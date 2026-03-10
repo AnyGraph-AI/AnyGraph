@@ -646,6 +646,118 @@ export class TypeScriptParser {
       }
     }
 
+    // =========================================================================
+    // BARREL RE-EXPORTS: export { X, Y } from './module'
+    // Creates IMPORTS edge (file→file) + RESOLVES_TO edges (re-export→canonical declaration)
+    // Without this, callers importing from a barrel file lose the dependency chain.
+    // =========================================================================
+    for (const exportDecl of sourceFile.getExportDeclarations()) {
+      const moduleSpecifier = exportDecl.getModuleSpecifierValue();
+      if (!moduleSpecifier) continue; // export { X } without from — not a re-export
+
+      // Create file-level IMPORTS edge for the re-export source
+      try {
+        const targetSourceFile = exportDecl.getModuleSpecifierSourceFile();
+        if (targetSourceFile) {
+          this.deferredEdges.push({
+            edgeType: CoreEdgeType.IMPORTS,
+            sourceNodeId: sourceFileNode.id,
+            targetName: targetSourceFile.getFilePath(),
+            targetType: CoreNodeType.SOURCE_FILE,
+          });
+        }
+      } catch {
+        // Resolution failed
+      }
+
+      // For each named re-export, create RESOLVES_TO from this file's symbol to the canonical declaration
+      for (const namedExport of exportDecl.getNamedExports()) {
+        try {
+          const symbol = namedExport.getSymbol();
+          if (!symbol) continue;
+
+          const aliased = symbol.getAliasedSymbol?.() || symbol;
+          const declarations = aliased.getDeclarations();
+          if (!declarations || declarations.length === 0) continue;
+
+          const targetDecl = declarations.find(d =>
+            d.getSourceFile().getFilePath() !== sourceFile.getFilePath()
+          );
+          if (!targetDecl) continue;
+
+          const targetFilePath = targetDecl.getSourceFile().getFilePath();
+          const targetName = namedExport.getName();
+          const kindName = targetDecl.getKindName();
+          let targetType = CoreNodeType.FUNCTION_DECLARATION;
+          if (kindName === 'ClassDeclaration') targetType = CoreNodeType.CLASS_DECLARATION;
+          else if (kindName === 'InterfaceDeclaration') targetType = CoreNodeType.INTERFACE_DECLARATION;
+          else if (kindName === 'TypeAliasDeclaration') targetType = CoreNodeType.TYPE_ALIAS;
+          else if (kindName === 'VariableDeclaration') targetType = CoreNodeType.VARIABLE_DECLARATION;
+
+          // Use sourceFileNode as the origin — the re-export belongs to this file
+          this.deferredEdges.push({
+            edgeType: CoreEdgeType.RESOLVES_TO,
+            sourceNodeId: sourceFileNode.id,
+            targetName: targetName,
+            targetType: targetType,
+            targetFilePath: targetFilePath,
+            callContext: {
+              receiverExpression: moduleSpecifier,
+              receiverType: 'barrel-reexport',
+              lineNumber: namedExport.getStartLineNumber?.() ?? exportDecl.getStartLineNumber(),
+              isAsync: false,
+              argumentCount: 0,
+              conditional: false,
+            },
+          });
+        } catch {
+          // Symbol resolution failed for re-export
+        }
+      }
+    }
+
+    // =========================================================================
+    // NAMESPACE IMPORTS: import * as X from './module'
+    // Creates RESOLVES_TO edge from namespace import to the target source file.
+    // Member accesses (X.foo()) are already captured as CALLS with receiverExpression.
+    // =========================================================================
+    for (const importDecl of sourceFile.getImportDeclarations()) {
+      const namespaceImport = importDecl.getNamespaceImport();
+      if (!namespaceImport) continue;
+
+      const moduleSpecifier = importDecl.getModuleSpecifierValue();
+      const importNodeId = generateDeterministicId(
+        this.projectId,
+        CoreNodeType.IMPORT_DECLARATION,
+        sourceFile.getFilePath(),
+        moduleSpecifier,
+        sourceFileNode.id,
+      );
+
+      try {
+        const targetSourceFile = importDecl.getModuleSpecifierSourceFile();
+        if (targetSourceFile) {
+          this.deferredEdges.push({
+            edgeType: CoreEdgeType.RESOLVES_TO,
+            sourceNodeId: importNodeId,
+            targetName: targetSourceFile.getFilePath(),
+            targetType: CoreNodeType.SOURCE_FILE,
+            targetFilePath: targetSourceFile.getFilePath(),
+            callContext: {
+              receiverExpression: moduleSpecifier,
+              receiverType: 'namespace',
+              lineNumber: namespaceImport.getStartLineNumber(),
+              isAsync: false,
+              argumentCount: 0,
+              conditional: false,
+            },
+          });
+        }
+      } catch {
+        // Namespace import resolution failed
+      }
+    }
+
     for (const varStatement of sourceFile.getVariableStatements()) {
       const isExported = varStatement.isExported();
       if (!isExported && !this.shouldParseVariables(sourceFile.getFilePath())) continue;
@@ -963,6 +1075,60 @@ export class TypeScriptParser {
           if (!seenCalls.has(callKey)) {
             seenCalls.add(callKey);
             this.queueCallEdge(callerNode.id, callInfo);
+          }
+        }
+      }
+
+      // Dynamic imports: await import('./module') or const mod = await import('./module')
+      // These are invisible to static import analysis — creates IMPORTS edge with dynamic: true
+      // In TypeScript AST: CallExpression with ImportKeyword as expression
+      if (Node.isCallExpression(descendant)) {
+        let moduleSpecifier: string | undefined;
+        const expr = descendant.getExpression();
+        const isDynamicImport = expr.getKindName() === 'ImportKeyword';
+        if (isDynamicImport) {
+          try {
+            const args = descendant.getArguments();
+            if (args.length > 0 && Node.isStringLiteral(args[0])) {
+              moduleSpecifier = args[0].getLiteralText();
+            }
+          } catch { /* not a string literal argument */ }
+        }
+        if (isDynamicImport && moduleSpecifier) {
+          const importKey = `dynamic-import:${moduleSpecifier}`;
+          if (!seenCalls.has(importKey)) {
+            seenCalls.add(importKey);
+            const callerFilePath = callerNode.properties.filePath as string;
+            const callerFileNodeId = this.findSourceFileNodeId(callerFilePath);
+            if (callerFileNodeId) {
+              const isInternal = moduleSpecifier.startsWith('.') || moduleSpecifier.startsWith('/');
+
+              // Resolve relative module specifier to absolute path for matching
+              let resolvedTarget = moduleSpecifier;
+              if (isInternal) {
+                const callerDir = path.dirname(callerFilePath);
+                // Resolve to absolute, then .js → .ts (GodSpeed uses .js in imports but source is .ts)
+                resolvedTarget = path.resolve(callerDir, moduleSpecifier);
+                if (resolvedTarget.endsWith('.js')) {
+                  resolvedTarget = resolvedTarget.replace(/\.js$/, '.ts');
+                }
+              }
+
+              this.deferredEdges.push({
+                edgeType: CoreEdgeType.IMPORTS,
+                sourceNodeId: callerFileNodeId,
+                targetName: resolvedTarget,
+                targetType: CoreNodeType.SOURCE_FILE,
+                callContext: {
+                  lineNumber: descendant.getStartLineNumber(),
+                  isAsync: true,
+                  argumentCount: 0,
+                  conditional: true,
+                  conditionalKind: 'dynamic-import',
+                  receiverType: isInternal ? 'dynamic-internal' : 'dynamic-external',
+                },
+              });
+            }
           }
         }
       }
@@ -1797,6 +1963,33 @@ export class TypeScriptParser {
 
       if (targetNode) {
         const edge = this.createCoreEdge(deferred.edgeType, deferred.sourceNodeId, targetNode.id);
+
+        // Propagate dynamic import metadata to the edge
+        if (deferred.edgeType === CoreEdgeType.IMPORTS && deferred.callContext?.conditionalKind === 'dynamic-import') {
+          edge.properties.dynamic = true;
+          edge.properties.lineNumber = deferred.callContext.lineNumber;
+          edge.properties.context = {
+            receiverType: deferred.callContext.receiverType,
+            lineNumber: deferred.callContext.lineNumber,
+          };
+        }
+
+        // Propagate barrel re-export metadata to RESOLVES_TO edges
+        if (deferred.edgeType === CoreEdgeType.RESOLVES_TO && deferred.callContext?.receiverType === 'barrel-reexport') {
+          edge.properties.context = {
+            receiverType: 'barrel-reexport',
+            lineNumber: deferred.callContext.lineNumber,
+          };
+        }
+
+        // Propagate namespace import metadata
+        if (deferred.edgeType === CoreEdgeType.RESOLVES_TO && deferred.callContext?.receiverType === 'namespace') {
+          edge.properties.context = {
+            receiverType: 'namespace',
+            lineNumber: deferred.callContext.lineNumber,
+          };
+        }
+
         resolvedEdges.push(edge);
         this.addEdge(edge);
 
@@ -2116,6 +2309,19 @@ export class TypeScriptParser {
    * Find the parent class node for a method/property node.
    * Uses the parentClassName property tracked during parsing.
    */
+  /**
+   * Find the SourceFile node ID for a given file path.
+   * Used to attach dynamic imports to the correct file node.
+   */
+  private findSourceFileNodeId(filePath: string): string | undefined {
+    for (const [, node] of this.parsedNodes) {
+      if (node.coreType === CoreNodeType.SOURCE_FILE && node.properties.filePath === filePath) {
+        return node.id;
+      }
+    }
+    return undefined;
+  }
+
   private findParentClassNode(node: ParsedNode): ParsedNode | undefined {
     const parentClassName = node.properties.parentClassName as string | undefined;
     if (!parentClassName) return undefined;

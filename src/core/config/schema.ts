@@ -200,6 +200,9 @@ export interface Neo4jEdgeProperties {
   conditional?: boolean; // true if call is inside if/switch/ternary/catch
   conditionalKind?: string; // 'if' | 'switch' | 'ternary' | 'catch' | 'logical'
 
+  // === IMPORT-SPECIFIC ===
+  dynamic?: boolean; // true if this is a dynamic import() expression
+
   // === FRAMEWORK-SPECIFIC (Dynamic) ===
   context?: Record<string, any>;
 }
