@@ -6,7 +6,6 @@
 import fs from 'fs/promises';
 import { join } from 'path';
 
-import { ensureNeo4jRunning, isDockerInstalled, isDockerRunning } from '../cli/neo4j-docker.js';
 import { Neo4jService, QUERIES } from '../storage/neo4j/neo4j.service.js';
 
 import { FILE_PATHS, LOG_CONFIG } from './constants.js';
@@ -29,47 +28,27 @@ const checkConfiguration = async (): Promise<void> => {
 };
 
 /**
- * Ensure Neo4j is running - auto-start if Docker available, fail if not
+ * Ensure Neo4j is running - verify connectivity (supports native install, no Docker required)
  */
 const ensureNeo4j = async (): Promise<void> => {
-  // Check if Docker is available
-  if (!isDockerInstalled()) {
-    const msg = 'Docker not installed. Install Docker or run: code-graph-context init';
+  try {
+    const neo4jService = new Neo4jService();
+    const result = await neo4jService.run('RETURN 1 as ok');
+    if (result.length > 0) {
+      console.error(
+        JSON.stringify({
+          level: 'info',
+          message: '[code-graph-context] Neo4j connected successfully',
+        }),
+      );
+      await debugLog('Neo4j ready (native)', { connected: true });
+      return;
+    }
+  } catch (error) {
+    const msg = `Neo4j not reachable at ${process.env.NEO4J_URI ?? 'bolt://localhost:7687'}. Ensure Neo4j is running (sudo neo4j start).`;
     console.error(JSON.stringify({ level: 'error', message: `[code-graph-context] ${msg}` }));
     throw new Error(msg);
   }
-
-  if (!isDockerRunning()) {
-    const msg = 'Docker not running. Start Docker or run: code-graph-context init';
-    console.error(JSON.stringify({ level: 'error', message: `[code-graph-context] ${msg}` }));
-    throw new Error(msg);
-  }
-
-  const result = await ensureNeo4jRunning();
-
-  if (!result.success) {
-    const msg = `Neo4j failed to start: ${result.error}. Run: code-graph-context init`;
-    console.error(JSON.stringify({ level: 'error', message: `[code-graph-context] ${msg}` }));
-    throw new Error(msg);
-  }
-
-  if (result.action === 'created') {
-    console.error(
-      JSON.stringify({
-        level: 'info',
-        message: '[code-graph-context] Neo4j container created and started',
-      }),
-    );
-  } else if (result.action === 'started') {
-    console.error(
-      JSON.stringify({
-        level: 'info',
-        message: '[code-graph-context] Neo4j container started',
-      }),
-    );
-  }
-
-  await debugLog('Neo4j ready', result);
 };
 
 /**

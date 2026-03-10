@@ -25,13 +25,27 @@ export const createTestNeo4jConnectionTool = (server: McpServer): void => {
 
         try {
           const basicResult = await session.run(MESSAGES.neo4j.connectionTest);
-          const apocResult = await session.run(MESSAGES.neo4j.apocTest);
-          const apocCount = apocResult.records[0].get('apocFunctions').toNumber();
+          const connMsg = basicResult.records[0].get('message');
+          const connTime = basicResult.records[0].get('timestamp');
 
-          const message = MESSAGES.neo4j.connectionSuccess
-            .replace('{}', basicResult.records[0].get('message'))
-            .replace('{}', basicResult.records[0].get('timestamp'))
-            .replace('{}', apocCount.toString());
+          // APOC is optional — check but don't fail
+          let apocMsg = 'APOC not installed (optional)';
+          try {
+            const apocResult = await session.run(MESSAGES.neo4j.apocTest);
+            const apocCount = apocResult.records[0].get('apocFunctions').toNumber();
+            apocMsg = `APOC available with ${apocCount} functions`;
+          } catch {
+            // APOC not installed — that's fine
+          }
+
+          // Count graph stats
+          const statsResult = await session.run(
+            'MATCH (n) WITH count(n) AS nodes MATCH ()-[r]->() RETURN nodes, count(r) AS edges'
+          );
+          const nodes = statsResult.records[0]?.get('nodes')?.toNumber?.() ?? 0;
+          const edges = statsResult.records[0]?.get('edges')?.toNumber?.() ?? 0;
+
+          const message = `Neo4j connected: ${connMsg} at ${connTime}\n${apocMsg}\nGraph: ${nodes} nodes, ${edges} edges`;
 
           return createSuccessResponse(message);
         } finally {
