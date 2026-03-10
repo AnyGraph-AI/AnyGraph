@@ -54,6 +54,8 @@ export interface CallContext {
   lineNumber: number;
   isAsync: boolean;
   argumentCount: number;
+  conditional: boolean; // true if call is inside if/switch/ternary/catch
+  conditionalKind?: string; // 'if' | 'switch' | 'ternary' | 'catch' | 'logical'
 }
 
 /**
@@ -635,6 +637,7 @@ export class TypeScriptParser {
               lineNumber: namedImport.getStartLineNumber(),
               isAsync: false,
               argumentCount: 0,
+              conditional: false,
             },
           });
         } catch {
@@ -1139,6 +1142,49 @@ export class TypeScriptParser {
   }
 
   /**
+   * Check if a node is inside a conditional block (if/switch/ternary/catch/logical).
+   * Walks up the AST until hitting the enclosing function/method body.
+   */
+  private detectConditionalContext(node: Node): { conditional: boolean; conditionalKind?: string } {
+    let current = node.getParent();
+    while (current) {
+      // Stop at function boundaries — don't look past the enclosing function
+      if (
+        Node.isFunctionDeclaration(current) ||
+        Node.isFunctionExpression(current) ||
+        Node.isArrowFunction(current) ||
+        Node.isMethodDeclaration(current) ||
+        Node.isConstructorDeclaration(current)
+      ) {
+        break;
+      }
+
+      if (Node.isIfStatement(current)) {
+        return { conditional: true, conditionalKind: 'if' };
+      }
+      if (Node.isConditionalExpression(current)) {
+        return { conditional: true, conditionalKind: 'ternary' };
+      }
+      if (Node.isSwitchStatement(current) || Node.isCaseClause(current) || Node.isDefaultClause(current)) {
+        return { conditional: true, conditionalKind: 'switch' };
+      }
+      if (Node.isCatchClause(current)) {
+        return { conditional: true, conditionalKind: 'catch' };
+      }
+      // Logical AND/OR short-circuit: foo && bar(), foo || bar()
+      if (Node.isBinaryExpression(current)) {
+        const op = current.getOperatorToken().getText();
+        if (op === '&&' || op === '||' || op === '??' ) {
+          return { conditional: true, conditionalKind: 'logical' };
+        }
+      }
+
+      current = current.getParent();
+    }
+    return { conditional: false };
+  }
+
+  /**
    * Extract call information from a CallExpression.
    */
   private extractCallInfo(
@@ -1154,6 +1200,8 @@ export class TypeScriptParser {
     isAsync: boolean;
     argumentCount: number;
     targetClassName?: string;
+    conditional: boolean;
+    conditionalKind?: string;
   } | null {
     if (!Node.isCallExpression(callExpr)) return null;
 
@@ -1164,6 +1212,9 @@ export class TypeScriptParser {
     // Check if this call is awaited
     const parent = callExpr.getParent();
     const isAsync = parent !== undefined && Node.isAwaitExpression(parent);
+
+    // Check if this call is inside a conditional block
+    const { conditional, conditionalKind } = this.detectConditionalContext(callExpr);
 
     // Case 1: Direct function call - functionName()
     if (Node.isIdentifier(expression)) {
@@ -1177,6 +1228,8 @@ export class TypeScriptParser {
         lineNumber,
         isAsync,
         argumentCount,
+        conditional,
+        conditionalKind,
       };
     }
 
@@ -1197,6 +1250,8 @@ export class TypeScriptParser {
           lineNumber,
           isAsync,
           argumentCount,
+          conditional,
+          conditionalKind,
         };
       }
 
@@ -1217,6 +1272,8 @@ export class TypeScriptParser {
             lineNumber,
             isAsync,
             argumentCount,
+            conditional,
+            conditionalKind,
           };
         }
       }
@@ -1242,6 +1299,8 @@ export class TypeScriptParser {
           lineNumber,
           isAsync,
           argumentCount,
+          conditional,
+          conditionalKind,
         };
       }
     }
@@ -1301,6 +1360,8 @@ export class TypeScriptParser {
       lineNumber: number;
       isAsync: boolean;
       argumentCount: number;
+      conditional?: boolean;
+      conditionalKind?: string;
     },
   ): void {
     // For constructor calls, use class name as target
@@ -1318,6 +1379,8 @@ export class TypeScriptParser {
         lineNumber: callInfo.lineNumber,
         isAsync: callInfo.isAsync,
         argumentCount: callInfo.argumentCount,
+        conditional: callInfo.conditional ?? false,
+        conditionalKind: callInfo.conditionalKind,
       },
     });
   }

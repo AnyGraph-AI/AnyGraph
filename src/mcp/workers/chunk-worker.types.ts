@@ -61,6 +61,8 @@ export interface SerializedCallContext {
   lineNumber: number;
   isAsync: boolean;
   argumentCount: number;
+  conditional: boolean;
+  conditionalKind?: string;
 }
 
 /**

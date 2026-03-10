@@ -196,6 +196,10 @@ export interface Neo4jEdgeProperties {
   createdAt: string;
   lineNumber?: number;
 
+  // === CALL-SPECIFIC ===
+  conditional?: boolean; // true if call is inside if/switch/ternary/catch
+  conditionalKind?: string; // 'if' | 'switch' | 'ternary' | 'catch' | 'logical'
+
   // === FRAMEWORK-SPECIFIC (Dynamic) ===
   context?: Record<string, any>;
 }

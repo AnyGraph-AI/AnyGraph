@@ -116,6 +116,8 @@ export interface CallsEdgeParams {
     isAsync?: boolean;
     argumentCount?: number;
     receiverType?: string;
+    conditional?: boolean;
+    conditionalKind?: string;
   };
 }
 
@@ -188,11 +190,15 @@ export const createCallsEdge = (params: CallsEdgeParams): Neo4jEdge => {
       filePath: '',
       createdAt: new Date().toISOString(),
       lineNumber: callContext?.lineNumber,
+      conditional: callContext?.conditional ?? false,
+      conditionalKind: callContext?.conditionalKind,
       context: callContext
         ? {
             isAsync: callContext.isAsync,
             argumentCount: callContext.argumentCount,
             receiverType: callContext.receiverType,
+            conditional: callContext.conditional ?? false,
+            conditionalKind: callContext.conditionalKind,
           }
         : undefined,
     },
