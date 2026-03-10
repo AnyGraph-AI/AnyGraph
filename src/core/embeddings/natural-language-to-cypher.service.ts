@@ -530,10 +530,16 @@ Remember to include WHERE n.projectId = $projectId for all node patterns.
     // SECURITY: Don't log the full text value which may contain sensitive queries
     console.error(`NL-to-Cypher: Parsing response (${textValue.length} chars)`);
 
+    // Strip markdown code fences if present (GPT sometimes wraps JSON in ```json ... ```)
+    let cleanedText = textValue.trim();
+    if (cleanedText.startsWith('```')) {
+      cleanedText = cleanedText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+    }
+
     // Parse the response with proper error handling
     let result: { cypher: string; parameters?: Record<string, unknown>; explanation?: string };
     try {
-      result = JSON.parse(textValue);
+      result = JSON.parse(cleanedText);
     } catch (parseError) {
       const message = parseError instanceof Error ? parseError.message : String(parseError);
       throw new Error(

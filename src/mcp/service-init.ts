@@ -72,12 +72,17 @@ export const initializeServices = async (): Promise<void> => {
  */
 const discoverSchemaFromGraph = async (neo4jService: Neo4jService) => {
   try {
+    // Find the first project to use for schema discovery
+    const projectResult = await neo4jService.run('MATCH (p:Project) RETURN p.projectId AS pid LIMIT 1');
+    const projectId = projectResult[0]?.pid ?? 'unknown';
+    const params = { projectId };
+
     // Discover actual node types, relationships, and patterns from the graph
     const [nodeTypes, relationshipTypes, semanticTypes, commonPatterns] = await Promise.all([
-      neo4jService.run(QUERIES.DISCOVER_NODE_TYPES),
-      neo4jService.run(QUERIES.DISCOVER_RELATIONSHIP_TYPES),
-      neo4jService.run(QUERIES.DISCOVER_SEMANTIC_TYPES),
-      neo4jService.run(QUERIES.DISCOVER_COMMON_PATTERNS),
+      neo4jService.run(QUERIES.DISCOVER_NODE_TYPES, params),
+      neo4jService.run(QUERIES.DISCOVER_RELATIONSHIP_TYPES, params),
+      neo4jService.run(QUERIES.DISCOVER_SEMANTIC_TYPES, params),
+      neo4jService.run(QUERIES.DISCOVER_COMMON_PATTERNS, params),
     ]);
 
     return {
