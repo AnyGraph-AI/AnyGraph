@@ -95,17 +95,17 @@ run("crossFile", """
 """)
 
 # Parse context JSON to extract resolutionKind and isAsync
-run("resolutionKind (method)", """
+run("resolutionKind (fluent)", """
     MATCH ()-[r:CALLS]->()
     WHERE r.context IS NOT NULL AND r.context CONTAINS '"receiverType"'
-    SET r.resolutionKind = 'method'
+    SET r.resolutionKind = 'fluent'
     RETURN count(r)
 """)
 
-run("resolutionKind (direct)", """
+run("resolutionKind (internal)", """
     MATCH ()-[r:CALLS]->()
     WHERE r.resolutionKind IS NULL
-    SET r.resolutionKind = 'direct'
+    SET r.resolutionKind = 'internal'
     RETURN count(r)
 """)
 

@@ -106,14 +106,21 @@ Framework-specific (Grammy):
 
 ### Edge Types
 - `CALLS` — function invocation (1,433 edges typical)
+  - `conditional` (boolean) — true if inside if/switch/ternary/catch
+  - `conditionalKind` — 'if' | 'switch' | 'ternary' | 'catch' | 'logical'
+  - `resolutionKind` — 'internal' (direct call) | 'fluent' (method on class instance)
+  - `crossFile` (boolean) — true if caller and callee are in different files
+  - `isAsync` (boolean) — true if call is awaited
 - `CONTAINS` — parent→child containment
 - `HAS_PARAMETER` — function→parameter
 - `RESOLVES_TO` — import symbol→canonical declaration (cross-file)
 - `REGISTERED_BY` — handler→entrypoint registration
 - `IMPORTS` — file-level import relationships
 - `HAS_MEMBER` — class/interface→member
+- `READS_STATE` — handler→Field (session field read)
+- `WRITES_STATE` — handler→Field (session field write)
 
-### Key Properties
+### Key Node Properties
 - `riskLevel` (float) — pre-computed risk score
 - `riskTier` (string) — LOW/MEDIUM/HIGH/CRITICAL
 - `fanInCount` (int) — how many things call this
@@ -122,6 +129,7 @@ Framework-specific (Grammy):
 - `sourceCode` (string) — full source text
 - `filePath` (string) — file location
 - `embedding` (float[]) — 3072-dim vector for semantic search
+- `semanticRole` (string) — 'session' on Field nodes
 
 ## Operational Notes
 
@@ -129,6 +137,6 @@ Framework-specific (Grammy):
 - APOC plugin installed (416 functions)
 - Vector index: `embedded_nodes_idx` (cosine similarity, 3072 dimensions)
 - Re-parse + re-ingest: `cd codegraph && npx tsx parse-and-ingest.ts`
-- Re-embed after re-ingest: `cd codegraph && npx tsx embed-nodes.ts`
+- Post-ingest (risk + state + embeddings): `cd codegraph && bash post-ingest-all.sh`
 - MCP server: `node codegraph/dist/mcp/mcp.server.js`
 - NL→Cypher needs ~20s init on cold start (creates OpenAI assistant)
