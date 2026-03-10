@@ -4,6 +4,7 @@
  */
 import { TypeScriptParser } from './src/core/parsers/typescript-parser.js';
 import { CORE_TYPESCRIPT_SCHEMA } from './src/core/config/schema.js';
+import { GRAMMY_FRAMEWORK_SCHEMA } from './src/core/config/grammy-framework-schema.js';
 import fs from 'fs';
 
 const GODSPEED_PATH = '/mnt/c/Users/ddfff/Downloads/Bots/GodSpeed/';
@@ -12,12 +13,12 @@ async function main() {
   console.log('=== CodeGraph Fork Parser Test: GodSpeed ===\n');
   console.log(`Target: ${GODSPEED_PATH}`);
   
-  // Create parser with no framework schemas (raw parse first)
+  // Create parser WITH Grammy framework schema
   const parser = new TypeScriptParser(
     GODSPEED_PATH,
     'tsconfig.json',
     CORE_TYPESCRIPT_SCHEMA,
-    [], // No framework schemas yet
+    [GRAMMY_FRAMEWORK_SCHEMA], // Grammy framework schema for bot handler detection
     undefined,
     undefined,
     true // lazyLoad for large projects
@@ -96,6 +97,35 @@ async function main() {
     }
   } else {
     console.log('\n⚠️ createBot not found in parsed nodes!');
+  }
+
+  // Check for Entrypoint nodes and REGISTERED_BY edges
+  const entrypoints = result.nodes.filter(n => n.labels?.includes('Entrypoint'));
+  console.log(`\n--- Entrypoint Nodes (${entrypoints.length}) ---`);
+  for (const ep of entrypoints.slice(0, 30)) {
+    console.log(`  ${ep.properties?.name} [${ep.properties?.context?.entrypointKind}] trigger=${ep.properties?.context?.trigger}`);
+  }
+
+  const handlers = result.nodes.filter(n => n.properties?.context?.registrationKind);
+  console.log(`\n--- Callback Handlers (${handlers.length}) ---`);
+  for (const h of handlers.slice(0, 30)) {
+    console.log(`  ${h.properties?.name} [${h.properties?.context?.registrationKind}] trigger=${h.properties?.context?.registrationTrigger}`);
+  }
+
+  const registeredByEdges = allEdges.filter(e => e.type === 'REGISTERED_BY');
+  console.log(`\n--- REGISTERED_BY Edges: ${registeredByEdges.length} ---`);
+
+  // Check for semantic types
+  const semanticTypes = new Map<string, number>();
+  for (const node of result.nodes) {
+    const st = node.properties?.semanticType;
+    if (st) semanticTypes.set(st, (semanticTypes.get(st) || 0) + 1);
+  }
+  if (semanticTypes.size > 0) {
+    console.log('\n--- Semantic Types ---');
+    for (const [type, count] of [...semanticTypes.entries()].sort((a, b) => b[1] - a[1])) {
+      console.log(`  ${type}: ${count}`);
+    }
   }
 
   // Write full output for analysis

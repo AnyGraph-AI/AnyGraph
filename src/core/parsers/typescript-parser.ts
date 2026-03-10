@@ -8,6 +8,7 @@ import { Project, SourceFile, Node } from 'ts-morph';
 
 import { EXCLUDE_PATTERNS_GLOB, BUILT_IN_FUNCTIONS, BUILT_IN_METHODS, BUILT_IN_CLASSES } from '../../constants.js';
 import { NESTJS_FRAMEWORK_SCHEMA } from '../config/nestjs-framework-schema.js';
+import { GRAMMY_REGISTRATION_MAP } from '../config/grammy-framework-schema.js';
 import {
   CoreNodeType,
   Neo4jNodeProperties,
@@ -53,6 +54,17 @@ export interface CallContext {
   lineNumber: number;
   isAsync: boolean;
   argumentCount: number;
+}
+
+/**
+ * Configuration for framework callback registration detection.
+ * Used to extract callback handlers from patterns like bot.command('start', handler).
+ */
+export interface CallbackRegistration {
+  callee: string;          // Expression to match: 'bot.command', 'bot.on', 'app.get'
+  callbackArg: number;     // Argument index of the handler (0-based)
+  triggerArg: number;      // Argument index of the trigger value (-1 if none)
+  kind: string;            // Entrypoint kind: 'command', 'event', 'callback', 'route'
 }
 
 // Re-export ParsedNode for convenience
@@ -880,7 +892,174 @@ export class TypeScriptParser {
           }
         }
       }
+
+      // Framework callback registration: bot.command('start', handler)
+      if (Node.isCallExpression(descendant)) {
+        this.extractCallbackHandler(callerNode, descendant);
+      }
     });
+  }
+
+  /**
+   * Extract a callback handler from a framework registration call expression.
+   * Detects patterns like: bot.command('start', async ctx => { ... })
+   * Creates: Entrypoint node + Handler Function node + REGISTERED_BY edge + CONTAINS edge
+   */
+  private extractCallbackHandler(parentNode: ParsedNode, callExpr: Node): void {
+    if (!Node.isCallExpression(callExpr)) return;
+
+    const expression = callExpr.getExpression();
+    if (!Node.isPropertyAccessExpression(expression)) return;
+
+    // Build the callee expression string: "bot.command", "bot.on", etc.
+    const methodName = expression.getName();
+    const receiver = expression.getExpression();
+    let calleeExpr: string;
+
+    if (Node.isIdentifier(receiver)) {
+      calleeExpr = `${receiver.getText()}.${methodName}`;
+    } else {
+      return; // Skip complex receivers like this.bot.command
+    }
+
+    // Check against known registration patterns
+    const registration = GRAMMY_REGISTRATION_MAP.get(calleeExpr as any);
+    if (!registration) return;
+
+    const args = callExpr.getArguments();
+
+    // Extract trigger value (e.g., 'start', ':message', /^buy:/)
+    let trigger = '';
+    if (registration.triggerArg >= 0 && args.length > registration.triggerArg) {
+      trigger = args[registration.triggerArg].getText().replace(/['"]/g, '');
+    }
+
+    // Extract callback argument (the handler function)
+    if (args.length <= registration.callbackArg) return;
+    const callbackArg = args[registration.callbackArg];
+
+    // The callback can be an arrow function, function expression, or identifier
+    let callbackBody: Node | undefined;
+    let callbackSource: string;
+    let isAsync = false;
+    let handlerStartLine: number;
+    let handlerEndLine: number;
+
+    if (Node.isArrowFunction(callbackArg) || Node.isFunctionExpression(callbackArg)) {
+      callbackBody = callbackArg;
+      callbackSource = callbackArg.getText();
+      isAsync = callbackArg.isAsync();
+      handlerStartLine = callbackArg.getStartLineNumber();
+      handlerEndLine = callbackArg.getEndLineNumber();
+    } else {
+      // Named function reference: bot.command('start', handleStart)
+      // The CALLS edge already handles this via normal call resolution
+      return;
+    }
+
+    const filePath = callExpr.getSourceFile().getFilePath();
+
+    // --- Create Entrypoint node ---
+    const entrypointName = `${registration.kind}:${trigger || '*'}`;
+    const entrypointId = generateDeterministicId(
+      this.projectId,
+      'Entrypoint',
+      filePath,
+      entrypointName,
+      parentNode.id,
+    );
+
+    const entrypointNode: ParsedNode = {
+      id: entrypointId,
+      coreType: CoreNodeType.FUNCTION_DECLARATION, // Reuse for compatibility
+      labels: ['Entrypoint'],
+      properties: {
+        id: entrypointId,
+        projectId: this.projectId,
+        name: entrypointName,
+        coreType: CoreNodeType.FUNCTION_DECLARATION,
+        filePath,
+        startLine: callExpr.getStartLineNumber(),
+        endLine: callExpr.getStartLineNumber(),
+        sourceCode: `${calleeExpr}(${trigger ? `'${trigger}'` : ''}, ...)`,
+        createdAt: new Date().toISOString(),
+        context: {
+          entrypointKind: registration.kind,
+          trigger,
+          framework: 'grammy',
+          callee: calleeExpr,
+        },
+      } as any,
+      skipEmbedding: true,
+    };
+    this.addNode(entrypointNode);
+
+    // --- Create Handler Function node ---
+    const handlerName = trigger
+      ? `${registration.kind}_${trigger.replace(/[^a-zA-Z0-9_]/g, '_')}`
+      : `${registration.kind}_handler_L${handlerStartLine}`;
+
+    const handlerId = generateDeterministicId(
+      this.projectId,
+      CoreNodeType.FUNCTION_DECLARATION,
+      filePath,
+      handlerName,
+      parentNode.id,
+    );
+
+    const handlerNode: ParsedNode = {
+      id: handlerId,
+      coreType: CoreNodeType.FUNCTION_DECLARATION,
+      labels: ['Function'],
+      properties: {
+        id: handlerId,
+        projectId: this.projectId,
+        name: handlerName,
+        coreType: CoreNodeType.FUNCTION_DECLARATION,
+        filePath,
+        startLine: handlerStartLine,
+        endLine: handlerEndLine,
+        sourceCode: callbackSource,
+        isAsync,
+        isExported: false,
+        createdAt: new Date().toISOString(),
+        context: {
+          registrationKind: registration.kind,
+          registrationTrigger: trigger,
+          anonymous: true,
+          framework: 'grammy',
+          parentFunction: parentNode.properties.name,
+        },
+      } as any,
+      skipEmbedding: false,
+    };
+    this.addNode(handlerNode);
+
+    // --- Create edges ---
+
+    // CONTAINS: parent function → handler
+    const containsEdge = this.createCoreEdge(CoreEdgeType.CONTAINS, parentNode.id, handlerId);
+    this.addEdge(containsEdge);
+
+    // REGISTERED_BY: handler → entrypoint
+    const registeredByEdge = this.createFrameworkEdge(
+      'REGISTERED_BY',
+      'REGISTERED_BY',
+      handlerId,
+      entrypointId,
+      {
+        registrationKind: registration.kind,
+        trigger,
+        framework: 'grammy',
+      },
+      0.9, // High weight — these are primary architectural relationships
+    );
+    this.addEdge(registeredByEdge);
+
+    // Extract CALLS from within the handler body
+    if (callbackBody) {
+      this.extractCallsFromBody(handlerNode, callbackBody);
+    }
   }
 
   /**

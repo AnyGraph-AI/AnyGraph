@@ -86,6 +86,14 @@ export enum SemanticNodeType {
 
   // Testing
   TEST_CLASS = 'TestClass',
+
+  // Grammy Bot Framework Types
+  BOT_FACTORY = 'BotFactory',
+  COMMAND_HANDLER = 'CommandHandler',
+  EVENT_HANDLER = 'EventHandler',
+  CALLBACK_QUERY_HANDLER = 'CallbackQueryHandler',
+  HEARS_HANDLER = 'HearsHandler',
+  MIDDLEWARE = 'Middleware',
 }
 
 /**
