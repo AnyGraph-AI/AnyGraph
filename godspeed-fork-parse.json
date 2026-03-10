@@ -2,8 +2,8 @@
   "summary": {
     "files": 36,
     "nodes": 1831,
-    "edges": 3341,
-    "parseTimeMs": 8825,
+    "edges": 3627,
+    "parseTimeMs": 8391,
     "spike_comparison": {
       "spike_nodes": 214,
       "spike_edges": 5161
@@ -33,7 +33,8 @@
     "REGISTERED_BY": 280,
     "HAS_MEMBER": 43,
     "CALLS": 1433,
-    "IMPORTS": 113
+    "IMPORTS": 113,
+    "RESOLVES_TO": 286
   },
   "nodes": [
     {

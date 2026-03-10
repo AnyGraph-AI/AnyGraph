@@ -59,6 +59,9 @@ export enum CoreEdgeType {
 
   // Decorator
   DECORATED_WITH = 'DECORATED_WITH',
+
+  // Symbol Resolution (cross-file)
+  RESOLVES_TO = 'RESOLVES_TO',
 }
 
 /**
@@ -1083,6 +1086,37 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
       relationshipWeight: 0.3, // Low - metadata, not code flow
       neo4j: {
         relationshipType: 'DECORATED_WITH',
+        direction: 'OUTGOING',
+      },
+    },
+
+    [CoreEdgeType.RESOLVES_TO]: {
+      coreType: CoreEdgeType.RESOLVES_TO,
+      sourceTypes: [CoreNodeType.IMPORT_DECLARATION],
+      targetTypes: [
+        CoreNodeType.FUNCTION_DECLARATION,
+        CoreNodeType.CLASS_DECLARATION,
+        CoreNodeType.INTERFACE_DECLARATION,
+        CoreNodeType.TYPE_ALIAS,
+        CoreNodeType.VARIABLE_DECLARATION,
+      ],
+      properties: [
+        {
+          name: 'confidence',
+          type: 'number',
+          extraction: { method: 'static', defaultValue: 1.0 },
+          neo4j: { indexed: true, unique: false, required: true },
+        },
+        {
+          name: 'source',
+          type: 'string',
+          extraction: { method: 'static', defaultValue: 'ts-morph' },
+          neo4j: { indexed: true, unique: false, required: true },
+        },
+      ],
+      relationshipWeight: 0.8, // High - critical for cross-file blast radius
+      neo4j: {
+        relationshipType: 'RESOLVES_TO',
         direction: 'OUTGOING',
       },
     },

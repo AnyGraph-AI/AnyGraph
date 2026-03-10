@@ -576,6 +576,73 @@ export class TypeScriptParser {
       }
     }
 
+    // Queue RESOLVES_TO edges for symbol-level resolution
+    // Links ImportDeclaration → canonical declaration node (FunctionDeclaration, ClassDeclaration, etc.)
+    for (const importDecl of sourceFile.getImportDeclarations()) {
+      const moduleSpecifier = importDecl.getModuleSpecifierValue();
+      // Skip external modules
+      if (!moduleSpecifier.startsWith('.') && !moduleSpecifier.startsWith('@')) {
+        continue;
+      }
+
+      // Find the ImportDeclaration node we already created
+      const importNodeId = generateDeterministicId(
+        this.projectId,
+        CoreNodeType.IMPORT_DECLARATION,
+        sourceFile.getFilePath(),
+        moduleSpecifier,
+        sourceFileNode.id,
+      );
+
+      for (const namedImport of importDecl.getNamedImports()) {
+        try {
+          const symbol = namedImport.getSymbol();
+          if (!symbol) continue;
+
+          const aliased = symbol.getAliasedSymbol?.() || symbol;
+          const declarations = aliased.getDeclarations();
+          if (!declarations || declarations.length === 0) continue;
+
+          // Find the declaration in a project source file (not the import itself)
+          const targetDecl = declarations.find(d =>
+            d.getSourceFile().getFilePath() !== sourceFile.getFilePath()
+          );
+          if (!targetDecl) continue;
+
+          const targetFilePath = targetDecl.getSourceFile().getFilePath();
+          const targetName = namedImport.getName();
+          const isTypeOnly = namedImport.isTypeOnly() || importDecl.isTypeOnly();
+
+          // Map ts-morph declaration kind to our CoreNodeType
+          const kindName = targetDecl.getKindName();
+          let targetType = CoreNodeType.FUNCTION_DECLARATION;
+          if (kindName === 'ClassDeclaration') targetType = CoreNodeType.CLASS_DECLARATION;
+          else if (kindName === 'InterfaceDeclaration') targetType = CoreNodeType.INTERFACE_DECLARATION;
+          else if (kindName === 'TypeAliasDeclaration') targetType = CoreNodeType.TYPE_ALIAS;
+          else if (kindName === 'VariableDeclaration') targetType = CoreNodeType.VARIABLE_DECLARATION;
+          else if (kindName === 'EnumDeclaration') targetType = CoreNodeType.CLASS_DECLARATION; // no enum type, reuse
+
+          // Queue for deferred resolution — target node may not exist yet
+          this.deferredEdges.push({
+            edgeType: CoreEdgeType.RESOLVES_TO,
+            sourceNodeId: importNodeId,
+            targetName: targetName,
+            targetType: targetType,
+            targetFilePath: targetFilePath,
+            callContext: {
+              receiverExpression: moduleSpecifier,
+              receiverType: isTypeOnly ? 'type-only' : 'runtime',
+              lineNumber: namedImport.getStartLineNumber(),
+              isAsync: false,
+              argumentCount: 0,
+            },
+          });
+        } catch {
+          // Symbol resolution failed — skip silently
+        }
+      }
+    }
+
     for (const varStatement of sourceFile.getVariableStatements()) {
       const isExported = varStatement.isExported();
       if (!isExported && !this.shouldParseVariables(sourceFile.getFilePath())) continue;
@@ -1631,14 +1698,17 @@ export class TypeScriptParser {
     const extendsCount = this.deferredEdges.filter((e) => e.edgeType === CoreEdgeType.EXTENDS).length;
     const implementsCount = this.deferredEdges.filter((e) => e.edgeType === CoreEdgeType.IMPLEMENTS).length;
     const callsCount = this.deferredEdges.filter((e) => e.edgeType === CoreEdgeType.CALLS).length;
+    const resolvesToCount = this.deferredEdges.filter((e) => e.edgeType === CoreEdgeType.RESOLVES_TO).length;
     let importsResolved = 0;
     let extendsResolved = 0;
     let implementsResolved = 0;
     let callsResolved = 0;
+    let resolvesToResolved = 0;
     const unresolvedImports: string[] = [];
     const unresolvedExtends: string[] = [];
     const unresolvedImplements: string[] = [];
     const unresolvedCalls: string[] = [];
+    const unresolvedResolvesTo: string[] = [];
 
     for (const deferred of this.deferredEdges) {
       // Special handling for CALLS edges - uses resolveCallTarget for proper resolution
@@ -1673,6 +1743,8 @@ export class TypeScriptParser {
           extendsResolved++;
         } else if (deferred.edgeType === CoreEdgeType.IMPLEMENTS) {
           implementsResolved++;
+        } else if (deferred.edgeType === CoreEdgeType.RESOLVES_TO) {
+          resolvesToResolved++;
         }
       } else {
         if (deferred.edgeType === CoreEdgeType.IMPORTS) {
@@ -1681,6 +1753,8 @@ export class TypeScriptParser {
           unresolvedExtends.push(deferred.targetName);
         } else if (deferred.edgeType === CoreEdgeType.IMPLEMENTS) {
           unresolvedImplements.push(deferred.targetName);
+        } else if (deferred.edgeType === CoreEdgeType.RESOLVES_TO) {
+          unresolvedResolvesTo.push(deferred.targetName);
         }
       }
     }
