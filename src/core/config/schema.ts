@@ -197,6 +197,7 @@ export interface Neo4jEdgeProperties {
   lineNumber?: number;
 
   // === CALL-SPECIFIC ===
+  isAsync?: boolean; // true if call is awaited (async boundary)
   conditional?: boolean; // true if call is inside if/switch/ternary/catch
   conditionalKind?: string; // 'if' | 'switch' | 'ternary' | 'catch' | 'logical'
 

@@ -23,6 +23,14 @@ const driver = neo4j.driver(
   neo4j.auth.basic(process.env.NEO4J_USER ?? 'neo4j', process.env.NEO4J_PASSWORD ?? 'codegraph')
 );
 
+// Structural-only mode: skip embeddings if no API key or STRUCTURAL_ONLY=true
+if (!process.env.OPENAI_API_KEY || process.env.STRUCTURAL_ONLY === 'true') {
+  console.log('⚠️  Structural-only mode: skipping embeddings (no OPENAI_API_KEY or STRUCTURAL_ONLY=true)');
+  console.log('   Blast radius, risk scoring, dead code, impact analysis all work without embeddings.');
+  console.log('   Only search_codebase and natural_language_to_cypher require embeddings.');
+  process.exit(0);
+}
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function main() {
