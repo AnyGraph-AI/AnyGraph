@@ -24,9 +24,11 @@ async function main() {
     true // lazyLoad for large projects
   );
 
-  // Discover source files
-  const files = await parser.discoverSourceFiles();
-  console.log(`\nDiscovered ${files.length} source files:`);
+  // Discover source files, excluding src/src/ duplicate directory
+  let files = await parser.discoverSourceFiles();
+  const beforeFilter = files.length;
+  files = files.filter(f => !f.includes('/src/src/'));
+  console.log(`\nDiscovered ${beforeFilter} files, filtered to ${files.length} (excluded src/src/ duplicates):`);
   files.forEach(f => console.log(`  ${f}`));
 
   // Parse all files
@@ -128,6 +130,58 @@ async function main() {
     }
   }
 
+  // === INVARIANT CHECKS (GPT review requirements) ===
+  console.log('\n=== INVARIANT CHECKS ===');
+  
+  // Check 1: Entrypoint/handler mismatch
+  const regEdges = allEdges.filter(e => e.type === 'REGISTERED_BY');
+  const epIdsWithHandler = new Set(regEdges.map(e => e.endNodeId));
+  const handlerIdsWithEp = new Set(regEdges.map(e => e.startNodeId));
+  
+  const orphanEps = entrypoints.filter(ep => !epIdsWithHandler.has(ep.properties?.id));
+  const orphanHandlers = handlers.filter(h => !handlerIdsWithEp.has(h.properties?.id));
+  
+  console.log(`\n1. Entrypoint/Handler matching:`);
+  console.log(`   Entrypoints: ${entrypoints.length}, Handlers: ${handlers.length}`);
+  console.log(`   Orphan entrypoints (no handler): ${orphanEps.length}`);
+  for (const ep of orphanEps) {
+    console.log(`     ${ep.properties?.name} ctx=${JSON.stringify(ep.properties?.context)}`);
+  }
+  console.log(`   Orphan handlers (no entrypoint): ${orphanHandlers.length}`);
+  for (const h of orphanHandlers) {
+    console.log(`     ${h.properties?.name} ctx=${JSON.stringify(h.properties?.context)}`);
+  }
+
+  // Check 2: Callback body CALLS belong to handler, not createBot
+  const createBotNode = result.nodes.find(n => n.properties?.name === 'createBot' && n.properties?.semanticType === 'BotFactory');
+  if (createBotNode) {
+    const createBotCalls = allEdges.filter(e => e.type === 'CALLS' && e.startNodeId === createBotNode.properties?.id);
+    const handlerIds = new Set(handlers.map(h => h.properties?.id));
+    const handlerCalls = allEdges.filter(e => e.type === 'CALLS' && handlerIds.has(e.startNodeId));
+    
+    console.log(`\n2. CALLS ownership:`);
+    console.log(`   createBot CALLS: ${createBotCalls.length}`);
+    console.log(`   Handler CALLS (sum of all handlers): ${handlerCalls.length}`);
+    console.log(`   Total CALLS: ${allEdges.filter(e => e.type === 'CALLS').length}`);
+    
+    // Sample: show a specific handler's calls
+    const startHandler = handlers.find(h => h.properties?.context?.registrationTrigger === 'start');
+    if (startHandler) {
+      const startCalls = allEdges.filter(e => e.type === 'CALLS' && e.startNodeId === startHandler.properties?.id);
+      console.log(`\n   /start handler CALLS (${startCalls.length}):`);
+      for (const c of startCalls.slice(0, 10)) {
+        const target = result.nodes.find(n => n.properties?.id === c.endNodeId);
+        console.log(`     → ${target?.properties?.name || c.endNodeId}`);
+      }
+    }
+  }
+
+  // Check 3: No REGISTERED_BY Cartesian explosion
+  console.log(`\n3. REGISTERED_BY sanity:`);
+  console.log(`   Total REGISTERED_BY edges: ${regEdges.length}`);
+  console.log(`   Expected max (1 per handler): ${handlers.length}`);
+  console.log(`   Ratio: ${(regEdges.length / Math.max(handlers.length, 1)).toFixed(2)} (should be ~1.0)`);
+  
   // Write full output for analysis
   const output = {
     summary: {

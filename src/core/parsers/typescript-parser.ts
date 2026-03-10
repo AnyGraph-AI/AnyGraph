@@ -856,6 +856,10 @@ export class TypeScriptParser {
       body = astNode.getBody();
     } else if (Node.isConstructorDeclaration(astNode)) {
       body = astNode.getBody();
+    } else if (Node.isArrowFunction(astNode)) {
+      body = astNode.getBody();
+    } else if (Node.isFunctionExpression(astNode)) {
+      body = astNode.getBody();
     }
 
     if (!body) return;
@@ -929,9 +933,14 @@ export class TypeScriptParser {
     const args = callExpr.getArguments();
 
     // Extract trigger value (e.g., 'start', ':message', /^buy:/)
+    // Normalization: commands always stored without leading slash
     let trigger = '';
     if (registration.triggerArg >= 0 && args.length > registration.triggerArg) {
       trigger = args[registration.triggerArg].getText().replace(/['"]/g, '');
+      // Normalize command triggers: strip leading slash if present
+      if (registration.kind === 'command') {
+        trigger = trigger.replace(/^\//, '');
+      }
     }
 
     // Extract callback argument (the handler function)
