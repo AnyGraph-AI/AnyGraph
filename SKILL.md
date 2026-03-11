@@ -393,3 +393,29 @@ Use `list_projects` (MCP) or the Project query to find the right `projectId`.
 8. **Use `sourceCode` property** to read function implementations from the graph before opening files.
 9. **Filter by `projectId`** in every query. Never query across projects accidentally.
 10. **100% coverage** — every declaration in the source is in the graph. If it's not in the graph, it's not in the code.
+
+---
+
+## Universal Architecture (In Progress)
+
+CodeGraph is expanding from TypeScript-only to a universal reasoning graph. Full plan: `plans/codegraph/MULTI_LANGUAGE_ASSESSMENT.md`
+
+### Three-Tier Parser Architecture
+- **Tier 0 (compiler)**: ts-morph (TS ✅), Eclipse JDT (Java), go/ast+go/types (Go), Roslyn (C#)
+- **Tier 1 (workspace-semantic)**: Pyright sidecar (Python — NEXT), rust-analyzer (Rust — future)
+- **Tier 2 (structural)**: tree-sitter fallback for all other languages
+
+### IR Layer (Coming)
+```
+Parser → IR → Enrichment → Graph
+```
+All parsers will output a language-agnostic IR before graph ingestion. This prevents language-specific assumptions from contaminating the enrichment pipeline.
+
+### Plan Graph
+Project plans in `plans/` directory are parsed into Task/Milestone/Sprint nodes and cross-referenced against code graphs. Auto-detects task completion by checking if referenced code exists.
+
+### Four Graph Domains
+- Code graphs (this skill) — source code structure
+- Corpus graphs — Bible, Quran, structured texts
+- Document graphs — legal filings, evidence
+- Plan graphs — task tracking, cross-domain linking

@@ -4,7 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Code Graph Context is an MCP (Model Context Protocol) server that builds code graphs to provide rich context to LLMs. It parses TypeScript codebases using AST analysis (ts-morph), stores the graph in Neo4j with vector embeddings, and provides semantic search and graph traversal tools.
+Code Graph Context is an MCP server that builds **universal reasoning graphs** — code, corpus, documents, and plans — to provide rich context and safety gates to AI agents. Currently parses TypeScript codebases using ts-morph, with multi-language and corpus parser expansion in progress.
+
+### Architecture Vision (In Progress)
+CodeGraph is evolving from TypeScript-only to a universal graph with four domains:
+- **Code graphs**: Source code structure, calls, risk scoring (TypeScript ✅, Python/Java/Go planned)
+- **Corpus graphs**: Bible, Quran, structured knowledge (custom Python parsers ✅)
+- **Document graphs**: Legal filings, investigative evidence (Epstein/GOYFILES)
+- **Plan graphs**: Task/milestone tracking cross-referenced against code graphs (building now)
+
+Full architecture plan: `plans/codegraph/MULTI_LANGUAGE_ASSESSMENT.md`
+
+### Key Design Principles
+- **Parser → IR → Enrichment → Graph**: All parsers output language-agnostic IR before Neo4j ingestion
+- **Three parser tiers**: Tier 0 (compiler-backed), Tier 1 (workspace-semantic), Tier 2 (structural/tree-sitter)
+- **Four graph layers**: Evidence → Canonical → Operational → Agent Session
+- **Confidence-aware risk**: Edge weights carry parser tier + confidence, risk engine degrades gracefully on structural-only areas
 
 ## Build & Development Commands
 
@@ -18,9 +33,14 @@ npm run format         # Prettier formatting
 
 ## Architecture
 
-### Data Flow
+### Data Flow (Current — TypeScript)
 ```
 TypeScript Project → AST Parser (ts-morph) → Graph Nodes/Edges → Neo4j + Vector Embeddings → MCP Tools
+```
+
+### Data Flow (Target — Universal)
+```
+Any Source → Language Parser → IR v1 → Enrichment Plugins → Neo4j → MCP Tools (33 tools)
 ```
 
 ### Key Directories

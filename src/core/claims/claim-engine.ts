@@ -440,6 +440,311 @@ export class ClaimEngine {
   }
 
   // ============================================================================
+  // Cross-Layer Synthesizers — THE REAL REASONING
+  // ============================================================================
+
+  /**
+   * SYNTHESIZER 1: Cross-cutting impact claims
+   * "Editing file X will break Y MCP tools and invalidate Z plan evidence edges"
+   * Connects: Code (blast radius) → Plan (evidence integrity)
+   */
+  async synthesizeCrossCuttingClaims(): Promise<{ claims: number; evidence: number }> {
+    const session = this.driver.session();
+    const now = new Date().toISOString();
+    let claimCount = 0;
+    let evidenceCount = 0;
+
+    try {
+      // Find source files that are BOTH high-risk code AND plan evidence targets
+      const crossCut = await session.run(
+        `MATCH (sf {projectId: $cg})<-[:HAS_CODE_EVIDENCE]-(t:Task)
+         WHERE sf.riskLevel IS NOT NULL AND sf.riskLevel >= 3
+         WITH sf, count(DISTINCT t) AS tasksDependingOnIt, collect(DISTINCT t.name)[..3] AS taskNames,
+              sf.riskLevel AS risk
+         OPTIONAL MATCH (caller)-[:CALLS]->(sf)
+         WITH sf, tasksDependingOnIt, taskNames, risk, count(DISTINCT caller) AS callers
+         WHERE tasksDependingOnIt >= 1
+         MERGE (c:Claim {id: 'claim_crosscut_' + sf.id})
+         ON CREATE SET
+           c.statement = 'Editing "' + sf.name + '" (risk ' + toString(round(risk * 10) / 10.0) + ', ' + toString(callers) + ' callers) would invalidate evidence for ' + toString(tasksDependingOnIt) + ' plan tasks: ' + reduce(s = '', n IN taskNames | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
+           c.confidence = 0.9,
+           c.domain = 'cross',
+           c.claimType = 'cross_cutting_impact',
+           c.status = 'supported',
+           c.projectId = $cg,
+           c.sourceNodeId = sf.id,
+           c.taskCount = tasksDependingOnIt,
+           c.created = $now
+         ON MATCH SET
+           c.statement = 'Editing "' + sf.name + '" (risk ' + toString(round(risk * 10) / 10.0) + ', ' + toString(callers) + ' callers) would invalidate evidence for ' + toString(tasksDependingOnIt) + ' plan tasks: ' + reduce(s = '', n IN taskNames | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
+           c.taskCount = tasksDependingOnIt,
+           c.updated = $now
+         WITH c, sf, tasksDependingOnIt, callers, risk
+         MERGE (e:Evidence {id: 'ev_crosscut_' + sf.id})
+         ON CREATE SET
+           e.source = 'Code risk + plan evidence intersection',
+           e.sourceType = 'cross_layer_analysis',
+           e.grade = 'A1',
+           e.description = sf.name + ': riskLevel=' + toString(risk) + ', callers=' + toString(callers) + ', plan tasks depending=' + toString(tasksDependingOnIt),
+           e.weight = 0.9,
+           e.created = $now
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9}]->(e)
+         RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
+        { cg: 'proj_c0d3e9a1f200', now },
+      );
+      if (crossCut.records.length > 0) {
+        claimCount += crossCut.records[0].get('claims').toNumber();
+        evidenceCount += crossCut.records[0].get('evidences').toNumber();
+      }
+
+      return { claims: claimCount, evidence: evidenceCount };
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * SYNTHESIZER 2: Critical path claims
+   * Traverses PART_OF hierarchy + plan structure to find dependency bottlenecks.
+   * "Sprint 1 has 4 unfinished tasks blocking Sprint 2's 6 tasks"
+   */
+  async synthesizeCriticalPathClaims(): Promise<{ claims: number; evidence: number }> {
+    const session = this.driver.session();
+    const now = new Date().toISOString();
+    let claimCount = 0;
+    let evidenceCount = 0;
+
+    try {
+      // Find sprints/milestones with mixed completion — some done, some not
+      const bottlenecks = await session.run(
+        `MATCH (t:Task)-[:PART_OF]->(m:Milestone)
+         WITH m,
+           count(t) AS total,
+           sum(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS done,
+           sum(CASE WHEN t.status = 'planned' THEN 1 ELSE 0 END) AS planned,
+           collect(CASE WHEN t.status = 'planned' THEN t.name ELSE null END)[..3] AS blockers
+         WHERE planned > 0 AND done > 0
+         WITH m, total, done, planned, blockers,
+              toFloat(done) / total AS completionRate
+         MERGE (c:Claim {id: 'claim_bottleneck_' + m.id})
+         ON CREATE SET
+           c.statement = '"' + m.name + '" is ' + toString(round(completionRate * 100)) + '% complete (' + toString(done) + '/' + toString(total) + ') — ' + toString(planned) + ' tasks remaining: ' + reduce(s = '', n IN blockers | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
+           c.confidence = 0.95,
+           c.domain = 'plan',
+           c.claimType = 'bottleneck',
+           c.status = 'supported',
+           c.projectId = m.projectId,
+           c.sourceNodeId = m.id,
+           c.completionRate = completionRate,
+           c.created = $now
+         ON MATCH SET
+           c.statement = '"' + m.name + '" is ' + toString(round(completionRate * 100)) + '% complete (' + toString(done) + '/' + toString(total) + ') — ' + toString(planned) + ' tasks remaining: ' + reduce(s = '', n IN blockers | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
+           c.completionRate = completionRate,
+           c.updated = $now
+         WITH c, m, completionRate, done, total
+         MERGE (e:Evidence {id: 'ev_bottleneck_' + m.id})
+         ON CREATE SET
+           e.source = 'Milestone task analysis',
+           e.sourceType = 'plan_structure',
+           e.grade = 'A1',
+           e.description = toString(done) + '/' + toString(total) + ' tasks done, completion=' + toString(round(completionRate * 100)) + '%',
+           e.weight = 0.95,
+           e.created = $now
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.95}]->(e)
+         RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
+        { now },
+      );
+      if (bottlenecks.records.length > 0) {
+        claimCount += bottlenecks.records[0].get('claims').toNumber();
+        evidenceCount += bottlenecks.records[0].get('evidences').toNumber();
+      }
+
+      return { claims: claimCount, evidence: evidenceCount };
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * SYNTHESIZER 3: Temporal stability claims
+   * Uses CO_CHANGES_WITH frequency to identify files that change together —
+   * if one is stable and the other is churning, that's a coupling risk.
+   */
+  async synthesizeTemporalClaims(): Promise<{ claims: number; evidence: number }> {
+    const session = this.driver.session();
+    const now = new Date().toISOString();
+    let claimCount = 0;
+    let evidenceCount = 0;
+
+    try {
+      // Files with high co-change frequency — tight coupling signals
+      const coupled = await session.run(
+        `MATCH (a)-[r:CO_CHANGES_WITH]->(b)
+         WHERE a.projectId IS NOT NULL AND r.cochangeCount >= 3
+         WITH a, b, r.cochangeCount AS changes, r.confidence AS conf
+         ORDER BY changes DESC
+         LIMIT 20
+         MERGE (c:Claim {id: 'claim_coupled_' + a.id + '_' + b.id})
+         ON CREATE SET
+           c.statement = '"' + a.name + '" and "' + b.name + '" are tightly coupled (' + toString(changes) + ' co-changes) — editing one likely requires editing the other',
+           c.confidence = CASE WHEN changes >= 8 THEN 0.95 WHEN changes >= 5 THEN 0.85 ELSE 0.7 END,
+           c.domain = 'code',
+           c.claimType = 'temporal_coupling',
+           c.status = 'supported',
+           c.projectId = a.projectId,
+           c.cochangeCount = changes,
+           c.created = $now
+         ON MATCH SET
+           c.cochangeCount = changes,
+           c.updated = $now
+         WITH c, a, b, changes
+         MERGE (e:Evidence {id: 'ev_coupled_' + a.id + '_' + b.id})
+         ON CREATE SET
+           e.source = 'CO_CHANGES_WITH: ' + toString(changes) + ' co-commits',
+           e.sourceType = 'git_temporal',
+           e.grade = 'A1',
+           e.description = a.name + ' ↔ ' + b.name + ' changed together in ' + toString(changes) + ' commits',
+           e.weight = CASE WHEN changes >= 8 THEN 0.95 WHEN changes >= 5 THEN 0.85 ELSE 0.7 END,
+           e.created = $now
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9}]->(e)
+         RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
+        { now },
+      );
+      if (coupled.records.length > 0) {
+        claimCount += coupled.records[0].get('claims').toNumber();
+        evidenceCount += coupled.records[0].get('evidences').toNumber();
+      }
+
+      return { claims: claimCount, evidence: evidenceCount };
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * SYNTHESIZER 4: Coverage gap claims
+   * Cross-references TestCase nodes against high-risk functions.
+   * "X% of high-risk functions have no test coverage"
+   */
+  async synthesizeCoverageGapClaims(): Promise<{ claims: number; evidence: number }> {
+    const session = this.driver.session();
+    const now = new Date().toISOString();
+    let claimCount = 0;
+    let evidenceCount = 0;
+
+    try {
+      // Per-project: count high-risk functions with and without tests
+      const coverage = await session.run(
+        `MATCH (f {projectId: $cg})
+         WHERE f.riskLevel IS NOT NULL AND f.riskLevel >= 2
+         WITH f, EXISTS { MATCH (f)-[:TESTED_BY]->(:TestCase) } AS hasTesting
+         WITH count(f) AS total,
+              sum(CASE WHEN hasTesting THEN 1 ELSE 0 END) AS tested,
+              sum(CASE WHEN NOT hasTesting THEN 1 ELSE 0 END) AS untested,
+              collect(CASE WHEN NOT hasTesting THEN f.name ELSE null END)[..5] AS worstOffenders
+         WHERE total > 0
+         MERGE (c:Claim {id: 'claim_coverage_proj_c0d3e9a1f200'})
+         ON CREATE SET
+           c.statement = toString(untested) + ' of ' + toString(total) + ' high-risk functions (' + toString(round(toFloat(untested)/total * 100)) + '%) have no test coverage. Worst: ' + reduce(s = '', n IN worstOffenders | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
+           c.confidence = 0.95,
+           c.domain = 'code',
+           c.claimType = 'coverage_gap',
+           c.status = 'supported',
+           c.projectId = $cg,
+           c.untested = untested,
+           c.total = total,
+           c.created = $now
+         ON MATCH SET
+           c.statement = toString(untested) + ' of ' + toString(total) + ' high-risk functions (' + toString(round(toFloat(untested)/total * 100)) + '%) have no test coverage. Worst: ' + reduce(s = '', n IN worstOffenders | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
+           c.untested = untested,
+           c.total = total,
+           c.updated = $now
+         WITH c, untested, total
+         MERGE (e:Evidence {id: 'ev_coverage_proj_c0d3e9a1f200'})
+         ON CREATE SET
+           e.source = 'TestCase node count vs high-risk function count',
+           e.sourceType = 'structural_analysis',
+           e.grade = 'A1',
+           e.description = toString(untested) + '/' + toString(total) + ' high-risk functions untested',
+           e.weight = 0.95,
+           e.created = $now
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.95}]->(e)
+         RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
+        { cg: 'proj_c0d3e9a1f200', now },
+      );
+      if (coverage.records.length > 0) {
+        claimCount += coverage.records[0].get('claims').toNumber();
+        evidenceCount += coverage.records[0].get('evidences').toNumber();
+      }
+
+      return { claims: claimCount, evidence: evidenceCount };
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * SYNTHESIZER 5: Cross-domain entity claims
+   * Finds entities that appear in BOTH code (as function/file names) AND corpus (as Person nodes)
+   * AND plan (as task references). The more layers an entity touches, the higher its centrality.
+   */
+  async synthesizeCrossDomainEntityClaims(): Promise<{ claims: number; evidence: number }> {
+    const session = this.driver.session();
+    const now = new Date().toISOString();
+    let claimCount = 0;
+    let evidenceCount = 0;
+
+    try {
+      // Person nodes that appear in multiple corpora AND have related plan tasks
+      const multiDomain = await session.run(
+        `MATCH (p:Person)<-[:MENTIONS_PERSON]-(v)
+         WHERE v.projectId IS NOT NULL
+         WITH p, collect(DISTINCT v.projectId) AS corpusProjects, count(DISTINCT v) AS mentionCount
+         WHERE size(corpusProjects) >= 2
+         WITH p, corpusProjects, mentionCount
+         MERGE (c:Claim {id: 'claim_centrality_' + replace(toLower(p.name), ' ', '_')})
+         ON CREATE SET
+           c.statement = '"' + p.name + '" is a cross-domain entity: ' + toString(mentionCount) + ' mentions across ' + toString(size(corpusProjects)) + ' corpora',
+           c.confidence = CASE
+             WHEN size(corpusProjects) >= 4 AND mentionCount >= 100 THEN 0.98
+             WHEN size(corpusProjects) >= 3 THEN 0.9
+             ELSE 0.75
+           END,
+           c.domain = 'cross',
+           c.claimType = 'entity_centrality',
+           c.status = 'supported',
+           c.mentionCount = mentionCount,
+           c.corpusCount = size(corpusProjects),
+           c.created = $now
+         ON MATCH SET
+           c.mentionCount = mentionCount,
+           c.corpusCount = size(corpusProjects),
+           c.updated = $now
+         WITH c, p, mentionCount, corpusProjects
+         MERGE (e:Evidence {id: 'ev_centrality_' + replace(toLower(p.name), ' ', '_')})
+         ON CREATE SET
+           e.source = 'MENTIONS_PERSON edges across ' + toString(size(corpusProjects)) + ' projects',
+           e.sourceType = 'entity_resolution',
+           e.grade = 'A1',
+           e.description = p.name + ': ' + toString(mentionCount) + ' verse mentions across ' + toString(size(corpusProjects)) + ' corpora',
+           e.weight = 0.9,
+           e.created = $now
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9}]->(e)
+         RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
+        { now },
+      );
+      if (multiDomain.records.length > 0) {
+        claimCount += multiDomain.records[0].get('claims').toNumber();
+        evidenceCount += multiDomain.records[0].get('evidences').toNumber();
+      }
+
+      return { claims: claimCount, evidence: evidenceCount };
+    } finally {
+      await session.close();
+    }
+  }
+
+  // ============================================================================
   // Confidence Aggregation
   // ============================================================================
 
@@ -498,14 +803,14 @@ export class ClaimEngine {
     plan: { claims: number; evidence: number; hypotheses: number };
     code: { claims: number; evidence: number; hypotheses: number };
     corpus: { claims: number; evidence: number };
+    cross: { claims: number; evidence: number };
     confidenceUpdated: number;
   }> {
     await this.ensureSchema();
 
-    // Plan claims (all plan projects)
+    // Phase 1: Single-domain claims (existing generators)
     const plan = await this.generatePlanClaims();
 
-    // Code claims (both code projects)
     const code1 = await this.generateCodeClaims('proj_60d5feed0001');  // GodSpeed
     const code2 = await this.generateCodeClaims('proj_c0d3e9a1f200');  // CodeGraph
     const code = {
@@ -514,13 +819,24 @@ export class ClaimEngine {
       hypotheses: code1.hypotheses + code2.hypotheses,
     };
 
-    // Corpus claims (entity resolution)
     const corpus = await this.generateCorpusClaims();
 
-    // Recompute confidence
+    // Phase 2: Cross-layer synthesizers (THE REAL REASONING)
+    const crossCut = await this.synthesizeCrossCuttingClaims();
+    const criticalPath = await this.synthesizeCriticalPathClaims();
+    const temporal = await this.synthesizeTemporalClaims();
+    const coverageGap = await this.synthesizeCoverageGapClaims();
+    const entityCentrality = await this.synthesizeCrossDomainEntityClaims();
+
+    const cross = {
+      claims: crossCut.claims + criticalPath.claims + temporal.claims + coverageGap.claims + entityCentrality.claims,
+      evidence: crossCut.evidence + criticalPath.evidence + temporal.evidence + coverageGap.evidence + entityCentrality.evidence,
+    };
+
+    // Phase 3: Recompute confidence with all evidence in place
     const confidenceUpdated = await this.recomputeConfidence();
 
-    return { plan, code, corpus, confidenceUpdated };
+    return { plan, code, corpus, cross, confidenceUpdated };
   }
 }
 
@@ -540,10 +856,12 @@ async function main() {
     console.log(`   Claims: ${results.code.claims}, Evidence: ${results.code.evidence}, Hypotheses: ${results.code.hypotheses}`);
     console.log('📚 Corpus Domain:');
     console.log(`   Claims: ${results.corpus.claims}, Evidence: ${results.corpus.evidence}`);
+    console.log('🔗 Cross-Layer Synthesis:');
+    console.log(`   Claims: ${results.cross.claims}, Evidence: ${results.cross.evidence}`);
     console.log(`\n🔄 Confidence recomputed on ${results.confidenceUpdated} claims`);
 
-    const total = results.plan.claims + results.code.claims + results.corpus.claims;
-    const totalEv = results.plan.evidence + results.code.evidence + results.corpus.evidence;
+    const total = results.plan.claims + results.code.claims + results.corpus.claims + results.cross.claims;
+    const totalEv = results.plan.evidence + results.code.evidence + results.corpus.evidence + results.cross.evidence;
     const totalHyp = results.plan.hypotheses + results.code.hypotheses;
     console.log(`\n📊 Total: ${total} claims, ${totalEv} evidence nodes, ${totalHyp} hypotheses`);
   } finally {
