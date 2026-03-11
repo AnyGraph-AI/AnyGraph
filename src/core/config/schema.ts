@@ -166,6 +166,17 @@ export interface Neo4jNodeProperties {
   // === DUPLICATE DETECTION ===
   normalizedHash?: string; // SHA256 hash of normalized code for structural duplicate detection
 
+  // === INNER FUNCTION ===
+  isInnerFunction?: boolean; // true if declared inside another function
+
+  // === OVERLOAD DETECTION ===
+  isOverloadSignature?: boolean; // true if this is an overload signature (not implementation)
+  isOverloadImplementation?: boolean; // true if this is the implementation with overloads
+  overloadCount?: number; // number of overload signatures
+
+  // === SUPER CALL ===
+  callsSuper?: boolean; // true if constructor calls super()
+
   // === FRAMEWORK-SPECIFIC (Dynamic) ===
   context?: Record<string, any>;
 }

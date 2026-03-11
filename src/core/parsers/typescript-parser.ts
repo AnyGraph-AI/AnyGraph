@@ -1054,6 +1054,32 @@ export class TypeScriptParser {
     const seenCalls = new Set<string>();
 
     // Traverse all descendants looking for call expressions
+    // === INNER FUNCTION DECLARATION EMISSION ===
+    // Named functions declared inside a parent function (e.g., helpers inside createBot)
+    // are emitted as Function nodes with CONTAINS edges. This makes them visible to
+    // blast radius queries and enables call resolution to them.
+    const emittedInnerFunctions = new Set<string>();
+    body.forEachDescendant((descendant) => {
+      if (Node.isFunctionDeclaration(descendant)) {
+        const fnName = descendant.getName();
+        if (fnName && !emittedInnerFunctions.has(fnName)) {
+          emittedInnerFunctions.add(fnName);
+          const innerNode = this.createCoreNode(
+            descendant,
+            CoreNodeType.FUNCTION_DECLARATION,
+            { isExported: false, isInnerFunction: true },
+            callerNode.id,
+          );
+          this.addNode(innerNode);
+          // CONTAINS edge from parent function to inner function
+          const containsEdge = this.createCoreEdge(CoreEdgeType.CONTAINS, callerNode.id, innerNode.id);
+          this.addEdge(containsEdge);
+          // Extract calls from the inner function body too
+          this.extractCallsFromBody(innerNode, descendant);
+        }
+      }
+    });
+
     body.forEachDescendant((descendant) => {
       // Method/function calls: foo(), this.foo(), obj.foo()
       if (Node.isCallExpression(descendant)) {
@@ -1382,6 +1408,20 @@ export class TypeScriptParser {
     // Check if this call is inside a conditional block
     const { conditional, conditionalKind } = this.detectConditionalContext(callExpr);
 
+    // Case 0: super() call — delegates to parent class constructor
+    if (Node.isSuperExpression(expression)) {
+      return {
+        targetName: 'constructor',
+        targetType: CoreNodeType.CONSTRUCTOR_DECLARATION,
+        receiverExpression: 'super',
+        lineNumber,
+        isAsync: false,
+        argumentCount,
+        conditional,
+        conditionalKind,
+      };
+    }
+
     // Case 1: Direct function call - functionName()
     if (Node.isIdentifier(expression)) {
       const targetName = expression.getText();
@@ -1642,6 +1682,48 @@ export class TypeScriptParser {
         }
       } catch (error) {
         console.warn(`Failed to compute normalizedHash for ${nodeId}:`, error);
+      }
+
+      // === OVERLOAD DETECTION (#17) ===
+      // Check if this function/method has overload signatures
+      if (Node.isFunctionDeclaration(astNode) && typeof (astNode as any).isOverload === 'function') {
+        const isOverload = (astNode as any).isOverload();
+        if (isOverload) {
+          properties.isOverloadSignature = true;
+        }
+        const overloads = (astNode as any).getOverloads?.();
+        if (overloads && overloads.length > 0) {
+          properties.overloadCount = overloads.length;
+          properties.isOverloadImplementation = true;
+        }
+      }
+      if (Node.isMethodDeclaration(astNode) && typeof (astNode as any).isOverload === 'function') {
+        const isOverload = (astNode as any).isOverload();
+        if (isOverload) {
+          properties.isOverloadSignature = true;
+        }
+        const overloads = (astNode as any).getOverloads?.();
+        if (overloads && overloads.length > 0) {
+          properties.overloadCount = overloads.length;
+          properties.isOverloadImplementation = true;
+        }
+      }
+
+      // === SUPER() DETECTION (#16) ===
+      // Mark if this constructor calls super()
+      if (Node.isConstructorDeclaration(astNode)) {
+        const body = astNode.getBody();
+        if (body) {
+          let callsSuper = false;
+          body.forEachDescendant(d => {
+            if (Node.isCallExpression(d) && Node.isSuperExpression(d.getExpression())) {
+              callsSuper = true;
+            }
+          });
+          if (callsSuper) {
+            properties.callsSuper = true;
+          }
+        }
       }
     }
 
