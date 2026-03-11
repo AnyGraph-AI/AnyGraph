@@ -4,22 +4,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Code Graph Context is an MCP server that builds **universal reasoning graphs** — code, corpus, documents, and plans — to provide rich context and safety gates to AI agents. Currently parses TypeScript codebases using ts-morph, with multi-language and corpus parser expansion in progress.
+**AnythingGraph** (repo: codegraph) is an MCP server that builds **universal reasoning graphs**. Give it any structured knowledge — code, documents, plans, corpora — and it parses, cross-references, generates claims, detects drift, and self-audits. Code parsing was the proof of concept. The architecture is the product.
 
-### Architecture Vision (In Progress)
-CodeGraph is evolving from TypeScript-only to a universal graph with four domains:
-- **Code graphs**: Source code structure, calls, risk scoring (TypeScript ✅, Python/Java/Go planned)
-- **Corpus graphs**: Bible, Quran, structured knowledge (custom Python parsers ✅)
-- **Document graphs**: Legal filings, investigative evidence (Epstein/GOYFILES)
-- **Plan graphs**: Task/milestone tracking cross-referenced against code graphs (building now)
+**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 43 MCP tools.
 
-Full architecture plan: `plans/codegraph/MULTI_LANGUAGE_ASSESSMENT.md`
+### Six Operational Layers
+| Layer | Status | What It Does |
+|-------|--------|-------------|
+| **Code** | ✅ 3 projects | TypeScript parsing, CALLS/RESOLVES_TO, risk scoring, blast radius |
+| **Corpus** | ✅ 5 projects | Bible + Quran + Deuterocanon + Pseudepigrapha + Early Contested, entity resolution |
+| **Documents** | ❌ Not built | Generic PDF/text ingestion pipeline (next milestone) |
+| **Plans** | ✅ 4 projects | Task/Milestone/Sprint tracking, drift detection, cross-domain evidence |
+| **Claims** | ✅ 346 claims | Domain-agnostic assertions with evidence grades + confidence aggregation |
+| **Reasoning** | ✅ 233 hypotheses | Auto-generated from evidence gaps, cross-layer synthesis, self-audit |
 
 ### Key Design Principles
-- **Parser → IR → Enrichment → Graph**: All parsers output language-agnostic IR before Neo4j ingestion
+- **Parser → IR → Enrichment → Graph**: All parsers should output language-agnostic IR (IR layer not yet built — current TS parser writes Neo4j directly)
 - **Three parser tiers**: Tier 0 (compiler-backed), Tier 1 (workspace-semantic), Tier 2 (structural/tree-sitter)
 - **Four graph layers**: Evidence → Canonical → Operational → Agent Session
 - **Confidence-aware risk**: Edge weights carry parser tier + confidence, risk engine degrades gracefully on structural-only areas
+- **Cross-layer synthesis**: Claims that require 2+ layers to derive (code risk × plan impact, coverage gaps, temporal coupling, entity centrality)
+- **Self-audit**: Graph generates verification questions, agents answer, graph updates itself
+
+Full architecture plan: `plans/codegraph/MULTI_LANGUAGE_ASSESSMENT.md` (title: "Universal Reasoning Graph — Architecture & Roadmap")
 
 ## Build & Development Commands
 
@@ -40,17 +47,20 @@ TypeScript Project → AST Parser (ts-morph) → Graph Nodes/Edges → Neo4j + V
 
 ### Data Flow (Target — Universal)
 ```
-Any Source → Language Parser → IR v1 → Enrichment Plugins → Neo4j → MCP Tools (33 tools)
+Any Source → Language Parser → IR v1 → Enrichment Plugins → Neo4j → MCP Tools (43 tools)
 ```
 
 ### Key Directories
 
 - `src/mcp/` - MCP server entry point and tools
   - `mcp.server.ts` - Server initialization
-  - `tools/` - 7 MCP tools (search_codebase, traverse_from_node, impact_analysis, etc.)
+  - `tools/` - 43 MCP tools across code, plan, claim, swarm, and self-audit domains
   - `handlers/` - Business logic for graph generation and traversal
 - `src/core/` - Core business logic
-  - `parsers/typescript-parser.ts` - Main AST parser (~1000 lines)
+  - `parsers/typescript-parser.ts` - TypeScript AST parser (~1000 lines)
+  - `parsers/plan-parser.ts` - Plan file parser (~800 lines, v2.1)
+  - `claims/claim-engine.ts` - Claim generation + 5 cross-layer synthesizers
+  - `claims/self-audit.ts` - Self-audit engine (questions → verdicts → graph updates)
   - `config/schema.ts` - Core graph schema definitions
   - `config/nestjs-framework-schema.ts` - NestJS semantic patterns
   - `embeddings/` - OpenAI embeddings and NL-to-Cypher services
@@ -108,16 +118,48 @@ If upgrading from a version without multi-project support, note these breaking c
 
 **Note:** There is no automatic migration path. Existing graphs must be rebuilt to use the new ID format with projectId isolation.
 
-### MCP Tools
+### MCP Tools (43 total)
 
+**Code Analysis:**
 | Tool | Purpose |
 |------|---------|
-| `search_codebase` | Semantic search via vector embeddings - start here |
+| `pre_edit_check` | **ALWAYS call before editing.** Returns verdict + callers + state + coupling |
+| `simulate_edit` | Full graph delta preview before applying changes |
+| `impact_analysis` | Deep blast radius with transitive dependents and risk scoring |
+| `search_codebase` | Semantic search via vector embeddings |
 | `traverse_from_node` | Explore relationships from a node ID |
-| `impact_analysis` | Analyze dependencies (LOW/MEDIUM/HIGH/CRITICAL risk) |
-| `parse_typescript_project` | Build the graph from source code |
 | `natural_language_to_cypher` | Convert NL to Cypher queries |
-| `test_neo4j_connection` | Health check |
+| `state_impact` | State field access patterns, race condition detection |
+| `registration_map` | Framework entrypoint queries |
+| `detect_hotspots` | Ranked risk × change frequency |
+| `detect_dead_code` | Find unused exports |
+| `detect_duplicate_code` | Find near-duplicates by normalized hash |
+
+**Plan Tracking:**
+| Tool | Purpose |
+|------|---------|
+| `plan_status` | Completion rates per project (done/planned/drift) |
+| `plan_drift` | Tasks with code evidence but unchecked boxes |
+| `plan_gaps` | Planned tasks with zero evidence |
+| `plan_query` | Free-form plan graph queries |
+
+**Claims & Reasoning:**
+| Tool | Purpose |
+|------|---------|
+| `claim_status` | Overview of claims by domain and status |
+| `evidence_for` | Evidence supporting/contradicting a specific claim |
+| `contradictions` | Find contested or contradicted claims |
+| `hypotheses` | Auto-generated investigation targets from gaps |
+| `claim_generate` | Run claim generation pipeline |
+
+**Self-Audit:**
+| Tool | Purpose |
+|------|---------|
+| `self_audit` | Summary / generate questions / apply verdicts |
+
+**Swarm (8 tools):** `swarm_post_task`, `swarm_claim_task`, `swarm_complete_task`, `swarm_get_tasks`, `swarm_message`, `swarm_pheromone`, `swarm_sense`, `swarm_graph_refresh`
+
+**Utility:** `parse_typescript_project`, `test_neo4j_connection`, `list_projects`, `save_session_bookmark`, `restore_session_bookmark`, `save_session_note`, `recall_session_notes`
 
 ### Response Format
 

@@ -1,12 +1,14 @@
-# CodeGraph — Agent Instructions
+# AnythingGraph — Agent Instructions
 
 ## What This Is
 
-CodeGraph is a Neo4j code knowledge graph. It parses TypeScript codebases into structural nodes and edges,
-computes risk scores, tracks state flow, ownership, architecture layers, and temporal coupling — giving AI agents complete architectural awareness before they touch a single line of code.
+AnythingGraph (repo: codegraph) is a **universal reasoning graph**. It ingests code, plans, corpora, and documents into Neo4j, cross-references across domains, generates claims with evidence, detects drift, and self-audits. Code parsing was the proof of concept — the architecture handles any structured knowledge.
 
-Every function, class, interface, variable, type alias, method, and property is a node.
-Every call, import, containment, state access, ownership, and co-change pattern is an edge.
+**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 43 MCP tools, 6 operational layers.
+
+**Six layers**: Code (3 projects) → Corpus (5 projects) → Plans (4 projects) → Claims (346) → Reasoning (233 hypotheses) → Self-Audit.
+
+Every function, task, verse, claim, and entity is a node. Every call, evidence link, mention, and dependency is an edge.
 **Query the graph before you edit. That's the entire point.**
 
 ---
@@ -277,6 +279,16 @@ If the MCP server is running (`node codegraph/dist/mcp/mcp.server.js`), these to
 | `state_impact` | Query state field access patterns. Shows readers/writers, detects race conditions. |
 | `registration_map` | Query framework entrypoints. "What happens when the user sends /buy?" |
 | `detect_hotspots` | Ranked list of functions with highest risk × change frequency. |
+| `plan_status` | Completion rates per plan project (done/planned/drift). |
+| `plan_drift` | Tasks with code evidence but unchecked boxes. |
+| `plan_gaps` | Planned tasks with zero evidence. |
+| `plan_query` | Free-form plan graph queries. |
+| `claim_status` | Overview of claims by domain and status. |
+| `evidence_for` | Evidence supporting/contradicting a specific claim. |
+| `contradictions` | Find contested or contradicted claims. |
+| `hypotheses` | Auto-generated investigation targets from evidence gaps. |
+| `claim_generate` | Run claim generation pipeline across all domains. |
+| `self_audit` | Summary / generate audit questions / apply verdicts. |
 
 MCP config for Claude Code (`.mcp.json` in project root):
 ```json
@@ -359,6 +371,94 @@ sudo neo4j start
 
 ---
 
+---
+
+## Plan Tracking
+
+Plans are parsed from markdown files in `plans/` into Task/Milestone/Sprint/Decision nodes.
+
+### Cross-domain evidence
+```cypher
+-- What plan tasks have code evidence?
+MATCH (t:Task)-[:HAS_CODE_EVIDENCE]->(sf)
+RETURN t.name, t.status, sf.name, t.projectId
+ORDER BY t.projectId
+
+-- Drift: planned but code exists
+MATCH (t:Task {status: 'planned'})
+WHERE t.hasCodeEvidence = true
+RETURN t.name, t.projectId
+
+-- Milestone completion
+MATCH (t:Task)-[:PART_OF]->(m:Milestone)
+WITH m, count(t) AS total, sum(CASE WHEN t.status='done' THEN 1 ELSE 0 END) AS done
+RETURN m.name, done, total, round(toFloat(done)/total*100) + '%'
+ORDER BY m.projectId
+```
+
+### Plan↔Code links
+| Plan Project | Code Project |
+|-------------|-------------|
+| `plan_codegraph` | `proj_c0d3e9a1f200` |
+| `plan_godspeed` | `proj_60d5feed0001` |
+| `plan_bible_graph` | `proj_0e32f3c187f4` |
+| `plan_plan_graph` | `proj_c0d3e9a1f200` |
+
+---
+
+## Claims & Reasoning
+
+The claim layer generates domain-agnostic assertions with evidence.
+
+### Claim types
+| Type | Domain | What It Claims |
+|------|--------|---------------|
+| `edit_safety` | code | "Function X is high-risk (level Y, Z callers)" |
+| `task_completion` | plan | "Task X is complete" (with code evidence) |
+| `plan_drift` | plan | "Task X may be complete but isn't checked off" |
+| `entity_identity` | corpus | "Moses appears across 4 corpora" |
+| `cross_cutting_impact` | cross | "Editing X invalidates evidence for Y plan tasks" |
+| `bottleneck` | plan | "Sprint X is 41% complete — 23 remaining" |
+| `temporal_coupling` | code | "A and B change together (8 co-commits)" |
+| `coverage_gap` | code | "85 of 85 high-risk functions have no tests" |
+| `entity_centrality` | cross | "God: 11,194 mentions across 2 corpora" |
+
+### Key queries
+```cypher
+-- Cross-cutting: what plan tasks break if I edit this file?
+MATCH (c:Claim {claimType: 'cross_cutting_impact'})
+RETURN c.statement, c.taskCount ORDER BY c.taskCount DESC
+
+-- Bottlenecks
+MATCH (c:Claim {claimType: 'bottleneck'})
+RETURN c.statement, c.completionRate ORDER BY c.completionRate ASC
+
+-- All claims about a project
+MATCH (c:Claim {projectId: 'proj_c0d3e9a1f200'})
+RETURN c.claimType, c.status, c.confidence, c.statement
+ORDER BY c.confidence ASC LIMIT 20
+```
+
+---
+
+## Self-Audit
+
+The graph generates verification questions about its own state.
+
+**Flow**: `getDriftItems()` → `buildAuditQuestions()` → agent verifies → `applyVerdict()` → graph updates
+
+**Verdicts**: `CONFIRMED` (check box, keep evidence), `FALSE_POSITIVE` (remove evidence, record in node), `PARTIAL` (flag for review)
+
+**Audit memory**: Tasks with `auditVerdict='FALSE_POSITIVE'` are skipped on re-ingest. Verdicts survive plan re-parsing.
+
+```cypher
+-- What's been audited?
+MATCH (t:Task) WHERE t.auditVerdict IS NOT NULL
+RETURN t.auditVerdict, count(t), collect(t.name)[..3]
+```
+
+---
+
 ## Rules
 
 1. **ALWAYS run pre_edit_check** before editing any function. No exceptions.
@@ -369,3 +469,5 @@ sudo neo4j start
 6. **Inner functions** (`isInnerFunction=true`) are helpers inside parent functions — they have their own call graphs.
 7. **Check architectureLayer** before adding cross-layer dependencies. Don't create new violations.
 8. **100% coverage** — every declaration in the source is in the graph. If it's not in the graph, it's not in the code.
+9. **Check cross-cutting claims** before editing high-risk files. Plan tasks may depend on them.
+10. **Self-audit verdicts are permanent.** Don't re-create evidence for tasks marked FALSE_POSITIVE.
