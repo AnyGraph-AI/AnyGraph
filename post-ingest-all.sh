@@ -7,27 +7,31 @@
 set -e
 cd "$(dirname "$0")"
 
-echo "=== 1/16: Risk scoring + edge classification ==="
+echo "=== 1/17: Risk scoring + edge classification ==="
 python3 post-ingest-enrich.py
 
 echo ""
-echo "=== 2/16: State edges (READS_STATE/WRITES_STATE) ==="
+echo "=== 2/17: State edges (READS_STATE/WRITES_STATE) ==="
 npx tsx create-state-edges.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 3/16: Git change frequency ==="
+echo "=== 3/17: Git change frequency ==="
 npx tsx seed-git-frequency.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 4/16: POSSIBLE_CALL edges (dynamic dispatch) ==="
+echo "=== 4/17: Temporal coupling (git co-change mining) ==="
+npx tsx temporal-coupling.ts godspeed 2>&1 | grep -v "dotenv\|tip:"
+
+echo ""
+echo "=== 5/17: POSSIBLE_CALL edges (dynamic dispatch) ==="
 npx tsx create-possible-call-edges.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 5/16: Virtual dispatch (interface/inheritance) ==="
+echo "=== 6/17: Virtual dispatch (interface/inheritance) ==="
 npx tsx create-virtual-dispatch-edges.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 6/16: Registration properties (registrationKind/Trigger) ==="
+echo "=== 7/17: Registration properties (registrationKind/Trigger) ==="
 cypher-shell -u neo4j -p codegraph "
 MATCH (e:Entrypoint)
 WHERE e.context IS NOT NULL
@@ -44,7 +48,7 @@ RETURN 'Promoted registrationKind/Trigger to ' + toString(count(h)) + ' handlers
 "
 
 echo ""
-echo "=== 7/16: Project node ==="
+echo "=== 8/17: Project node ==="
 cypher-shell -u neo4j -p codegraph "
 MERGE (p:Project {projectId: 'proj_60d5feed0001'})
 SET p.name = 'GodSpeed',
@@ -61,15 +65,15 @@ RETURN 'Project node updated: ' + toString(nodes) + ' nodes, ' + toString(edges)
 "
 
 echo ""
-echo "=== 8/16: Author ownership (git blame) ==="
+echo "=== 9/17: Author ownership (git blame) ==="
 npx tsx seed-author-ownership.ts godspeed 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 9/16: Architecture layers ==="
+echo "=== 10/17: Architecture layers ==="
 npx tsx seed-architecture-layers.ts godspeed 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 10/16: riskLevel v2 promotion (temporal coupling + author entropy) ==="
+echo "=== 11/17: riskLevel v2 promotion (temporal coupling + author entropy) ==="
 cypher-shell -u neo4j -p codegraph "
 MATCH (f:CodeNode)
 WHERE f.riskLevel IS NOT NULL
@@ -88,27 +92,27 @@ RETURN 'Promoted riskLevel v2 on ' + toString(count(f)) + ' nodes' AS status
 "
 
 echo ""
-echo "=== 11/16: Provenance + confidence on edges ==="
+echo "=== 12/17: Provenance + confidence on edges ==="
 npx tsx add-provenance.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 12/16: Unresolved reference nodes ==="
+echo "=== 13/17: Unresolved reference nodes ==="
 npx tsx create-unresolved-nodes.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 13/16: Audit subgraph (invariant checks) ==="
+echo "=== 14/17: Audit subgraph (invariant checks) ==="
 npx tsx run-audit.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 14/16: Test coverage mapping ==="
+echo "=== 15/17: Test coverage mapping ==="
 npx tsx seed-test-coverage.ts . 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 15/16: Embeddings (OpenAI — set STRUCTURAL_ONLY=true to skip) ==="
+echo "=== 16/17: Embeddings (OpenAI — set STRUCTURAL_ONLY=true to skip) ==="
 npx tsx embed-nodes.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 16/16: Evaluation (regression detection) ==="
+echo "=== 17/17: Evaluation (regression detection) ==="
 npx tsx run-evaluation.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""

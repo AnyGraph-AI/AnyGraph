@@ -55,7 +55,7 @@ const { nodes, edges } = parser.exportToJson();
 cd codegraph && npx tsx parse-and-ingest.ts
 ```
 
-**Step 4: Run post-ingest enrichment (16 steps):**
+**Step 4: Run post-ingest enrichment (17 steps):**
 ```bash
 cd codegraph && bash post-ingest-all.sh
 ```
@@ -180,7 +180,7 @@ Read `swarm/COORDINATOR.md` (decomposition algorithm) + `swarm/WORKER.md` (worke
 |---------|-------------|
 | `npx tsx parse-and-ingest.ts` | Parse GodSpeed + ingest to Neo4j |
 | `npx tsx parse-and-ingest-self.ts` | Parse CodeGraph itself (self-graph) |
-| `bash post-ingest-all.sh` | Run all 16 post-ingest enrichment passes |
+| `bash post-ingest-all.sh` | Run all 17 post-ingest enrichment passes |
 | `npx tsx edit-simulation.ts <file> <modified>` | Preview graph delta |
 | `npx tsx temporal-coupling.ts codegraph` | Mine git co-change patterns |
 | `npx tsx seed-author-ownership.ts codegraph` | Git blame → Author nodes |
@@ -252,7 +252,7 @@ codegraph/
 ├── CHANGELOG.md              # Version history
 ├── parse-and-ingest.ts       # GodSpeed parser + ingest script
 ├── parse-and-ingest-self.ts  # Self-graph script
-├── post-ingest-all.sh        # 16-step enrichment pipeline
+├── post-ingest-all.sh        # 17-step enrichment pipeline
 ├── edit-simulation.ts        # Delta graph preview
 ├── temporal-coupling.ts      # Git co-change mining
 ├── seed-author-ownership.ts  # Git blame → Author nodes
