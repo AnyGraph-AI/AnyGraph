@@ -55,11 +55,11 @@ const { nodes, edges } = parser.exportToJson();
 cd codegraph && npx tsx parse-and-ingest.ts
 ```
 
-**Step 4: Run post-ingest enrichment (10 steps):**
+**Step 4: Run post-ingest enrichment (15 steps):**
 ```bash
 cd codegraph && bash post-ingest-all.sh
 ```
-This adds: risk scoring, state edges, git frequency, POSSIBLE_CALL, virtual dispatch, registration properties, project node, author ownership, architecture layers, embeddings.
+This adds: risk scoring, state edges, git frequency, POSSIBLE_CALL, virtual dispatch, registration properties, project node, author ownership, architecture layers, riskLevel v2 promotion, provenance + confidence, unresolved reference nodes, audit subgraph, test coverage mapping, embeddings.
 
 **Step 5: Query the graph:**
 ```bash
@@ -110,7 +110,7 @@ cd codegraph && npx tsx parse-and-ingest-self.ts
 
 ### Key Properties
 - `riskLevel` / `riskTier` (LOW/MEDIUM/HIGH/CRITICAL) — pre-computed risk score
-- `riskLevelV2` — risk with temporal coupling + author entropy
+- `riskLevel` — risk with temporal coupling + author entropy baked in
 - `fanInCount` / `fanOutCount` — caller/callee counts
 - `sourceCode` — full source text (read implementations without opening files)
 - `authorEntropy` — number of distinct git authors (fragmented ownership)
@@ -235,7 +235,7 @@ codegraph/
 │   │   ├── utils/            # File change detection, graph factory
 │   │   └── workspace/        # Project detection
 │   ├── mcp/
-│   │   ├── tools/            # 29 MCP tools
+│   │   ├── tools/            # 33 MCP tools
 │   │   ├── handlers/         # Graph generation, traversal, incremental parse
 │   │   ├── services/         # Watch manager, job manager
 │   │   └── mcp.server.ts     # MCP server entry point

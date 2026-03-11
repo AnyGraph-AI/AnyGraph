@@ -44,6 +44,11 @@ cypher-shell -u neo4j -p codegraph "YOUR CYPHER QUERY"
 | `Author` | Git author (from `git blame`) |
 | `ArchitectureLayer` | Inferred layer (Presentation, Domain, Data, etc.) |
 | `Project` | Top-level project node with stats |
+| `UnresolvedReference` | Import/call the parser couldn't resolve |
+| `AuditCheck` | Structural invariant check result |
+| `InvariantViolation` | Specific invariant failure |
+| `EvaluationRun` | Metrics snapshot for regression tracking |
+| `MetricResult` | Single metric value from an evaluation run |
 
 Framework-specific labels (added when `.codegraph.yml` specifies a framework):
 `CallbackQueryHandler`, `CommandHandler`, `EventHandler`, `Middleware`, `BotFactory`
@@ -64,6 +69,9 @@ Framework-specific labels (added when `.codegraph.yml` specifies a framework):
 | `BELONGS_TO_LAYER` | SourceFile → ArchitectureLayer | — |
 | `HAS_PARAMETER` | Function → Parameter | — |
 | `HAS_MEMBER` | Class/Interface → Method/Property | — |
+| `ORIGINATES_IN` | UnresolvedReference → Function/File | — |
+| `FOUND` | AuditCheck → InvariantViolation | — |
+| `MEASURED` | EvaluationRun → MetricResult | — |
 
 ### Key Node Properties
 | Property | Type | On | Meaning |
@@ -76,7 +84,6 @@ Framework-specific labels (added when `.codegraph.yml` specifies a framework):
 | `isInnerFunction` | bool | Function | Declared inside another function? |
 | `riskLevel` | float | Function/Method | Pre-computed risk score |
 | `riskTier` | string | Function/Method | LOW / MEDIUM / HIGH / CRITICAL |
-| `riskLevelV2` | float | Function/Method | Risk with temporal coupling + author entropy |
 | `fanInCount` | int | Function/Method | How many things call this |
 | `fanOutCount` | int | Function/Method | How many things this calls |
 | `lineCount` | int | Function/Method | Lines of code |
@@ -87,6 +94,8 @@ Framework-specific labels (added when `.codegraph.yml` specifies a framework):
 | `architectureLayer` | string | SourceFile | Inferred layer name |
 | `registrationKind` | string | Function/Entrypoint | command, callback, event, middleware |
 | `registrationTrigger` | string | Function/Entrypoint | Trigger pattern (e.g., 'start', 'home_buy') |
+| `sourceKind` | string | edges | Provenance: 'typeChecker', 'frameworkExtractor', 'heuristic', 'postIngest', 'gitMining' |
+| `confidence` | float | edges | 0.0-1.0 confidence of the edge derivation |
 
 ### CALLS Edge Properties
 | Property | Type | Meaning |
@@ -128,7 +137,7 @@ Pre-computed on every Function/Method node via `fanIn × fanOut × log(complexit
 | MEDIUM | 10-100 | Normal caution. |
 | LOW | < 10 | Leaf functions, utilities. Safe to edit. |
 
-`riskLevelV2` adds temporal coupling and author entropy: `riskLevel × (1 + temporalCoupling × 0.1) × (1 + (authorEntropy-1) × 0.15)`
+`riskLevel` incorporates temporal coupling and author entropy: `base × (1 + temporalCoupling × 0.1) × (1 + (authorEntropy-1) × 0.15)`
 
 ---
 
@@ -265,6 +274,9 @@ If the MCP server is running (`node codegraph/dist/mcp/mcp.server.js`), these to
 | `swarm_pheromone` | Deposit coordination signals on nodes. |
 | `swarm_sense` | Read pheromones near a node. |
 | `swarm_graph_refresh` | Re-parse changed files after edits. Workers MUST call before completing. |
+| `state_impact` | Query state field access patterns. Shows readers/writers, detects race conditions. |
+| `registration_map` | Query framework entrypoints. "What happens when the user sends /buy?" |
+| `detect_hotspots` | Ranked list of functions with highest risk × change frequency. |
 
 MCP config for Claude Code (`.mcp.json` in project root):
 ```json
@@ -289,11 +301,16 @@ MCP config for Claude Code (`.mcp.json` in project root):
 cd codegraph && npx tsx parse-and-ingest.ts
 ```
 
-### Full post-ingest pipeline (10 steps):
+### Full post-ingest pipeline (15 steps):
 ```bash
 cd codegraph && bash post-ingest-all.sh
 ```
-Steps: risk scoring → state edges → git frequency → POSSIBLE_CALL → virtual dispatch → registration properties → project node → author ownership → architecture layers → embeddings
+Steps: risk scoring → state edges → git frequency → POSSIBLE_CALL → virtual dispatch → registration properties → project node → author ownership → architecture layers → riskLevel v2 promotion → provenance + confidence → unresolved reference nodes → audit subgraph → test coverage mapping → embeddings
+
+### Run evaluation (regression detection):
+```bash
+cd codegraph && npx tsx run-evaluation.ts [projectId]
+```
 
 ### Run tests:
 ```bash

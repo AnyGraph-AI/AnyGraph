@@ -98,6 +98,9 @@ RETURN f.riskTier, round(f.riskLevel) AS risk, f.fanInCount, f.fanOutCount,
 | `swarm_message` | Agent-to-agent messaging (blocked/conflict/alert/handoff). |
 | `swarm_pheromone` | Deposit coordination signals on nodes. |
 | `swarm_sense` | Read pheromones near a node. |
+| `state_impact` | Query state field access patterns. Shows readers/writers, detects race conditions. |
+| `registration_map` | Query framework entrypoints. "What happens when /buy is sent?" |
+| `detect_hotspots` | Ranked functions with highest risk × change frequency. |
 
 ### Multi-Agent Refactoring
 
@@ -143,6 +146,11 @@ MCP config (`.mcp.json`):
 | `Author` | Git author (from `git blame`) |
 | `ArchitectureLayer` | Inferred layer (Presentation, Domain, Data, etc.) |
 | `Project` | Top-level project node with counts and status |
+| `UnresolvedReference` | Import/call the parser couldn't resolve |
+| `AuditCheck` | Structural invariant check result |
+| `InvariantViolation` | Specific invariant failure |
+| `EvaluationRun` | Metrics snapshot for regression tracking |
+| `MetricResult` | Single metric value from an evaluation run |
 
 ### Edge Types
 | Edge | Meaning | Key Properties |
@@ -160,13 +168,15 @@ MCP config (`.mcp.json`):
 | `BELONGS_TO_LAYER` | SourceFile → ArchitectureLayer | — |
 | `HAS_PARAMETER` | Function → Parameter | — |
 | `HAS_MEMBER` | Class/Interface → Method/Property | — |
+| `ORIGINATES_IN` | UnresolvedReference → Function/File | — |
+| `FOUND` | AuditCheck → InvariantViolation | — |
+| `MEASURED` | EvaluationRun → MetricResult | — |
 
 ### Key Properties
 
 **On Functions/Methods:**
 - `riskLevel` (float) — pre-computed risk score
 - `riskTier` — LOW / MEDIUM / HIGH / CRITICAL
-- `riskLevelV2` (float) — risk with temporal coupling + author entropy factored in
 - `fanInCount` — how many things call this
 - `fanOutCount` — how many things this calls
 - `lineCount` — lines of code
@@ -366,8 +376,8 @@ Use `list_projects` (MCP) or the Project query to find the right `projectId`.
 | MEDIUM | 10-100 | Normal functions. Standard caution. |
 | LOW | < 10 | Leaf functions, utilities, helpers. Safe to edit. |
 
-`riskLevelV2` adds temporal coupling and author entropy:
-`riskLevel × (1 + temporalCoupling × 0.1) × (1 + (authorEntropy-1) × 0.15)`
+`riskLevel` incorporates temporal coupling and author entropy:
+`base × (1 + temporalCoupling × 0.1) × (1 + (authorEntropy-1) × 0.15)`
 
 ---
 
