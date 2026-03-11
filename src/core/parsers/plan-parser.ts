@@ -385,6 +385,36 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       continue;
     }
 
+    // --- "Files touched:" sections — MUST check before H3 handler consumes the line ---
+    if (FILES_TOUCHED.test(line)) {
+      // Read subsequent lines for file paths until next section or empty line after content
+      let hitContent = false;
+      for (let j = i + 1; j < lines.length; j++) {
+        const fline = lines[j].trim();
+        if (fline.startsWith('#')) break;
+        if (fline === '') {
+          if (hitContent) break;
+          continue;
+        }
+        hitContent = true;
+        const fileRefs = extractCrossReferences(fline);
+        for (const ref of fileRefs) {
+          if (ref.type === 'file_path') {
+            if (currentSectionId) {
+              unresolvedRefs.push({
+                taskId: currentSectionId,
+                taskName: `section:${currentSectionKey}:files_touched`,
+                refType: ref.type,
+                refValue: ref.value,
+              });
+              stats.crossRefs++;
+            }
+          }
+        }
+      }
+      continue;
+    }
+
     // --- H3 sub-sections (update section key but don't create separate section nodes) ---
     const h3Match = line.match(/^###\s+(.+)$/);
     if (h3Match && !sprintMatch) {
@@ -450,7 +480,7 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       const risk = tableMatch[4].trim();
 
       // Skip header rows and separators
-      if (taskText.toLowerCase() === 'task' || taskText.includes('---') || gapNum.includes('---')) continue;
+      if (taskText.toLowerCase() === 'task' || taskText.toLowerCase().startsWith('task') && gapNum.toLowerCase().includes('gap') || taskText.includes('---') || gapNum.includes('---')) continue;
 
       taskOrdinalInSection++;
       const taskId = stableId(ctx.projectId, PlanNodeType.TASK, ctx.filePath, currentSectionKey, taskOrdinalInSection);
@@ -499,30 +529,6 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       }
 
       stats.tasks++;
-      continue;
-    }
-
-    // --- "Files touched:" sections — extract file references ---
-    if (FILES_TOUCHED.test(line)) {
-      // Read subsequent lines for file paths until next section
-      for (let j = i + 1; j < lines.length; j++) {
-        const fline = lines[j].trim();
-        if (fline.startsWith('#') || fline === '' || fline.startsWith('|')) break;
-        if (fline.startsWith('-') || fline.startsWith('`')) {
-          const fileRefs = extractCrossReferences(fline);
-          for (const ref of fileRefs) {
-            if (ref.type === 'file_path' && currentSectionId) {
-              unresolvedRefs.push({
-                taskId: currentSectionId,
-                taskName: `section:${currentSectionKey}:files_touched`,
-                refType: ref.type,
-                refValue: ref.value,
-              });
-              stats.crossRefs++;
-            }
-          }
-        }
-      }
       continue;
     }
 

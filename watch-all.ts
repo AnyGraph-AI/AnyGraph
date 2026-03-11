@@ -15,7 +15,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { LoggingMessageNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import neo4j from 'neo4j-driver';
 import dotenv from 'dotenv';
-import { existsSync } from 'fs';
+import { existsSync, watch as fsWatch, type FSWatcher } from 'fs';
+import { parsePlanDirectory, ingestToNeo4j, enrichCrossDomain, type ParsedPlan } from './src/core/parsers/plan-parser.js';
 
 dotenv.config();
 
@@ -208,6 +209,68 @@ async function main() {
     }
   });
   
+  // ========================================
+  // PLAN GRAPH WATCHER
+  // ========================================
+  const PLANS_ROOT = '/home/jonathan/.openclaw/workspace/plans';
+  let planParseTimer: NodeJS.Timeout | null = null;
+  const PLAN_DEBOUNCE_MS = 3000; // 3 second debounce for plan file changes
+
+  async function reParsePlans() {
+    try {
+      const time = new Date().toLocaleTimeString();
+      console.log(`[${time}] 📋 Plan change detected — reparsing...`);
+      
+      const results = await parsePlanDirectory(PLANS_ROOT);
+      let totalNodes = 0;
+      let totalStale = 0;
+      
+      for (const parsed of results) {
+        const ingestResult = await ingestToNeo4j(parsed);
+        totalNodes += ingestResult.nodesUpserted;
+        totalStale += ingestResult.staleRemoved;
+      }
+      
+      // Cross-domain enrichment
+      const enrichResult = await enrichCrossDomain(results);
+      
+      console.log(`[${time}] ✅ Plans updated: ${totalNodes} nodes, ${totalStale} stale removed, ${enrichResult.evidenceEdges} evidence edges`);
+      
+      if (enrichResult.driftDetected.length > 0) {
+        console.log(`[${time}] ⚠️  ${enrichResult.driftDetected.length} drift items detected`);
+      }
+    } catch (err) {
+      console.error(`[plan-watcher] ❌ Parse failed: ${err}`);
+    }
+  }
+
+  // Watch plans directory recursively
+  const planWatchers: FSWatcher[] = [];
+
+  function watchPlansDir(dir: string) {
+    try {
+      const watcher = fsWatch(dir, { recursive: true }, (eventType, filename) => {
+        if (!filename?.endsWith('.md')) return;
+        
+        // Debounce: reset timer on each change
+        if (planParseTimer) clearTimeout(planParseTimer);
+        planParseTimer = setTimeout(reParsePlans, PLAN_DEBOUNCE_MS);
+      });
+      planWatchers.push(watcher);
+      console.log(`   📋 Watching plans: ${dir} (recursive)`);
+    } catch (err) {
+      console.error(`   ❌ Failed to watch plans dir: ${err}`);
+    }
+  }
+
+  if (existsSync(PLANS_ROOT)) {
+    watchPlansDir(PLANS_ROOT);
+    // Initial parse on startup
+    await reParsePlans();
+  } else {
+    console.log('   ℹ️  Plans directory not found, skipping plan watcher');
+  }
+
   // Periodic re-scan for new projects
   setInterval(async () => {
     try {
@@ -230,11 +293,17 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     console.log('\n🛑 Stopping all watchers...');
+    // Stop code watchers
     for (const pid of watchedIds) {
       try {
         await client.callTool({ name: 'stop_watch_project', arguments: { projectId: pid } });
       } catch {}
     }
+    // Stop plan watchers
+    for (const w of planWatchers) {
+      try { w.close(); } catch {}
+    }
+    if (planParseTimer) clearTimeout(planParseTimer);
     await client.close();
     console.log('   Done.');
     process.exit(0);
