@@ -847,6 +847,94 @@ export async function enrichCrossDomain(
       }
     }
 
+    // Phase 1c: Semantic keyword matching — match task descriptions to function names
+    // For tasks with no explicit cross-refs, extract keywords and match against functions
+    {
+      const session = driver.session();
+      try {
+        // Get plan projects linked to code projects
+        const linked = await session.run(
+          `MATCH (pp:PlanProject)
+           WHERE pp.linkedCodeProject IS NOT NULL
+           RETURN pp.projectId AS planPid, pp.linkedCodeProject AS codePid`,
+        );
+
+        for (const linkRec of linked.records) {
+          const planPid = linkRec.get('planPid');
+          const codePid = linkRec.get('codePid');
+
+          // Get tasks without evidence in this plan project
+          const tasks = await session.run(
+            `MATCH (t:Task {projectId: $planPid})
+             WHERE (t.hasCodeEvidence IS NULL OR t.hasCodeEvidence = false)
+             RETURN t.id AS id, t.name AS name`,
+            { planPid },
+          );
+
+          for (const taskRec of tasks.records) {
+            const taskId = taskRec.get('id');
+            const taskName: string = taskRec.get('name');
+
+            // Extract meaningful keywords from task name (lowercase, > 3 chars, no noise)
+            const noise = new Set(['with', 'from', 'that', 'this', 'when', 'than', 'them', 'then',
+              'each', 'only', 'show', 'make', 'into', 'card', 'type', 'mode', 'both', 'open',
+              'used', 'uses', 'none', 'auto', 'adds', 'also', 'same', 'first', 'after', 'before',
+              'button', 'toggle', 'display', 'success', 'default', 'setting', 'settings', 'command',
+              'notification', 'position', 'positions', 'order', 'orders', 'field', 'fields', 'input',
+              'custom', 'amount', 'number', 'text', 'value']);
+            const keywords = taskName
+              .toLowerCase()
+              .replace(/[^a-z0-9\s-_]/g, ' ')
+              .split(/[\s\-_]+/)
+              .filter((w) => w.length > 3 && !noise.has(w));
+
+            if (keywords.length === 0) continue;
+
+            // Build keyword match: function name must contain at least one keyword
+            // and not be a super-generic name
+            for (const keyword of keywords) {
+              if (keyword.length < 4) continue;
+              const result = await session.run(
+                `MATCH (f:CodeNode {projectId: $codePid})
+                 WHERE f.coreType IN ['FunctionDeclaration', 'ArrowFunction', 'MethodDeclaration']
+                 AND toLower(f.name) CONTAINS $keyword
+                 RETURN f.id AS id, f.name AS name
+                 LIMIT 3`,
+                { codePid, keyword },
+              );
+
+              if (result.records.length > 0) {
+                // Found matching functions — create evidence edge
+                for (const funcRec of result.records) {
+                  const fnId = funcRec.get('id');
+                  await session.run(
+                    `MATCH (t {id: $taskId}), (fn {id: $fnId})
+                     MERGE (t)-[r:HAS_CODE_EVIDENCE]->(fn)
+                     ON CREATE SET r.refType = 'semantic_keyword',
+                         r.refValue = $keyword,
+                         r.codeProjectId = $codePid,
+                         r.resolvedAt = datetime()`,
+                    { taskId, fnId, keyword, codePid },
+                  );
+                  evidenceEdges++;
+                }
+
+                await session.run(
+                  `MATCH (t:CodeNode {id: $taskId})
+                   SET t.hasCodeEvidence = true,
+                       t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + $cnt`,
+                  { taskId, cnt: result.records.length },
+                );
+                break; // One keyword match is enough per task
+              }
+            }
+          }
+        }
+      } finally {
+        await session.close();
+      }
+    }
+
     // Phase 2: Drift detection (separate session)
     {
       const session = driver.session();
