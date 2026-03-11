@@ -1655,9 +1655,13 @@ export class TypeScriptParser {
     };
 
     // Extract schema-defined properties
+    // baseProperties take precedence — they were explicitly set by the caller
+    // (e.g., isExported on VariableDeclaration comes from the parent VariableStatement)
     const coreNodeDef = this.coreSchema.nodeTypes[coreType];
     if (coreNodeDef) {
       for (const propDef of coreNodeDef.properties) {
+        // Skip if baseProperties already explicitly set this property
+        if (propDef.name in baseProperties) continue;
         try {
           const value = this.extractProperty(astNode, propDef);
           if (value !== undefined && propDef.name !== 'context') {
