@@ -36,6 +36,7 @@ import { createSwarmPostTaskTool } from './swarm-post-task.tool.js';
 import { createSwarmSenseTool } from './swarm-sense.tool.js';
 import { createTestNeo4jConnectionTool } from './test-neo4j-connection.tool.js';
 import { createTraverseFromNodeTool } from './traverse-from-node.tool.js';
+import { createPlanStatusTool, createPlanDriftTool, createPlanGapsTool, createPlanQueryTool } from './plan-status.tool.js';
 
 // Track tool calls for debugging
 let globalToolCallCount = 0;
@@ -124,4 +125,10 @@ export const registerAllTools = (server: McpServer): void => {
   // Register analysis tools
   createStateImpactTool(server);
   createRegistrationMapTool(server);
+
+  // Register plan graph tools
+  createPlanStatusTool(server);
+  createPlanDriftTool(server);
+  createPlanGapsTool(server);
+  createPlanQueryTool(server);
 };
