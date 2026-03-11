@@ -4,10 +4,9 @@
  * Extracts Task, Milestone, Sprint, Decision, and PlanProject nodes
  * from structured markdown files (checkboxes, headers, tables, status lines).
  * 
- * Output format matches the existing Neo4j ingest pipeline (Neo4jNode/Neo4jEdge arrays).
- * 
- * This is the simplest parser in CodeGraph — designed to be the first test case
- * for the IR layer when it ships.
+ * v2: Stable IDs (file:section:ordinal, not text-dependent)
+ * v2: Cross-domain enrichment (resolve refs against code graph, auto-detect completion)
+ * v2: Upsert-safe (MERGE by stable ID, SET properties — no orphan nodes on re-parse)
  */
 
 import fs from 'fs/promises';
@@ -37,6 +36,7 @@ export enum PlanEdgeType {
   TARGETS = 'TARGETS',
   BASED_ON = 'BASED_ON',
   SUPERSEDES = 'SUPERSEDES',
+  HAS_CODE_EVIDENCE = 'HAS_CODE_EVIDENCE',
 }
 
 export enum TaskStatus {
@@ -69,6 +69,7 @@ export interface ParsedPlan {
   projectName: string;
   nodes: PlanNode[];
   edges: PlanEdge[];
+  unresolvedRefs: UnresolvedRef[];
   stats: {
     files: number;
     tasks: number;
@@ -91,6 +92,13 @@ interface CrossReference {
   raw: string;
 }
 
+export interface UnresolvedRef {
+  taskId: string;
+  taskName: string;
+  refType: string;
+  refValue: string;
+}
+
 // ============================================================================
 // REGEX PATTERNS
 // ============================================================================
@@ -101,13 +109,11 @@ const CHECKBOX_PLANNED = /^(\s*)- \[ \]\s+(.+)$/;
 
 // Header patterns
 const MILESTONE_HEADER = /^##\s+Milestone\s+(\d+)[\s:]*(.*)$/i;
-const SPRINT_HEADER = /^##\s+Sprint\s+(\d+)[\s:]*(.*)$/i;
+const SPRINT_HEADER = /^###?\s+Sprint\s+(\d+)[\s:]*(.*)$/i;
 const GENERIC_H2 = /^##\s+(.+)$/;
-const GENERIC_H3 = /^###\s+(.+)$/;
 
 // Status patterns
 const STATUS_LINE = /\*\*Status\*\*:\s*(.+)/i;
-const PROJECT_LINE = /\*\*Project\*\*:\s*(.+)/i;
 
 // Decision table row
 const DECISION_ROW = /^\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|$/;
@@ -117,11 +123,31 @@ const FILE_PATH_REF = /(?:`([^`]+\.[a-z]{1,4})`|(\b\w+[\w-]*\.(?:ts|js|py|java|g
 const FUNCTION_REF = /`(\w+(?:\.\w+)*)\(\)`/g;
 const PROJECT_ID_REF = /`?(proj_[a-f0-9]{12})`?/g;
 const EFTA_REF = /EFTA\d{8}/g;
-const PROJECT_NAME_REF = /\b(codegraph|godspeed|bible-graph|plan-graph)\b/gi;
 
 // Cross-project dependency patterns
 const DEPENDS_ON_PATTERN = /\*\*DEPENDS_ON\*\*\s+(.+)/i;
 const BLOCKS_PATTERN = /\*\*BLOCKS\*\*\s+(.+)/i;
+
+// ============================================================================
+// STABLE ID GENERATION
+// ============================================================================
+
+/**
+ * Generate stable IDs based on structural position, NOT content.
+ * 
+ * For milestones/sprints: keyed on their number (Milestone 1, Sprint 3)
+ * For tasks: keyed on file + parent section + ordinal within that section
+ * For decisions: keyed on file + decision table ordinal
+ * 
+ * This means:
+ * - Editing task text → same ID → MERGE updates in place
+ * - Checking/unchecking a box → same ID → status updates in place
+ * - Reordering tasks within a section → IDs shift (acceptable — task identity IS position)
+ * - Adding a task in the middle → downstream ordinals shift (acceptable for plan files)
+ */
+function stableId(projectId: string, type: string, file: string, sectionKey: string, ordinal: number): string {
+  return generateDeterministicId(projectId, type, file, `${sectionKey}#${ordinal}`);
+}
 
 // ============================================================================
 // PARSER
@@ -133,7 +159,6 @@ export async function parsePlanDirectory(
 ): Promise<ParsedPlan[]> {
   const results: ParsedPlan[] = [];
 
-  // Discover project directories
   const entries = await fs.readdir(plansRoot, { withFileTypes: true });
   const projectDirs = entries
     .filter((e) => e.isDirectory())
@@ -143,9 +168,7 @@ export async function parsePlanDirectory(
     const projectPath = path.join(plansRoot, dir.name);
     const projectId = `plan_${dir.name.replace(/-/g, '_')}`;
 
-    // Find all markdown files
     const mdFiles = await glob('**/*.md', { cwd: projectPath });
-
     if (mdFiles.length === 0) continue;
 
     const planFiles: PlanFile[] = [];
@@ -169,10 +192,11 @@ export function parsePlanProject(
 ): ParsedPlan {
   const nodes: PlanNode[] = [];
   const edges: PlanEdge[] = [];
+  const unresolvedRefs: UnresolvedRef[] = [];
   const stats = { files: files.length, tasks: 0, milestones: 0, sprints: 0, decisions: 0, crossRefs: 0 };
 
   // Create PlanProject node
-  const projectNodeId = generateDeterministicId(projectId, PlanNodeType.PLAN_PROJECT, '', projectName);
+  const projectNodeId = stableId(projectId, PlanNodeType.PLAN_PROJECT, '', 'root', 0);
   nodes.push({
     id: projectNodeId,
     labels: ['CodeNode', PlanNodeType.PLAN_PROJECT],
@@ -185,24 +209,19 @@ export function parsePlanProject(
   });
 
   for (const file of files) {
-    const fileContext = {
-      projectId,
-      projectNodeId,
-      projectName,
-      filePath: file.relativePath,
-    };
-
-    const { fileNodes, fileEdges, fileStats } = parseFile(file, fileContext);
-    nodes.push(...fileNodes);
-    edges.push(...fileEdges);
-    stats.tasks += fileStats.tasks;
-    stats.milestones += fileStats.milestones;
-    stats.sprints += fileStats.sprints;
-    stats.decisions += fileStats.decisions;
-    stats.crossRefs += fileStats.crossRefs;
+    const ctx: FileContext = { projectId, projectNodeId, projectName, filePath: file.relativePath };
+    const result = parseFile(file, ctx);
+    nodes.push(...result.fileNodes);
+    edges.push(...result.fileEdges);
+    unresolvedRefs.push(...result.unresolvedRefs);
+    stats.tasks += result.fileStats.tasks;
+    stats.milestones += result.fileStats.milestones;
+    stats.sprints += result.fileStats.sprints;
+    stats.decisions += result.fileStats.decisions;
+    stats.crossRefs += result.fileStats.crossRefs;
   }
 
-  return { projectId, projectName, nodes, edges, stats };
+  return { projectId, projectName, nodes, edges, unresolvedRefs, stats };
 }
 
 interface FileContext {
@@ -215,33 +234,24 @@ interface FileContext {
 interface FileParseResult {
   fileNodes: PlanNode[];
   fileEdges: PlanEdge[];
+  unresolvedRefs: UnresolvedRef[];
   fileStats: { tasks: number; milestones: number; sprints: number; decisions: number; crossRefs: number };
 }
 
 function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
   const nodes: PlanNode[] = [];
   const edges: PlanEdge[] = [];
+  const unresolvedRefs: UnresolvedRef[] = [];
   const stats = { tasks: 0, milestones: 0, sprints: 0, decisions: 0, crossRefs: 0 };
 
   const lines = file.content.split('\n');
 
-  // Extract file-level metadata
-  let fileStatus = 'unknown';
-  let fileProjectName = ctx.projectName;
-
-  for (const line of lines) {
-    const statusMatch = line.match(STATUS_LINE);
-    if (statusMatch) fileStatus = statusMatch[1].trim();
-    const projMatch = line.match(PROJECT_LINE);
-    if (projMatch) fileProjectName = projMatch[1].trim();
-  }
-
   // Track current section context
-  let currentMilestoneId: string | null = null;
-  let currentSprintId: string | null = null;
   let currentSectionId: string | null = null;
+  let currentSectionKey: string = 'root';
+  let taskOrdinalInSection = 0;   // resets per section
+  let decisionOrdinal = 0;        // global per file
   let inDecisionTable = false;
-  let decisionTableHeaderSeen = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -255,7 +265,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       const isDone = line.includes('✅');
       const isNext = line.includes('🔜');
 
-      const nodeId = generateDeterministicId(ctx.projectId, PlanNodeType.MILESTONE, ctx.filePath, `milestone-${num}`);
+      const sectionKey = `milestone-${num}`;
+      const nodeId = stableId(ctx.projectId, PlanNodeType.MILESTONE, ctx.filePath, sectionKey, 0);
       nodes.push({
         id: nodeId,
         labels: ['CodeNode', PlanNodeType.MILESTONE],
@@ -278,9 +289,9 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
         properties: { projectId: ctx.projectId },
       });
 
-      currentMilestoneId = nodeId;
       currentSectionId = nodeId;
-      currentSprintId = null;
+      currentSectionKey = sectionKey;
+      taskOrdinalInSection = 0;
       stats.milestones++;
       inDecisionTable = false;
       continue;
@@ -292,7 +303,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       const num = sprintMatch[1];
       const title = sprintMatch[2].trim();
 
-      const nodeId = generateDeterministicId(ctx.projectId, PlanNodeType.SPRINT, ctx.filePath, `sprint-${num}`);
+      const sectionKey = `sprint-${num}`;
+      const nodeId = stableId(ctx.projectId, PlanNodeType.SPRINT, ctx.filePath, sectionKey, 0);
       nodes.push({
         id: nodeId,
         labels: ['CodeNode', PlanNodeType.SPRINT],
@@ -315,9 +327,9 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
         properties: { projectId: ctx.projectId },
       });
 
-      currentSprintId = nodeId;
       currentSectionId = nodeId;
-      currentMilestoneId = null;
+      currentSectionKey = sectionKey;
+      taskOrdinalInSection = 0;
       stats.sprints++;
       inDecisionTable = false;
       continue;
@@ -328,16 +340,17 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
     if (h2Match && !milestoneMatch && !sprintMatch) {
       const title = h2Match[1].trim();
 
-      // Check if this is a decision table section
+      // Stable section key from sanitized title
+      const sanitized = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').substring(0, 40);
+      const sectionKey = `section-${sanitized}`;
+
       if (title.toLowerCase().includes('decision')) {
         inDecisionTable = true;
-        decisionTableHeaderSeen = false;
       } else {
         inDecisionTable = false;
       }
 
-      // Create a milestone-like node for non-standard sections
-      const nodeId = generateDeterministicId(ctx.projectId, PlanNodeType.MILESTONE, ctx.filePath, `section-${lineNum}`);
+      const nodeId = stableId(ctx.projectId, PlanNodeType.MILESTONE, ctx.filePath, sectionKey, 0);
       nodes.push({
         id: nodeId,
         labels: ['CodeNode', PlanNodeType.MILESTONE],
@@ -361,8 +374,23 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       });
 
       currentSectionId = nodeId;
-      currentMilestoneId = nodeId;
-      currentSprintId = null;
+      currentSectionKey = sectionKey;
+      taskOrdinalInSection = 0;
+      continue;
+    }
+
+    // --- H3 sub-sections (update section key but don't create separate section nodes) ---
+    const h3Match = line.match(/^###\s+(.+)$/);
+    if (h3Match && !sprintMatch) {
+      const title = h3Match[1].trim();
+      const sanitized = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').substring(0, 40);
+      // Sub-section key includes parent
+      currentSectionKey = `${currentSectionKey}/${sanitized}`;
+      taskOrdinalInSection = 0;
+
+      if (title.toLowerCase().includes('decision')) {
+        inDecisionTable = true;
+      }
       continue;
     }
 
@@ -370,43 +398,39 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
     if (inDecisionTable) {
       const rowMatch = line.match(DECISION_ROW);
       if (rowMatch) {
-        // Skip header row and separator
         if (rowMatch[1].includes('---') || rowMatch[2].includes('---')) continue;
-        if (rowMatch[1].toLowerCase().trim() === 'decision' || rowMatch[1].toLowerCase().trim() === '|') {
-          decisionTableHeaderSeen = true;
-          continue;
-        }
-
         const decision = rowMatch[1].trim();
         const choice = rowMatch[2].trim();
         const rationale = rowMatch[3].trim();
 
-        if (decision && choice && !decision.startsWith('--')) {
-          const nodeId = generateDeterministicId(ctx.projectId, PlanNodeType.DECISION, ctx.filePath, `decision-${decision.substring(0, 40)}`);
-          nodes.push({
-            id: nodeId,
-            labels: ['CodeNode', PlanNodeType.DECISION],
-            properties: {
-              projectId: ctx.projectId,
-              name: decision,
-              choice,
-              rationale,
-              coreType: PlanNodeType.DECISION,
-              filePath: ctx.filePath,
-              line: lineNum,
-            },
-          });
+        if (decision.toLowerCase() === 'decision' || decision === '|') continue;
+        if (!decision || !choice || decision.startsWith('--')) continue;
 
-          edges.push({
-            id: `${nodeId}->PART_OF->${ctx.projectNodeId}`,
-            type: PlanEdgeType.PART_OF,
-            source: nodeId,
-            target: ctx.projectNodeId,
-            properties: { projectId: ctx.projectId },
-          });
+        decisionOrdinal++;
+        const nodeId = stableId(ctx.projectId, PlanNodeType.DECISION, ctx.filePath, 'decisions', decisionOrdinal);
+        nodes.push({
+          id: nodeId,
+          labels: ['CodeNode', PlanNodeType.DECISION],
+          properties: {
+            projectId: ctx.projectId,
+            name: decision,
+            choice,
+            rationale,
+            coreType: PlanNodeType.DECISION,
+            filePath: ctx.filePath,
+            line: lineNum,
+          },
+        });
 
-          stats.decisions++;
-        }
+        edges.push({
+          id: `${nodeId}->PART_OF->${ctx.projectNodeId}`,
+          type: PlanEdgeType.PART_OF,
+          source: nodeId,
+          target: ctx.projectNodeId,
+          properties: { projectId: ctx.projectId },
+        });
+
+        stats.decisions++;
         continue;
       }
     }
@@ -420,13 +444,12 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       const indent = checkboxMatch[1].length;
       const text = checkboxMatch[2].trim();
       const status = doneMatch ? TaskStatus.DONE : TaskStatus.PLANNED;
-
-      // Determine if sub-task (indented)
       const isSubTask = indent >= 2;
 
-      const taskId = generateDeterministicId(ctx.projectId, PlanNodeType.TASK, ctx.filePath, `task-${lineNum}-${text.substring(0, 50)}`);
+      taskOrdinalInSection++;
+      const taskId = stableId(ctx.projectId, PlanNodeType.TASK, ctx.filePath, currentSectionKey, taskOrdinalInSection);
 
-      // Extract cross-references from task text
+      // Extract cross-references
       const crossRefs = extractCrossReferences(text);
       stats.crossRefs += crossRefs.length;
 
@@ -442,13 +465,18 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
           indentLevel: indent,
           filePath: ctx.filePath,
           line: lineNum,
+          sectionKey: currentSectionKey,
+          ordinal: taskOrdinalInSection,
           crossRefCount: crossRefs.length,
           crossRefs: crossRefs.map((r) => `${r.type}:${r.value}`).join('|'),
+          // These get filled by enrichment:
+          hasCodeEvidence: false,
+          codeEvidenceCount: 0,
         },
       });
 
       // Link to parent section
-      const parentId = currentSprintId || currentMilestoneId || currentSectionId || ctx.projectNodeId;
+      const parentId = currentSectionId || ctx.projectNodeId;
       edges.push({
         id: `${taskId}->PART_OF->${parentId}`,
         type: PlanEdgeType.PART_OF,
@@ -457,23 +485,14 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
         properties: { projectId: ctx.projectId },
       });
 
-      // Create MODIFIES edges for file path cross-references
+      // Track unresolved refs for cross-domain enrichment
       for (const ref of crossRefs) {
         if (ref.type === 'file_path' || ref.type === 'function') {
-          // Store as properties — actual cross-domain linking happens in enrichment
-          // For now we record the reference so the graph knows about it
-          edges.push({
-            id: `${taskId}->MODIFIES->${ref.type}:${ref.value}`,
-            type: PlanEdgeType.MODIFIES,
-            source: taskId,
-            target: `__UNRESOLVED__:${ref.type}:${ref.value}`,
-            properties: {
-              projectId: ctx.projectId,
-              refType: ref.type,
-              refValue: ref.value,
-              rawText: ref.raw,
-              resolved: false,
-            },
+          unresolvedRefs.push({
+            taskId,
+            taskName: text,
+            refType: ref.type,
+            refValue: ref.value,
           });
         }
       }
@@ -485,36 +504,26 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
     // --- Cross-project dependency lines ---
     const dependsMatch = line.match(DEPENDS_ON_PATTERN);
     if (dependsMatch && currentSectionId) {
-      edges.push({
-        id: `${currentSectionId}->DEPENDS_ON->__UNRESOLVED__:${dependsMatch[1].trim()}`,
-        type: PlanEdgeType.DEPENDS_ON,
-        source: currentSectionId,
-        target: `__UNRESOLVED__:dep:${dependsMatch[1].trim()}`,
-        properties: {
-          projectId: ctx.projectId,
-          description: dependsMatch[1].trim(),
-          resolved: false,
-        },
+      unresolvedRefs.push({
+        taskId: currentSectionId,
+        taskName: `section:${currentSectionKey}`,
+        refType: 'depends_on',
+        refValue: dependsMatch[1].trim(),
       });
     }
 
     const blocksMatch = line.match(BLOCKS_PATTERN);
     if (blocksMatch && currentSectionId) {
-      edges.push({
-        id: `${currentSectionId}->BLOCKS->__UNRESOLVED__:${blocksMatch[1].trim()}`,
-        type: PlanEdgeType.BLOCKS,
-        source: currentSectionId,
-        target: `__UNRESOLVED__:block:${blocksMatch[1].trim()}`,
-        properties: {
-          projectId: ctx.projectId,
-          description: blocksMatch[1].trim(),
-          resolved: false,
-        },
+      unresolvedRefs.push({
+        taskId: currentSectionId,
+        taskName: `section:${currentSectionKey}`,
+        refType: 'blocks',
+        refValue: blocksMatch[1].trim(),
       });
     }
   }
 
-  return { fileNodes: nodes, fileEdges: edges, fileStats: stats };
+  return { fileNodes: nodes, fileEdges: edges, unresolvedRefs, fileStats: stats };
 }
 
 // ============================================================================
@@ -525,8 +534,8 @@ function extractCrossReferences(text: string): CrossReference[] {
   const refs: CrossReference[] = [];
   const seen = new Set<string>();
 
-  // File paths
   let match: RegExpExecArray | null;
+
   const filePathRegex = new RegExp(FILE_PATH_REF.source, FILE_PATH_REF.flags);
   while ((match = filePathRegex.exec(text)) !== null) {
     const value = match[1] || match[2];
@@ -537,7 +546,6 @@ function extractCrossReferences(text: string): CrossReference[] {
     }
   }
 
-  // Function references
   const funcRegex = new RegExp(FUNCTION_REF.source, FUNCTION_REF.flags);
   while ((match = funcRegex.exec(text)) !== null) {
     const key = `func:${match[1]}`;
@@ -547,7 +555,6 @@ function extractCrossReferences(text: string): CrossReference[] {
     }
   }
 
-  // Project IDs
   const projIdRegex = new RegExp(PROJECT_ID_REF.source, PROJECT_ID_REF.flags);
   while ((match = projIdRegex.exec(text)) !== null) {
     const key = `proj:${match[1]}`;
@@ -557,7 +564,6 @@ function extractCrossReferences(text: string): CrossReference[] {
     }
   }
 
-  // EFTA numbers
   const eftaRegex = new RegExp(EFTA_REF.source, EFTA_REF.flags);
   while ((match = eftaRegex.exec(text)) !== null) {
     const key = `efta:${match[0]}`;
@@ -571,79 +577,251 @@ function extractCrossReferences(text: string): CrossReference[] {
 }
 
 // ============================================================================
-// NEO4J INGEST
+// CROSS-DOMAIN ENRICHMENT
 // ============================================================================
 
-export function generateCypherStatements(parsed: ParsedPlan): string[] {
-  const statements: string[] = [];
+/**
+ * Resolve unresolved references against the code graph.
+ * Creates HAS_CODE_EVIDENCE edges from Task nodes to SourceFile/Function nodes.
+ * Also updates task properties: hasCodeEvidence, codeEvidenceCount.
+ * 
+ * This is the key: a task that says "Build plan-parser.ts" gets linked to the
+ * actual SourceFile node if it exists. The plan graph can then answer
+ * "what's really done?" without relying on anyone checking a box.
+ */
+export async function enrichCrossDomain(
+  parsedPlans: ParsedPlan[],
+  neo4jUri: string = 'bolt://localhost:7687',
+  neo4jUser: string = 'neo4j',
+  neo4jPassword: string = 'codegraph',
+): Promise<{ resolved: number; notFound: number; evidenceEdges: number; driftDetected: DriftItem[] }> {
+  const neo4j = await import('neo4j-driver');
+  const driver = neo4j.default.driver(neo4jUri, neo4j.default.auth.basic(neo4jUser, neo4jPassword));
 
-  // Create constraint if not exists
-  statements.push(
-    `CREATE CONSTRAINT IF NOT EXISTS FOR (n:CodeNode) REQUIRE n.id IS UNIQUE`,
-  );
+  let resolved = 0;
+  let notFound = 0;
+  let evidenceEdges = 0;
+  const driftDetected: DriftItem[] = [];
 
-  // Batch create nodes
-  for (const node of parsed.nodes) {
-    const labels = node.labels.join(':');
-    const props = { ...node.properties, id: node.id };
-    statements.push(
-      `MERGE (n:${labels} {id: $id}) SET n += $props`,
-    );
-  }
+  try {
+    // Collect all unresolved refs
+    const allRefs = parsedPlans.flatMap((p) => p.unresolvedRefs);
 
-  // Batch create edges (skip unresolved targets for now)
-  for (const edge of parsed.edges) {
-    if (edge.target.startsWith('__UNRESOLVED__')) {
-      // Store as pending edge — cross-domain resolution happens later
-      continue;
+    // Phase 1: Resolve refs and create evidence edges
+    {
+      const session = driver.session();
+      try {
+        for (const ref of allRefs) {
+          if (ref.refType === 'file_path') {
+            const filename = path.basename(ref.refValue);
+            const result = await session.run(
+              `MATCH (sf:SourceFile)
+               WHERE sf.name ENDS WITH $filename OR sf.filePath ENDS WITH $refValue
+               RETURN sf.id AS id, sf.name AS name, sf.filePath AS filePath, sf.projectId AS projectId
+               LIMIT 5`,
+              { filename, refValue: ref.refValue },
+            );
+
+            if (result.records.length > 0) {
+              resolved++;
+              for (const record of result.records) {
+                const sfId = record.get('id');
+                const sfProjectId = record.get('projectId');
+
+                // Use label-agnostic match — code graph nodes may not have CodeNode label
+                await session.run(
+                  `MATCH (t {id: $taskId}), (sf {id: $sfId})
+                   MERGE (t)-[r:HAS_CODE_EVIDENCE]->(sf)
+                   SET r.refType = 'file_path',
+                       r.refValue = $refValue,
+                       r.codeProjectId = $sfProjectId,
+                       r.resolvedAt = datetime()`,
+                  { taskId: ref.taskId, sfId, refValue: ref.refValue, sfProjectId },
+                );
+                evidenceEdges++;
+              }
+
+              await session.run(
+                `MATCH (t:CodeNode {id: $taskId})
+                 SET t.hasCodeEvidence = true,
+                     t.codeEvidenceCount = $count`,
+                { taskId: ref.taskId, count: result.records.length },
+              );
+            } else {
+              notFound++;
+            }
+          } else if (ref.refType === 'function') {
+            const funcName = ref.refValue.split('.').pop() || ref.refValue;
+            const result = await session.run(
+              `MATCH (fn)
+               WHERE (fn:Function OR fn:Method OR fn:Variable) AND fn.name = $funcName
+               RETURN fn.id AS id, fn.name AS name, fn.projectId AS projectId
+               LIMIT 5`,
+              { funcName },
+            );
+
+            if (result.records.length > 0) {
+              resolved++;
+              for (const record of result.records) {
+                const fnId = record.get('id');
+                const fnProjectId = record.get('projectId');
+
+                // Use label-agnostic match — code graph nodes may not have CodeNode label
+                await session.run(
+                  `MATCH (t {id: $taskId}), (fn {id: $fnId})
+                   MERGE (t)-[r:HAS_CODE_EVIDENCE]->(fn)
+                   SET r.refType = 'function',
+                       r.refValue = $refValue,
+                       r.codeProjectId = $fnProjectId,
+                       r.resolvedAt = datetime()`,
+                  { taskId: ref.taskId, fnId, refValue: ref.refValue, fnProjectId },
+                );
+                evidenceEdges++;
+              }
+
+              await session.run(
+                `MATCH (t:CodeNode {id: $taskId})
+                 SET t.hasCodeEvidence = true,
+                     t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + $count`,
+                { taskId: ref.taskId, count: result.records.length },
+              );
+            } else {
+              notFound++;
+            }
+          }
+        }
+      } finally {
+        await session.close();
+      }
     }
-    statements.push(
-      `MATCH (a:CodeNode {id: $source}), (b:CodeNode {id: $target}) MERGE (a)-[r:${edge.type}]->(b) SET r += $props`,
-    );
+
+    // Phase 2: Drift detection (separate session)
+    {
+      const session = driver.session();
+      try {
+        // Tasks marked 'planned' but with code evidence (forgotten checkboxes)
+        const driftResult = await session.run(
+          `MATCH (t:Task {status: 'planned'})
+           WHERE t.hasCodeEvidence = true
+           RETURN t.id AS id, t.name AS name, t.filePath AS file, t.line AS line, t.projectId AS project`,
+        );
+
+        for (const record of driftResult.records) {
+          driftDetected.push({
+            taskId: record.get('id'),
+            taskName: record.get('name'),
+            file: record.get('file'),
+            line: record.get('line')?.toNumber?.() || record.get('line'),
+            project: record.get('project'),
+            reason: 'Task marked planned but code evidence exists — likely done but checkbox not checked',
+          });
+        }
+
+        // Tasks marked 'done' but referenced code not found
+        const revertResult = await session.run(
+          `MATCH (t:Task {status: 'done'})
+           WHERE t.crossRefCount > 0 AND (t.hasCodeEvidence IS NULL OR t.hasCodeEvidence = false)
+           RETURN t.id AS id, t.name AS name, t.filePath AS file, t.line AS line, t.projectId AS project`,
+        );
+
+        for (const record of revertResult.records) {
+          driftDetected.push({
+            taskId: record.get('id'),
+            taskName: record.get('name'),
+            file: record.get('file'),
+            line: record.get('line')?.toNumber?.() || record.get('line'),
+            project: record.get('project'),
+            reason: 'Task marked done but referenced code not found — code may have been deleted or moved',
+          });
+        }
+      } finally {
+        await session.close();
+      }
+    }
+  } finally {
+    await driver.close();
   }
 
-  return statements;
+  return { resolved, notFound, evidenceEdges, driftDetected };
 }
+
+export interface DriftItem {
+  taskId: string;
+  taskName: string;
+  file: string;
+  line: number;
+  project: string;
+  reason: string;
+}
+
+// ============================================================================
+// NEO4J INGEST (UPSERT-SAFE)
+// ============================================================================
 
 export async function ingestToNeo4j(
   parsed: ParsedPlan,
   neo4jUri: string = 'bolt://localhost:7687',
   neo4jUser: string = 'neo4j',
   neo4jPassword: string = 'codegraph',
-): Promise<{ nodesCreated: number; edgesCreated: number; unresolvedEdges: number }> {
-  // Dynamic import to avoid hard dependency
+): Promise<{ nodesUpserted: number; edgesCreated: number; staleRemoved: number }> {
   const neo4j = await import('neo4j-driver');
   const driver = neo4j.default.driver(neo4jUri, neo4j.default.auth.basic(neo4jUser, neo4jPassword));
   const session = driver.session();
 
-  let nodesCreated = 0;
+  let nodesUpserted = 0;
   let edgesCreated = 0;
-  let unresolvedEdges = 0;
+  let staleRemoved = 0;
+
+  // Collect all current node IDs so we can detect stale ones
+  const currentNodeIds = new Set(parsed.nodes.map((n) => n.id));
 
   try {
-    // Index already exists from code graph setup — skip constraint creation
-    // The existing index on :CodeNode {id} handles uniqueness
+    // Phase 1: Remove stale nodes from previous parse that no longer exist
+    // This handles: deleted tasks, restructured sections, removed milestones
+    const existingResult = await session.run(
+      `MATCH (n:CodeNode {projectId: $projectId})
+       WHERE n.coreType IN ['Task', 'Milestone', 'Sprint', 'Decision', 'PlanProject']
+       RETURN n.id AS id`,
+      { projectId: parsed.projectId },
+    );
 
-    // Ingest nodes in batches
-    const nodeBatchSize = 100;
-    for (let i = 0; i < parsed.nodes.length; i += nodeBatchSize) {
-      const batch = parsed.nodes.slice(i, i + nodeBatchSize);
-      for (const node of batch) {
-        const labels = node.labels.join(':');
-        await session.run(
-          `MERGE (n:${labels} {id: $id}) SET n += $props`,
-          { id: node.id, props: { ...node.properties, id: node.id } },
-        );
-        nodesCreated++;
+    const staleIds: string[] = [];
+    for (const record of existingResult.records) {
+      const id = record.get('id');
+      if (!currentNodeIds.has(id)) {
+        staleIds.push(id);
       }
     }
 
-    // Ingest resolved edges
+    if (staleIds.length > 0) {
+      // Delete stale nodes and their edges
+      await session.run(
+        `UNWIND $ids AS staleId
+         MATCH (n:CodeNode {id: staleId})
+         DETACH DELETE n`,
+        { ids: staleIds },
+      );
+      staleRemoved = staleIds.length;
+    }
+
+    // Phase 2: Upsert all current nodes
+    for (const node of parsed.nodes) {
+      const labels = node.labels.join(':');
+      await session.run(
+        `MERGE (n:${labels} {id: $id}) SET n += $props`,
+        { id: node.id, props: { ...node.properties, id: node.id } },
+      );
+      nodesUpserted++;
+    }
+
+    // Phase 3: Recreate edges (delete old PART_OF for this project first, then recreate)
+    await session.run(
+      `MATCH (a:CodeNode {projectId: $projectId})-[r:PART_OF]->(b:CodeNode {projectId: $projectId})
+       DELETE r`,
+      { projectId: parsed.projectId },
+    );
+
     for (const edge of parsed.edges) {
-      if (edge.target.startsWith('__UNRESOLVED__')) {
-        unresolvedEdges++;
-        continue;
-      }
       try {
         await session.run(
           `MATCH (a:CodeNode {id: $source}), (b:CodeNode {id: $target})
@@ -653,19 +831,19 @@ export async function ingestToNeo4j(
         );
         edgesCreated++;
       } catch (err: any) {
-        // Edge target might not exist yet — that's expected for cross-project refs
-        console.warn(`Edge skipped (${edge.type}): ${edge.source} -> ${edge.target}: ${err.message}`);
+        // Acceptable — edge target might not exist for cross-project refs
       }
     }
 
-    // Create Project node if it doesn't exist (for linking to code graph projects)
+    // Phase 4: Update Project node
     await session.run(
       `MERGE (p:Project:CodeNode {projectId: $projectId})
-       SET p.name = $name, p.type = 'plan', p.nodeCount = $nodeCount, p.edgeCount = $edgeCount`,
+       SET p.name = $name, p.type = 'plan', p.nodeCount = $nodeCount, p.edgeCount = $edgeCount,
+           p.lastParsed = datetime()`,
       {
         projectId: parsed.projectId,
         name: parsed.projectName,
-        nodeCount: nodesCreated,
+        nodeCount: nodesUpserted,
         edgeCount: edgesCreated,
       },
     );
@@ -674,7 +852,7 @@ export async function ingestToNeo4j(
     await driver.close();
   }
 
-  return { nodesCreated, edgesCreated, unresolvedEdges };
+  return { nodesUpserted, edgesCreated, staleRemoved };
 }
 
 // ============================================================================
@@ -684,50 +862,79 @@ export async function ingestToNeo4j(
 export async function main() {
   const positionalArgs = process.argv.slice(2).filter((a) => !a.startsWith('--'));
   const plansRoot = positionalArgs[0] || path.resolve(process.cwd(), '../plans');
-  const filterArg = positionalArgs[1]; // optional: "codegraph,godspeed"
+  const filterArg = positionalArgs[1];
   const projectFilter = filterArg ? filterArg.split(',') : undefined;
+  const doIngest = process.argv.includes('--ingest');
+  const doEnrich = process.argv.includes('--enrich');
+  const doJson = process.argv.includes('--json');
 
-  console.log(`\n📋 Plan Parser — parsing ${plansRoot}`);
+  console.log(`\n📋 Plan Parser v2 — parsing ${plansRoot}`);
   if (projectFilter) console.log(`  Filter: ${projectFilter.join(', ')}`);
 
   const results = await parsePlanDirectory(plansRoot, projectFilter);
 
   let totalNodes = 0;
   let totalEdges = 0;
+  let totalUnresolved = 0;
 
   for (const parsed of results) {
+    const doneCount = parsed.nodes.filter((n) => n.properties.status === 'done').length;
     console.log(`\n  📁 ${parsed.projectName} (${parsed.projectId})`);
     console.log(`     Files: ${parsed.stats.files}`);
-    console.log(`     Tasks: ${parsed.stats.tasks} (${parsed.nodes.filter((n) => n.properties.status === 'done').length} done)`);
+    console.log(`     Tasks: ${parsed.stats.tasks} (${doneCount} done)`);
     console.log(`     Milestones: ${parsed.stats.milestones}`);
     console.log(`     Sprints: ${parsed.stats.sprints}`);
     console.log(`     Decisions: ${parsed.stats.decisions}`);
-    console.log(`     Cross-refs: ${parsed.stats.crossRefs}`);
+    console.log(`     Cross-refs: ${parsed.stats.crossRefs} (${parsed.unresolvedRefs.length} to resolve)`);
     console.log(`     Total: ${parsed.nodes.length} nodes, ${parsed.edges.length} edges`);
 
     totalNodes += parsed.nodes.length;
     totalEdges += parsed.edges.length;
+    totalUnresolved += parsed.unresolvedRefs.length;
   }
 
-  console.log(`\n  📊 Total: ${totalNodes} nodes, ${totalEdges} edges across ${results.length} projects`);
+  console.log(`\n  📊 Total: ${totalNodes} nodes, ${totalEdges} edges, ${totalUnresolved} refs to resolve`);
 
-  // Ingest to Neo4j if --ingest flag
-  if (process.argv.includes('--ingest')) {
-    console.log('\n  🔄 Ingesting to Neo4j...');
+  // Ingest to Neo4j
+  if (doIngest) {
+    console.log('\n  🔄 Ingesting to Neo4j (upsert-safe)...');
     for (const parsed of results) {
       const result = await ingestToNeo4j(parsed);
-      console.log(`     ${parsed.projectName}: ${result.nodesCreated} nodes, ${result.edgesCreated} edges, ${result.unresolvedEdges} unresolved`);
+      console.log(`     ${parsed.projectName}: ${result.nodesUpserted} upserted, ${result.edgesCreated} edges, ${result.staleRemoved} stale removed`);
     }
-    console.log('  ✅ Done.');
-  } else {
-    console.log('\n  ℹ️  Run with --ingest to load into Neo4j');
+    console.log('  ✅ Ingest done.');
   }
 
-  // Write JSON output if --json flag
-  if (process.argv.includes('--json')) {
+  // Cross-domain enrichment
+  if (doEnrich || doIngest) {
+    if (totalUnresolved > 0) {
+      console.log('\n  🔗 Cross-domain enrichment...');
+      const enrichResult = await enrichCrossDomain(results);
+      console.log(`     Resolved: ${enrichResult.resolved}/${enrichResult.resolved + enrichResult.notFound} refs`);
+      console.log(`     Evidence edges: ${enrichResult.evidenceEdges}`);
+
+      if (enrichResult.driftDetected.length > 0) {
+        console.log(`\n  ⚠️  DRIFT DETECTED (${enrichResult.driftDetected.length} items):`);
+        for (const drift of enrichResult.driftDetected) {
+          console.log(`     ${drift.project} ${drift.file}:${drift.line}`);
+          console.log(`       ${drift.taskName}`);
+          console.log(`       → ${drift.reason}`);
+        }
+      } else {
+        console.log('     No drift detected.');
+      }
+    }
+  }
+
+  // JSON output
+  if (doJson) {
     const outPath = path.resolve(process.cwd(), 'plan-graph.json');
     await fs.writeFile(outPath, JSON.stringify(results, null, 2));
     console.log(`  📄 JSON written to ${outPath}`);
+  }
+
+  if (!doIngest && !doEnrich) {
+    console.log('\n  ℹ️  Run with --ingest to load into Neo4j (includes enrichment)');
   }
 }
 
