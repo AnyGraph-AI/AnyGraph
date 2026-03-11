@@ -10,6 +10,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
+import neo4j from 'neo4j-driver';
 import { Neo4jService } from '../../storage/neo4j/neo4j.service.js';
 import { createErrorResponse, createSuccessResponse } from '../utils.js';
 
@@ -382,6 +383,92 @@ export function createPlanQueryTool(server: McpServer) {
           });
           lines.push(`- ${parts.join(' | ')}`);
         }
+
+        return createSuccessResponse(lines.join('\n'));
+      } catch (err: any) {
+        return createErrorResponse(err.message || String(err));
+      }
+    },
+  );
+}
+
+// ============================================================================
+// plan_priority — Dynamic priority ranking: what to build next
+// ============================================================================
+
+export function createPlanPriorityTool(server: McpServer) {
+  const neo4jService = new Neo4jService();
+
+  server.tool(
+    'plan_priority',
+    'Dynamic priority ranking of planned tasks. Scores based on downstream impact: ' +
+    'tasks in milestones that BLOCK other milestones score higher. ' +
+    'Priority recomputes dynamically as tasks are completed. ' +
+    'Use this to answer "what should I work on next?"',
+    {
+      projectFilter: z.string().optional().describe(
+        'Filter to a specific plan project (e.g., "codegraph"). Omit for all.',
+      ),
+      limit: z.number().optional().describe(
+        'Max tasks to return (default 20)',
+      ),
+    },
+    async (args) => {
+      try {
+        const filterClause = args.projectFilter
+          ? `AND t.projectId = '${planProjectId(args.projectFilter)}'`
+          : '';
+        const limit = args.limit ?? 20;
+
+        const results = await neo4jService.run(
+          `MATCH (t:Task {status: 'planned'})
+           WHERE true ${filterClause}
+           MATCH (t)-[:PART_OF]->(m:Milestone)
+           OPTIONAL MATCH (m)-[:BLOCKS*1..3]->(downstream:Milestone)
+           OPTIONAL MATCH (downstream)<-[:PART_OF]-(dt:Task {status: 'planned'})
+           WITH t, m,
+                count(DISTINCT downstream) AS downstreamMilestones,
+                count(DISTINCT dt) AS downstreamTasks,
+                CASE WHEN t.hasCodeEvidence = true THEN 2 ELSE 0 END AS evidenceBoost
+           WITH t, m, downstreamMilestones, downstreamTasks, evidenceBoost,
+                (downstreamMilestones * 10 + downstreamTasks + evidenceBoost) AS priority
+           RETURN t.name AS task, m.name AS milestone, t.projectId AS project,
+                  priority, downstreamMilestones AS unblocksMilestones,
+                  downstreamTasks AS unblocksDownstreamTasks,
+                  t.hasCodeEvidence AS hasEvidence
+           ORDER BY priority DESC, t.name
+           LIMIT ${limit}`,
+        );
+
+        const lines: string[] = ['# What To Build Next (Dynamic Priority)\n'];
+        let currentMilestone = '';
+
+        for (const row of results) {
+          const task = str(row.task);
+          const milestone = str(row.milestone);
+          const project = str(row.project).replace('plan_', '');
+          const pts = num(row.priority);
+          const unblockMs = num(row.unblocksMilestones);
+          const unblockTs = num(row.unblocksDownstreamTasks);
+          const hasEv = row.hasEvidence ? '⚡' : '';
+
+          if (milestone !== currentMilestone) {
+            currentMilestone = milestone;
+            lines.push(`\n## ${milestone} [${project}]`);
+            if (unblockMs > 0) {
+              lines.push(`   Unblocks ${unblockMs} milestone(s), ${unblockTs} downstream task(s)\n`);
+            }
+          }
+          lines.push(`- [${pts}pts] ${hasEv} ${task}`);
+        }
+
+        if (results.length === 0) {
+          lines.push('No planned tasks found.');
+        }
+
+        lines.push(`\n---`);
+        lines.push(`Priority = (downstream_milestones × 10) + downstream_tasks + evidence_boost`);
+        lines.push(`Higher score = unblocks more work. Build these first.`);
 
         return createSuccessResponse(lines.join('\n'));
       } catch (err: any) {

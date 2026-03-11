@@ -11,7 +11,7 @@
  */
 
 import { z } from 'zod';
-import { SelfAuditEngine, AuditVerdict } from '../../core/claims/self-audit.js';
+import { SelfAuditEngine, AuditVerdictRecord } from '../../core/claims/self-audit.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 export function createSelfAuditTool(server: McpServer): void {
@@ -80,7 +80,7 @@ export function createSelfAuditTool(server: McpServer): void {
             return { content: [{ type: 'text', text: 'Error: verdict requires taskId, verdictType, and reasoning' }] };
           }
           
-          const verdict: AuditVerdict = {
+          const verdict: AuditVerdictRecord = {
             taskId: args.taskId,
             verdict: args.verdictType,
             confidence: args.confidence ?? 0.8,

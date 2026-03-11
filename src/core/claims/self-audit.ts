@@ -51,9 +51,9 @@ export interface AuditQuestion {
   context: string;           // Full context for the agent
 }
 
-export interface AuditVerdict {
+export interface AuditVerdictRecord {
   taskId: string;
-  verdict: 'CONFIRMED' | 'FALSE_POSITIVE' | 'PARTIAL';
+  verdict: AuditVerdict;
   confidence: number;        // 0.0-1.0
   reasoning: string;         // Why this verdict
   missingParts?: string[];   // For PARTIAL: what's not done
@@ -66,7 +66,7 @@ export interface AuditReport {
   confirmed: number;
   falsePositive: number;
   partial: number;
-  verdicts: AuditVerdict[];
+  verdicts: AuditVerdictRecord[];
   timestamp: string;
 }
 
@@ -186,7 +186,7 @@ Respond with a JSON object: { "verdict": "CONFIRMED|FALSE_POSITIVE|PARTIAL", "co
   // Step 3: Apply verdicts to graph
   // ============================================================================
 
-  async applyVerdict(verdict: AuditVerdict): Promise<void> {
+  async applyVerdict(verdict: AuditVerdictRecord): Promise<void> {
     const session = this.driver.session();
     try {
       const claimId = `audit:${verdict.taskId}:${Date.now()}`;
@@ -259,7 +259,7 @@ Respond with a JSON object: { "verdict": "CONFIRMED|FALSE_POSITIVE|PARTIAL", "co
   // Step 4: Generate audit report
   // ============================================================================
 
-  generateReport(projectName: string, verdicts: AuditVerdict[]): AuditReport {
+  generateReport(projectName: string, verdicts: AuditVerdictRecord[]): AuditReport {
     return {
       projectName,
       totalDrift: verdicts.length,
@@ -275,7 +275,7 @@ Respond with a JSON object: { "verdict": "CONFIRMED|FALSE_POSITIVE|PARTIAL", "co
   // Step 5: Update plan files (check boxes for CONFIRMED verdicts)
   // ============================================================================
 
-  async updatePlanFiles(verdicts: AuditVerdict[], plansDir: string): Promise<string[]> {
+  async updatePlanFiles(verdicts: AuditVerdictRecord[], plansDir: string): Promise<string[]> {
     const session = this.driver.session();
     const updated: string[] = [];
     
