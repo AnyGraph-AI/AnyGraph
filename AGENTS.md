@@ -3,11 +3,10 @@
 ## What This Is
 
 CodeGraph is a Neo4j code knowledge graph. It parses TypeScript codebases into structural nodes and edges,
-computes risk scores, tracks state flow, and gives AI agents complete architectural awareness
-before they touch a single line of code.
+computes risk scores, tracks state flow, ownership, architecture layers, and temporal coupling — giving AI agents complete architectural awareness before they touch a single line of code.
 
 Every function, class, interface, variable, type alias, method, and property is a node.
-Every call, import, containment, and state access is an edge.
+Every call, import, containment, state access, ownership, and co-change pattern is an edge.
 **Query the graph before you edit. That's the entire point.**
 
 ---
@@ -42,6 +41,9 @@ cypher-shell -u neo4j -p codegraph "YOUR CYPHER QUERY"
 | `Import` | Import statement |
 | `Field` | Tracked state field (e.g., session properties) |
 | `Entrypoint` | Framework registration point |
+| `Author` | Git author (from `git blame`) |
+| `ArchitectureLayer` | Inferred layer (Presentation, Domain, Data, etc.) |
+| `Project` | Top-level project node with stats |
 
 Framework-specific labels (added when `.codegraph.yml` specifies a framework):
 `CallbackQueryHandler`, `CommandHandler`, `EventHandler`, `Middleware`, `BotFactory`
@@ -57,29 +59,34 @@ Framework-specific labels (added when `.codegraph.yml` specifies a framework):
 | `READS_STATE` | Function → Field (reads session/state) | — |
 | `WRITES_STATE` | Function → Field (writes session/state) | — |
 | `POSSIBLE_CALL` | Dynamic dispatch target (ternary/interface) | `confidence`, `reason` |
+| `CO_CHANGES_WITH` | File → File (temporal coupling from git) | `coChangeCount`, `strength` |
+| `OWNED_BY` | SourceFile → Author (primary git blame owner) | — |
+| `BELONGS_TO_LAYER` | SourceFile → ArchitectureLayer | — |
 | `HAS_PARAMETER` | Function → Parameter | — |
 | `HAS_MEMBER` | Class/Interface → Method/Property | — |
 
-### Node Properties
-| Property | Type | Meaning |
-|----------|------|---------|
-| `name` | string | Declaration name |
-| `filePath` | string | Absolute file path |
-| `startLine` / `endLine` | int | Source location |
-| `sourceCode` | string | Full source text |
-| `isExported` | bool | Exported from module? |
-| `isInnerFunction` | bool | Declared inside another function? |
-| `riskLevel` | float | Pre-computed risk score |
-| `riskTier` | string | LOW / MEDIUM / HIGH / CRITICAL |
-| `fanInCount` | int | How many things call this |
-| `fanOutCount` | int | How many things this calls |
-| `lineCount` | int | Lines of code |
-| `gitChangeFrequency` | float | 0.0-1.0, how often this file changes |
-| `registrationKind` | string | Handler type: command, callback, event, middleware |
-| `registrationTrigger` | string | What triggers this handler (e.g., 'start', 'home_buy') |
-| `callsSuper` | bool | Constructor calls super()? |
-| `isOverloadSignature` | bool | TypeScript overload signature? |
-| `overloadCount` | int | Number of overload signatures |
+### Key Node Properties
+| Property | Type | On | Meaning |
+|----------|------|-----|---------|
+| `name` | string | all | Declaration name |
+| `filePath` | string | all | Absolute file path |
+| `startLine` / `endLine` | int | all | Source location |
+| `sourceCode` | string | all | Full source text |
+| `isExported` | bool | Function/Variable/Class | Exported from module? |
+| `isInnerFunction` | bool | Function | Declared inside another function? |
+| `riskLevel` | float | Function/Method | Pre-computed risk score |
+| `riskTier` | string | Function/Method | LOW / MEDIUM / HIGH / CRITICAL |
+| `riskLevelV2` | float | Function/Method | Risk with temporal coupling + author entropy |
+| `fanInCount` | int | Function/Method | How many things call this |
+| `fanOutCount` | int | Function/Method | How many things this calls |
+| `lineCount` | int | Function/Method | Lines of code |
+| `gitChangeFrequency` | float | SourceFile/Function | 0.0-1.0, how often this changes |
+| `authorEntropy` | int | SourceFile | Number of distinct git authors |
+| `primaryAuthor` | string | SourceFile | Author with most lines (git blame) |
+| `ownershipPct` | int | SourceFile | % of lines owned by primary author |
+| `architectureLayer` | string | SourceFile | Inferred layer name |
+| `registrationKind` | string | Function/Entrypoint | command, callback, event, middleware |
+| `registrationTrigger` | string | Function/Entrypoint | Trigger pattern (e.g., 'start', 'home_buy') |
 
 ### CALLS Edge Properties
 | Property | Type | Meaning |
@@ -89,6 +96,24 @@ Framework-specific labels (added when `.codegraph.yml` specifies a framework):
 | `isAsync` | bool | Is the call awaited? |
 | `crossFile` | bool | Caller and callee in different files? |
 | `resolutionKind` | string | 'internal' (direct) or 'fluent' (method chain) |
+
+---
+
+## Pre-Edit Gate
+
+**Before editing ANY function, call `pre_edit_check` (MCP) or run this:**
+```cypher
+MATCH (f:Function {name: 'FUNCTION_NAME'})
+RETURN f.riskTier, f.riskLevel, f.fanInCount
+```
+
+| Verdict | When | Action |
+|---------|------|--------|
+| 🔴 SIMULATE_FIRST | CRITICAL/HIGH risk or fanIn > 15 | MUST call `simulate_edit` with modified content before writing |
+| ⚠️ PROCEED_WITH_CAUTION | MEDIUM risk or fanIn 5-15 | Check callers list, proceed carefully |
+| ✅ SAFE | LOW risk and fanIn < 5 | Edit freely |
+
+**This is not optional.** The graph exists to prevent blind edits.
 
 ---
 
@@ -102,6 +127,8 @@ Pre-computed on every Function/Method node via `fanIn × fanOut × log(complexit
 | HIGH | 100-500 | Check dependents before editing. |
 | MEDIUM | 10-100 | Normal caution. |
 | LOW | < 10 | Leaf functions, utilities. Safe to edit. |
+
+`riskLevelV2` adds temporal coupling and author entropy: `riskLevel × (1 + temporalCoupling × 0.1) × (1 + (authorEntropy-1) × 0.15)`
 
 ---
 
@@ -127,6 +154,36 @@ RETURN f.name, f.riskTier, f.riskLevel,
        collect(DISTINCT callee.name) AS calls,
        collect(DISTINCT r.name) AS readsState,
        collect(DISTINCT w.name) AS writesState
+```
+
+### Who owns this file:
+```cypher
+MATCH (sf:SourceFile {name: 'FILENAME.ts'})-[:OWNED_BY]->(a:Author)
+RETURN a.name AS owner, sf.ownershipPct AS pct, sf.authorEntropy AS authors
+```
+
+### Architecture layer violations:
+```cypher
+MATCH (sf1:SourceFile)-[:IMPORTS]->(sf2:SourceFile)
+WHERE sf1.architectureLayer IS NOT NULL AND sf2.architectureLayer IS NOT NULL
+RETURN sf1.architectureLayer AS from, sf2.architectureLayer AS to,
+       sf1.filePath AS importer, sf2.filePath AS imported
+```
+
+### Hidden dependencies (temporal coupling):
+```cypher
+MATCH (a:SourceFile {projectId: 'PID'})-[r:CO_CHANGES_WITH]->(b)
+WHERE NOT (a)-[:IMPORTS]->(b) AND NOT (b)-[:IMPORTS]->(a)
+RETURN a.filePath, b.filePath, r.coChangeCount
+ORDER BY r.coChangeCount DESC LIMIT 10
+```
+
+### Cross-layer call flow:
+```cypher
+MATCH (sf1:SourceFile {projectId: 'PID'})-[:CONTAINS]->(caller)-[:CALLS]->(callee)<-[:CONTAINS]-(sf2:SourceFile)
+WHERE sf1.architectureLayer <> sf2.architectureLayer
+RETURN sf1.architectureLayer AS fromLayer, sf2.architectureLayer AS toLayer, count(*) AS calls
+ORDER BY calls DESC
 ```
 
 ### Module-level state in a file:
@@ -167,40 +224,42 @@ MATCH (f)-[e:WRITES_STATE|READS_STATE]->(field:Field {name: 'FIELD_NAME'})
 RETURN f.name, type(e) AS access, f.filePath
 ```
 
-### Full project overview (run this first on any new project):
+### Multi-author files (fragmented ownership):
 ```cypher
-MATCH (p:Project)
-RETURN p.name, p.nodeCount, p.edgeCount, p.status
+MATCH (sf:SourceFile {projectId: 'PID'})
+WHERE sf.authorEntropy > 1
+RETURN sf.filePath, sf.primaryAuthor, sf.ownershipPct, sf.authorEntropy
+ORDER BY sf.authorEntropy DESC
 ```
 
-### Architectural overview:
+### Full project overview:
 ```cypher
-MATCH (n)
-WHERE n.projectId IS NOT NULL
-RETURN labels(n)[1] AS type, count(n) AS count
-ORDER BY count DESC
+MATCH (p:Project)
+RETURN p.name, p.projectId, p.nodeCount, p.edgeCount, p.status
 ```
 
 ---
 
-## MCP Server
+## MCP Tools
 
 If the MCP server is running (`node codegraph/dist/mcp/mcp.server.js`), these tools are available:
 
 | Tool | Use For |
 |------|---------|
-| `list_projects` | Get project name and ID |
-| `search_codebase` | Natural language code search (uses embeddings) |
-| `natural_language_to_cypher` | Ask structural questions in plain English |
-| `impact_analysis` | Pre-built blast radius analysis |
-| `traverse_from_node` | Walk the graph from a node |
-| `detect_dead_code` | Find unused exports |
-| `detect_duplicate_code` | Find near-duplicates by normalized hash |
-| `save_session_bookmark` / `restore_session_bookmark` | Cross-session continuity |
-| `save_session_note` / `recall_session_notes` | Persistent notes |
-| `swarm_*` | Multi-agent coordination (task posting, claiming, signaling) |
+| `pre_edit_check` | **ALWAYS call before editing a function.** Returns verdict + callers + state + coupling. |
+| `simulate_edit` | When pre_edit_check says SIMULATE_FIRST. Shows full graph delta before applying. |
+| `impact_analysis` | Deep blast radius with transitive dependents and risk scoring. |
+| `search_codebase` | Natural language code search (uses embeddings). |
+| `natural_language_to_cypher` | Ask structural questions in plain English. |
+| `traverse_from_node` | Walk the graph from a specific node. |
+| `detect_dead_code` | Find unused exports. |
+| `detect_duplicate_code` | Find near-duplicates by normalized hash. |
+| `list_projects` | Get project name and ID. |
+| `save_session_bookmark` / `restore_session_bookmark` | Cross-session continuity. |
+| `save_session_note` / `recall_session_notes` | Persistent notes. |
+| `swarm_*` | Multi-agent coordination (task posting, claiming, signaling). |
 
-MCP config for Claude Code:
+MCP config for Claude Code (`.mcp.json` in project root):
 ```json
 {
   "mcpServers": {
@@ -212,7 +271,7 @@ MCP config for Claude Code:
 }
 ```
 
-**You don't need MCP to use the graph.** `cypher-shell` works from any terminal. MCP adds convenience tools like natural language search and pre-built impact analysis.
+**You don't need MCP to use the graph.** `cypher-shell` works from any terminal. MCP adds convenience tools.
 
 ---
 
@@ -223,11 +282,11 @@ MCP config for Claude Code:
 cd codegraph && npx tsx parse-and-ingest.ts
 ```
 
-### Full post-ingest pipeline (8 steps):
+### Full post-ingest pipeline (10 steps):
 ```bash
 cd codegraph && bash post-ingest-all.sh
 ```
-Steps: risk scoring → state edges → git frequency → POSSIBLE_CALL → virtual dispatch → registration properties → project node → embeddings
+Steps: risk scoring → state edges → git frequency → POSSIBLE_CALL → virtual dispatch → registration properties → project node → author ownership → architecture layers → embeddings
 
 ### Run tests:
 ```bash
@@ -244,60 +303,45 @@ cd codegraph && npx tsx verify-completeness.ts
 cd codegraph && npx tsx compute-reparse-set.ts FILENAME.ts
 ```
 
-### Start Neo4j (after reboot):
-```bash
-sudo neo4j start
-```
-
 ### Edit simulation (preview changes before applying):
 ```bash
 cd codegraph && npx tsx edit-simulation.ts <file> <modified-file>
 ```
-Shows diff against current graph: nodes added/removed/modified, broken callers, risk assessment (SAFE/CAUTION/DANGEROUS/CRITICAL). Use on CRITICAL/HIGH functions before committing.
 
 ### Temporal coupling (mine co-change patterns from git):
 ```bash
 cd codegraph && npx tsx temporal-coupling.ts codegraph
 ```
-Creates `CO_CHANGES_WITH` edges between files that always change together. Query hidden couplings (co-change but no import):
-```cypher
-MATCH (a:SourceFile {projectId: 'PID'})-[r:CO_CHANGES_WITH]->(b)
-WHERE NOT (a)-[:IMPORTS]->(b) AND NOT (b)-[:IMPORTS]->(a)
-RETURN a.filePath, b.filePath, r.coChangeCount
-ORDER BY r.coChangeCount DESC LIMIT 10
+
+### Author ownership (git blame → OWNED_BY edges):
+```bash
+cd codegraph && npx tsx seed-author-ownership.ts codegraph
+```
+
+### Architecture layers (directory → layer classification + violation detection):
+```bash
+cd codegraph && npx tsx seed-architecture-layers.ts codegraph
 ```
 
 ### File watcher (incremental re-parse on save):
 ```bash
 cd codegraph && npx tsx watch.ts codegraph
 ```
-Watches for file changes and incrementally updates the graph (~600-800ms per change). Note: requires native Linux FS (inotify); won't get live events on WSL→NTFS cross-mounts.
 
----
-
-## Pre-Edit Gate
-
-**Before editing ANY function, call `pre_edit_check` (MCP) or run this:**
-```cypher
-MATCH (f:Function {name: 'FUNCTION_NAME'})
-RETURN f.riskTier, f.riskLevel, f.fanInCount
+### Start Neo4j (after reboot):
+```bash
+sudo neo4j start
 ```
-
-| Verdict | When | Action |
-|---------|------|--------|
-| 🔴 SIMULATE_FIRST | CRITICAL/HIGH risk or fanIn > 15 | MUST call `simulate_edit` with modified content before writing |
-| ⚠️ PROCEED_WITH_CAUTION | MEDIUM risk or fanIn 5-15 | Check callers list, proceed carefully |
-| ✅ SAFE | LOW risk and fanIn < 5 | Edit freely |
-
-**This is not optional.** The graph exists to prevent blind edits.
 
 ---
 
 ## Rules
 
-1. **ALWAYS run pre_edit_check** before editing any function.
-2. **Check module-level variables** before adding state — it might already exist.
-3. **fanInCount > 10 = widely used.** Signature changes affect many callers.
-4. **Check READS_STATE/WRITES_STATE** before touching session/state handling.
-5. **Inner functions** (`isInnerFunction=true`) are helpers inside parent functions — they have their own call graphs.
-6. **100% coverage** — every declaration in the source is in the graph. If it's not in the graph, it's not in the code.
+1. **ALWAYS run pre_edit_check** before editing any function. No exceptions.
+2. **If verdict is SIMULATE_FIRST**, call simulate_edit before writing. No shortcuts.
+3. **Check module-level variables** before adding state — it might already exist.
+4. **fanInCount > 10 = widely used.** Signature changes affect many callers.
+5. **Check READS_STATE/WRITES_STATE** before touching session/state handling.
+6. **Inner functions** (`isInnerFunction=true`) are helpers inside parent functions — they have their own call graphs.
+7. **Check architectureLayer** before adding cross-layer dependencies. Don't create new violations.
+8. **100% coverage** — every declaration in the source is in the graph. If it's not in the graph, it's not in the code.
