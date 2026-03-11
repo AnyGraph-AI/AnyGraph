@@ -760,7 +760,9 @@ export class TypeScriptParser {
 
     for (const varStatement of sourceFile.getVariableStatements()) {
       const isExported = varStatement.isExported();
-      if (!isExported && !this.shouldParseVariables(sourceFile.getFilePath())) continue;
+      // Emit ALL variables — non-exported module-scope state (caches, locks, timers,
+      // constants) matters for blast radius. An agent editing a file needs to know
+      // what module-level state exists, not just what's exported.
       for (const varDecl of varStatement.getDeclarations()) {
         if (this.shouldSkipChildNode(varDecl)) continue;
 
