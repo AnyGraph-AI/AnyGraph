@@ -48,6 +48,7 @@ export const TOOL_NAMES = {
   recallSessionNotes: 'recall_session_notes',
   cleanupSession: 'cleanup_session',
   swarmMessage: 'swarm_message',
+  simulateEdit: 'simulate_edit',
 } as const;
 
 // Tool Metadata
@@ -348,6 +349,28 @@ Parameters:
 - dryRun (default: false): Preview what would be deleted without deleting
 
 Returns counts of deleted notes, bookmarks, and edges.`,
+  },
+  [TOOL_NAMES.simulateEdit]: {
+    title: 'Simulate Edit',
+    description: `Simulate a code change and show the graph delta BEFORE applying it.
+
+Takes a file path and modified content, parses the modified version with ts-morph,
+compares against the current graph state, and shows what would change:
+
+- Nodes added/removed/modified
+- CALLS edges added/removed  
+- Exports added/removed
+- External callers that would break
+- Risk assessment: SAFE / CAUTION / DANGEROUS / CRITICAL
+
+USE THIS BEFORE making changes to HIGH or CRITICAL risk functions.
+
+Parameters:
+- projectId (required): Project ID, name, or path
+- filePath (required): Path to the file being modified
+- modifiedContent (required): Full content of the modified file
+
+Returns a structured diff showing exactly what the edit changes in the dependency graph.`,
   },
   [TOOL_NAMES.swarmMessage]: {
     title: 'Swarm Message',

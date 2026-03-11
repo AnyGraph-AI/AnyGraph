@@ -17,6 +17,7 @@ import { createParseTypescriptProjectTool } from './parse-typescript-project.too
 import { createSearchCodebaseTool } from './search-codebase.tool.js';
 import { createRestoreSessionBookmarkTool, createSaveSessionBookmarkTool } from './session-bookmark.tool.js';
 import { createCleanupSessionTool } from './session-cleanup.tool.js';
+import { createSimulateEditTool } from './simulate-edit.tool.js';
 import { createRecallSessionNotesTool, createSaveSessionNoteTool } from './session-note.tool.js';
 import { createStartWatchProjectTool } from './start-watch-project.tool.js';
 import { createStopWatchProjectTool } from './stop-watch-project.tool.js';
@@ -106,4 +107,7 @@ export const registerAllTools = (server: McpServer): void => {
 
   // Register session cleanup tool
   createCleanupSessionTool(server);
+
+  // Register edit simulation tool
+  createSimulateEditTool(server);
 };
