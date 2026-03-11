@@ -118,11 +118,17 @@ const STATUS_LINE = /\*\*Status\*\*:\s*(.+)/i;
 // Decision table row
 const DECISION_ROW = /^\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|$/;
 
-// Cross-reference patterns
-const FILE_PATH_REF = /(?:`([^`]+\.[a-z]{1,4})`|(\b\w+[\w-]*\.(?:ts|js|py|java|go|rs|md|json|csv)\b))/g;
+// Cross-reference patterns — expanded to catch more file types
+const FILE_PATH_REF = /(?:`([^`]+\.[a-z]{1,5})`|(\b[\w/.-]+\.(?:ts|js|py|java|go|rs|md|json|csv|sql|toml|yaml|yml|sh)\b))/g;
 const FUNCTION_REF = /`(\w+(?:\.\w+)*)\(\)`/g;
 const PROJECT_ID_REF = /`?(proj_[a-f0-9]{12})`?/g;
 const EFTA_REF = /EFTA\d{8}/g;
+
+// Table task pattern: | Task description | Gap # | LOC | Risk |
+const TABLE_TASK_ROW = /^\|\s*(.+?)\s*\|\s*(#?\d+|—|-)\s*\|\s*(\d+|—|-)\s*\|\s*(.+?)\s*\|$/;
+
+// "Files touched:" section pattern
+const FILES_TOUCHED = /^###?\s*Files\s+touched:?\s*$/i;
 
 // Cross-project dependency patterns
 const DEPENDS_ON_PATTERN = /\*\*DEPENDS_ON\*\*\s+(.+)/i;
@@ -435,6 +441,91 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       }
     }
 
+    // --- Table-based tasks (GodSpeed-style: | Task | Gap # | LOC | Risk |) ---
+    const tableMatch = line.match(TABLE_TASK_ROW);
+    if (tableMatch && currentSectionId) {
+      const taskText = tableMatch[1].trim();
+      const gapNum = tableMatch[2].trim();
+      const loc = tableMatch[3].trim();
+      const risk = tableMatch[4].trim();
+
+      // Skip header rows and separators
+      if (taskText.toLowerCase() === 'task' || taskText.includes('---') || gapNum.includes('---')) continue;
+
+      taskOrdinalInSection++;
+      const taskId = stableId(ctx.projectId, PlanNodeType.TASK, ctx.filePath, currentSectionKey, taskOrdinalInSection);
+
+      const crossRefs = extractCrossReferences(taskText);
+      stats.crossRefs += crossRefs.length;
+
+      nodes.push({
+        id: taskId,
+        labels: ['CodeNode', PlanNodeType.TASK],
+        properties: {
+          projectId: ctx.projectId,
+          name: taskText,
+          coreType: PlanNodeType.TASK,
+          status: TaskStatus.PLANNED,
+          isSubTask: false,
+          indentLevel: 0,
+          filePath: ctx.filePath,
+          line: lineNum,
+          sectionKey: currentSectionKey,
+          ordinal: taskOrdinalInSection,
+          format: 'table',
+          gapNumber: gapNum !== '—' && gapNum !== '-' ? gapNum : null,
+          estimatedLOC: loc !== '—' && loc !== '-' ? parseInt(loc) || null : null,
+          risk: risk !== '—' && risk !== '-' ? risk : null,
+          crossRefCount: crossRefs.length,
+          crossRefs: crossRefs.map((r) => `${r.type}:${r.value}`).join('|'),
+          hasCodeEvidence: false,
+          codeEvidenceCount: 0,
+        },
+      });
+
+      const parentId = currentSectionId || ctx.projectNodeId;
+      edges.push({
+        id: `${taskId}->PART_OF->${parentId}`,
+        type: PlanEdgeType.PART_OF,
+        source: taskId,
+        target: parentId,
+        properties: { projectId: ctx.projectId },
+      });
+
+      for (const ref of crossRefs) {
+        if (ref.type === 'file_path' || ref.type === 'function') {
+          unresolvedRefs.push({ taskId, taskName: taskText, refType: ref.type, refValue: ref.value });
+        }
+      }
+
+      stats.tasks++;
+      continue;
+    }
+
+    // --- "Files touched:" sections — extract file references ---
+    if (FILES_TOUCHED.test(line)) {
+      // Read subsequent lines for file paths until next section
+      for (let j = i + 1; j < lines.length; j++) {
+        const fline = lines[j].trim();
+        if (fline.startsWith('#') || fline === '' || fline.startsWith('|')) break;
+        if (fline.startsWith('-') || fline.startsWith('`')) {
+          const fileRefs = extractCrossReferences(fline);
+          for (const ref of fileRefs) {
+            if (ref.type === 'file_path' && currentSectionId) {
+              unresolvedRefs.push({
+                taskId: currentSectionId,
+                taskName: `section:${currentSectionKey}:files_touched`,
+                refType: ref.type,
+                refValue: ref.value,
+              });
+              stats.crossRefs++;
+            }
+          }
+        }
+      }
+      continue;
+    }
+
     // --- Checkboxes (tasks) ---
     const doneMatch = line.match(CHECKBOX_DONE);
     const plannedMatch = line.match(CHECKBOX_PLANNED);
@@ -688,6 +779,61 @@ export async function enrichCrossDomain(
             } else {
               notFound++;
             }
+          }
+        }
+      } finally {
+        await session.close();
+      }
+    }
+
+      // Phase 1b: Check documentation coverage
+    // For each project that has a SKILL.md, AGENTS.md, CLAUDE.md, or README.md,
+    // verify the doc mentions key code graph elements
+    {
+      const session = driver.session();
+      try {
+        // Find projects that have both plan nodes and code nodes
+        const projectResult = await session.run(
+          `MATCH (pp:PlanProject)
+           WITH pp.name AS planName, pp.projectId AS planProjectId
+           MATCH (cp:Project)
+           WHERE toLower(cp.name) = toLower(planName) AND cp.type IS NULL
+           RETURN planProjectId, cp.projectId AS codeProjectId, cp.name AS name`,
+        );
+
+        for (const record of projectResult.records) {
+          const codeProjectId = record.get('codeProjectId');
+          const planProjectId = record.get('planProjectId');
+          const name = record.get('name');
+
+          // Count code graph elements
+          const codeStats = await session.run(
+            `MATCH (n {projectId: $pid})
+             WHERE n.coreType IN ['FunctionDeclaration', 'SourceFile', 'ClassDeclaration', 'MethodDeclaration']
+             RETURN n.coreType AS type, count(n) AS count`,
+            { pid: codeProjectId },
+          );
+
+          if (codeStats.records.length > 0) {
+            // Update plan project with code coverage stats
+            const statsMap: Record<string, number> = {};
+            for (const r of codeStats.records) {
+              statsMap[r.get('type')] = r.get('count')?.toNumber?.() || r.get('count');
+            }
+            await session.run(
+              `MATCH (pp:PlanProject {projectId: $planPid})
+               SET pp.linkedCodeProject = $codePid,
+                   pp.codeSourceFiles = $sf,
+                   pp.codeFunctions = $fn,
+                   pp.codeClasses = $cls`,
+              {
+                planPid: planProjectId,
+                codePid: codeProjectId,
+                sf: statsMap['SourceFile'] || 0,
+                fn: statsMap['FunctionDeclaration'] || 0,
+                cls: statsMap['ClassDeclaration'] || 0,
+              },
+            );
           }
         }
       } finally {
