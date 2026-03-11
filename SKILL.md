@@ -90,6 +90,22 @@ RETURN f.riskTier, round(f.riskLevel) AS risk, f.fanInCount, f.fanOutCount,
 | `detect_dead_code` | Find exported functions nobody calls. |
 | `detect_duplicate_code` | Find near-duplicates by normalized hash. |
 | `list_projects` | See all projects in the graph with stats. |
+| `swarm_graph_refresh` | After editing files, refresh the graph so next queries see fresh data. |
+| `swarm_post_task` | Post refactoring tasks with dependencies for multi-agent work. |
+| `swarm_claim_task` | Claim a pending task from the blackboard. |
+| `swarm_complete_task` | Complete/fail/request_review/approve/reject tasks. |
+| `swarm_get_tasks` | Query tasks by status/agent/swarm. |
+| `swarm_message` | Agent-to-agent messaging (blocked/conflict/alert/handoff). |
+| `swarm_pheromone` | Deposit coordination signals on nodes. |
+| `swarm_sense` | Read pheromones near a node. |
+
+### Multi-Agent Refactoring
+
+For multi-agent work, read `swarm/COORDINATOR.md` (decomposition algorithm) and `swarm/WORKER.md` (worker protocol). Key rules:
+- One writer per file
+- Workers complete to `needs_review`, coordinator approves
+- Always call `swarm_graph_refresh` after edits
+- CRITICAL simulation = stop and alert coordinator
 
 MCP config (`.mcp.json`):
 ```json

@@ -257,7 +257,14 @@ If the MCP server is running (`node codegraph/dist/mcp/mcp.server.js`), these to
 | `list_projects` | Get project name and ID. |
 | `save_session_bookmark` / `restore_session_bookmark` | Cross-session continuity. |
 | `save_session_note` / `recall_session_notes` | Persistent notes. |
-| `swarm_*` | Multi-agent coordination (task posting, claiming, signaling). |
+| `swarm_post_task` | Post refactoring task with dependencies and context. |
+| `swarm_claim_task` | Claim a pending task. Returns unread messages. |
+| `swarm_complete_task` | Complete/fail/request_review/approve/reject. |
+| `swarm_get_tasks` | Query tasks by status/agent/swarm. |
+| `swarm_message` | Agent-to-agent messaging (blocked/conflict/alert/handoff). |
+| `swarm_pheromone` | Deposit coordination signals on nodes. |
+| `swarm_sense` | Read pheromones near a node. |
+| `swarm_graph_refresh` | Re-parse changed files after edits. Workers MUST call before completing. |
 
 MCP config for Claude Code (`.mcp.json` in project root):
 ```json
