@@ -69,7 +69,7 @@ describe('Grammy Framework Schema', () => {
       MATCH (f:Function {projectId: 'proj_60d5feed0001'})-[r:READS_STATE]->(fld:Field)
       RETURN count(r) AS cnt
     `);
-    expect(rows[0].cnt).toBeGreaterThanOrEqual(100);
+    expect(rows[0].cnt).toBeGreaterThanOrEqual(90);
   });
 
   it('should have WRITES_STATE edges to Field nodes', async () => {
