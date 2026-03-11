@@ -275,9 +275,27 @@ Watches for file changes and incrementally updates the graph (~600-800ms per cha
 
 ---
 
+## Pre-Edit Gate
+
+**Before editing ANY function, call `pre_edit_check` (MCP) or run this:**
+```cypher
+MATCH (f:Function {name: 'FUNCTION_NAME'})
+RETURN f.riskTier, f.riskLevel, f.fanInCount
+```
+
+| Verdict | When | Action |
+|---------|------|--------|
+| 🔴 SIMULATE_FIRST | CRITICAL/HIGH risk or fanIn > 15 | MUST call `simulate_edit` with modified content before writing |
+| ⚠️ PROCEED_WITH_CAUTION | MEDIUM risk or fanIn 5-15 | Check callers list, proceed carefully |
+| ✅ SAFE | LOW risk and fanIn < 5 | Edit freely |
+
+**This is not optional.** The graph exists to prevent blind edits.
+
+---
+
 ## Rules
 
-1. **Query before you edit.** Check blast radius on anything CRITICAL or HIGH.
+1. **ALWAYS run pre_edit_check** before editing any function.
 2. **Check module-level variables** before adding state — it might already exist.
 3. **fanInCount > 10 = widely used.** Signature changes affect many callers.
 4. **Check READS_STATE/WRITES_STATE** before touching session/state handling.
