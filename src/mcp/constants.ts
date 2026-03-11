@@ -49,6 +49,7 @@ export const TOOL_NAMES = {
   cleanupSession: 'cleanup_session',
   swarmMessage: 'swarm_message',
   simulateEdit: 'simulate_edit',
+  preEditCheck: 'pre_edit_check',
 } as const;
 
 // Tool Metadata
@@ -371,6 +372,24 @@ Parameters:
 - modifiedContent (required): Full content of the modified file
 
 Returns a structured diff showing exactly what the edit changes in the dependency graph.`,
+  },
+  [TOOL_NAMES.preEditCheck]: {
+    title: 'Pre-Edit Check',
+    description: `The gate. Call this BEFORE editing any function or method.
+
+Returns risk assessment, fan-in/fan-out, callers, state access, temporal coupling,
+and a verdict:
+
+- SIMULATE_FIRST: HIGH/CRITICAL risk. You MUST call simulate_edit before proceeding.
+- PROCEED_WITH_CAUTION: MEDIUM risk. Check the callers list before editing.
+- SAFE: LOW risk. Edit freely.
+
+Parameters:
+- projectId (required): Project ID, name, or path
+- functionName (required): Name of the function/method to check
+- filePath (optional): Disambiguate if multiple functions share the name
+
+ALWAYS call this before editing a function. It takes 1 second and can prevent breakage.`,
   },
   [TOOL_NAMES.swarmMessage]: {
     title: 'Swarm Message',

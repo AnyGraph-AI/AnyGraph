@@ -249,6 +249,30 @@ cd codegraph && npx tsx compute-reparse-set.ts FILENAME.ts
 sudo neo4j start
 ```
 
+### Edit simulation (preview changes before applying):
+```bash
+cd codegraph && npx tsx edit-simulation.ts <file> <modified-file>
+```
+Shows diff against current graph: nodes added/removed/modified, broken callers, risk assessment (SAFE/CAUTION/DANGEROUS/CRITICAL). Use on CRITICAL/HIGH functions before committing.
+
+### Temporal coupling (mine co-change patterns from git):
+```bash
+cd codegraph && npx tsx temporal-coupling.ts codegraph
+```
+Creates `CO_CHANGES_WITH` edges between files that always change together. Query hidden couplings (co-change but no import):
+```cypher
+MATCH (a:SourceFile {projectId: 'PID'})-[r:CO_CHANGES_WITH]->(b)
+WHERE NOT (a)-[:IMPORTS]->(b) AND NOT (b)-[:IMPORTS]->(a)
+RETURN a.filePath, b.filePath, r.coChangeCount
+ORDER BY r.coChangeCount DESC LIMIT 10
+```
+
+### File watcher (incremental re-parse on save):
+```bash
+cd codegraph && npx tsx watch.ts codegraph
+```
+Watches for file changes and incrementally updates the graph (~600-800ms per change). Note: requires native Linux FS (inotify); won't get live events on WSL→NTFS cross-mounts.
+
 ---
 
 ## Rules
