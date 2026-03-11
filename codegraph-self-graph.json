@@ -1,0 +1,30 @@
+{
+  "summary": {
+    "files": 86,
+    "nodes": 1739,
+    "edges": 2725
+  },
+  "nodeTypes": {
+    "SourceFile": 85,
+    "Interface": 110,
+    "Import": 413,
+    "Variable": 351,
+    "TypeAlias": 29,
+    "Class": 19,
+    "Method": 206,
+    "Parameter": 370,
+    "Property": 70,
+    "Constructor": 13,
+    "Function": 70,
+    "Enum": 3
+  },
+  "edgeTypes": {
+    "CONTAINS": 995,
+    "HAS_MEMBER": 289,
+    "HAS_PARAMETER": 370,
+    "IMPORTS": 262,
+    "RESOLVES_TO": 509,
+    "CALLS": 293,
+    "EXTENDS": 7
+  }
+}
