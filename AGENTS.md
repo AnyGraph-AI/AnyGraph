@@ -4,7 +4,7 @@
 
 AnythingGraph (repo: codegraph) is a **universal reasoning graph**. It ingests code, plans, corpora, and documents into Neo4j, cross-references across domains, generates claims with evidence, detects drift, and self-audits. Code parsing was the proof of concept — the architecture handles any structured knowledge.
 
-**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 43 MCP tools, 6 operational layers.
+**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 44 MCP tools, 6 operational layers.
 
 **Six layers**: Code (3 projects) → Corpus (5 projects) → Plans (4 projects) → Claims (346) → Reasoning (233 hypotheses) → Self-Audit.
 
@@ -283,6 +283,7 @@ If the MCP server is running (`node codegraph/dist/mcp/mcp.server.js`), these to
 | `plan_drift` | Tasks with code evidence but unchecked boxes. |
 | `plan_gaps` | Planned tasks with zero evidence. |
 | `plan_query` | Free-form plan graph queries. |
+| `plan_priority` | Dynamic priority ranking — "what should I build next?" |
 | `claim_status` | Overview of claims by domain and status. |
 | `evidence_for` | Evidence supporting/contradicting a specific claim. |
 | `contradictions` | Find contested or contradicted claims. |
@@ -471,3 +472,50 @@ RETURN t.auditVerdict, count(t), collect(t.name)[..3]
 8. **100% coverage** — every declaration in the source is in the graph. If it's not in the graph, it's not in the code.
 9. **Check cross-cutting claims** before editing high-risk files. Plan tasks may depend on them.
 10. **Self-audit verdicts are permanent.** Don't re-create evidence for tasks marked FALSE_POSITIVE.
+
+---
+
+## End-to-End Execution Loop (Mandatory)
+
+When asked "what next?", run this loop in order:
+
+1. **State snapshot**
+   - `plan_status`
+   - `plan_priority`
+   - `self_audit` summary
+
+2. **Choose work by unblock value**
+   - Highest priority tasks first (downstream unblock score)
+   - Prefer tasks with existing evidence for rapid closure
+
+3. **Implement with safety gate**
+   - `pre_edit_check` before edits
+   - `simulate_edit` when verdict requires it
+
+4. **Refresh graph state**
+   - Reparse / watcher refresh
+   - Confirm node/edge updates visible
+
+5. **Reconcile plan truth**
+   - `plan_drift` + `self_audit` verdicts
+   - Update checkboxes for confirmed completions
+
+6. **Close the loop**
+   - Re-run `plan_priority` and `plan_status`
+   - Commit code + plan + docs together
+
+If this loop is skipped, the graph drifts from reality.
+
+## Definition of Done (Per Task)
+A task is only "done" when all are true:
+- Implementation exists in graph-linked evidence
+- Plan status is checked/updated
+- Drift for that task is resolved or audited
+- Priority recalculation reflects new state
+- Changes are committed
+
+## Dependency Hygiene
+For dynamic prioritization to work, dependencies must be explicit:
+- encode milestone/task dependencies via `BLOCKS` / `DEPENDS_ON`
+- re-ingest plans after dependency edits
+- verify dependency edges in Neo4j before trusting ranking

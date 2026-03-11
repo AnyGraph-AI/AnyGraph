@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **AnythingGraph** (repo: codegraph) is an MCP server that builds **universal reasoning graphs**. Give it any structured knowledge — code, documents, plans, corpora — and it parses, cross-references, generates claims, detects drift, and self-audits. Code parsing was the proof of concept. The architecture is the product.
 
-**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 43 MCP tools.
+**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 44 MCP tools.
 
 ### Six Operational Layers
 | Layer | Status | What It Does |
@@ -54,7 +54,7 @@ Any Source → Language Parser → IR v1 → Enrichment Plugins → Neo4j → MC
 
 - `src/mcp/` - MCP server entry point and tools
   - `mcp.server.ts` - Server initialization
-  - `tools/` - 43 MCP tools across code, plan, claim, swarm, and self-audit domains
+  - `tools/` - 44 MCP tools across code, plan, claim, swarm, and self-audit domains
   - `handlers/` - Business logic for graph generation and traversal
 - `src/core/` - Core business logic
   - `parsers/typescript-parser.ts` - TypeScript AST parser (~1000 lines)
@@ -118,7 +118,7 @@ If upgrading from a version without multi-project support, note these breaking c
 
 **Note:** There is no automatic migration path. Existing graphs must be rebuilt to use the new ID format with projectId isolation.
 
-### MCP Tools (43 total)
+### MCP Tools (44 total)
 
 **Code Analysis:**
 | Tool | Purpose |
@@ -142,6 +142,7 @@ If upgrading from a version without multi-project support, note these breaking c
 | `plan_drift` | Tasks with code evidence but unchecked boxes |
 | `plan_gaps` | Planned tasks with zero evidence |
 | `plan_query` | Free-form plan graph queries |
+| `plan_priority` | Dynamic priority ranking — "what should I build next?" |
 
 **Claims & Reasoning:**
 | Tool | Purpose |
@@ -214,3 +215,75 @@ NEO4J_PASSWORD=PASSWORD
 
 Conventional Commits: `type(scope): description`
 - feat, fix, docs, style, refactor, perf, test, chore
+
+## Operator Playbook (End-to-End)
+
+Use this sequence when running AnythingGraph as a production system, not just a code parser.
+
+### 0) Cold Start (5-10 min)
+1. `test_neo4j_connection`
+2. `list_projects`
+3. `plan_status` (all projects)
+4. `plan_priority` (global, then `projectFilter: "codegraph"`)
+5. `self_audit` summary (identify unaudited drift)
+
+**Output:** a ranked work queue, current drift count, and blocked milestones.
+
+### 1) Intake / Ingest
+- Plan changes: re-run plan ingest (`plan-parser.ts ... --ingest`) or let watcher ingest.
+- Code changes: parse project or run watcher refresh.
+- Documents/corpus: ingest through adapter pipeline (when M2 ships).
+
+**Definition of done:** graph nodes/edges updated, project stats changed, no parser errors.
+
+### 2) Reconcile Reality vs Plan
+1. `plan_drift` for target project
+2. `self_audit` generate questions
+3. Apply verdicts (`CONFIRMED`, `FALSE_POSITIVE`, `PARTIAL`)
+4. Update plan checkboxes when confirmed
+
+**Definition of done:** drift is either resolved or explicitly audited with verdict metadata.
+
+### 3) Prioritize
+- Run `plan_priority`.
+- Pick highest-scoring tasks first (most downstream unblock).
+- If tie: prefer tasks with `hasCodeEvidence=true` (fast closure).
+
+### 4) Execute Safely
+Before touching code:
+1. `pre_edit_check`
+2. if needed, `simulate_edit`
+3. implement
+4. `swarm_graph_refresh` / reparse
+
+### 5) Verify + Close
+- Re-run: `plan_status`, `plan_drift`, `plan_priority`
+- Re-run claim generation if evidence changed materially.
+- Commit docs + plan updates with code.
+
+---
+
+## Failure & Recovery Playbooks
+
+### Watcher stale / not reflecting changes
+- Run manual parse/ingest for affected project.
+- Validate via `list_projects` node/edge deltas.
+
+### Drift explosion (many false positives)
+- Run `self_audit` on that project.
+- Mark `FALSE_POSITIVE` to suppress repeated noise.
+- Tighten matching thresholds if needed.
+
+### Claims look like mirrors (low synthesis value)
+- Prioritize cross-layer synthesizers over single-layer generators.
+- Ensure evidence links exist across plan↔code↔corpus/document.
+
+### Priority queue looks wrong
+- Check `BLOCKS`/`DEPENDS_ON` graph edges exist for milestones/tasks.
+- If missing, add structured dependency annotations in plan markdown and re-ingest.
+
+---
+
+## Project-Agnostic Query Rule
+All plan queries are project-agnostic by default. Scope with `projectFilter` when needed.
+Examples: `codegraph`, `godspeed`, `bible-graph`, `plan-graph`.

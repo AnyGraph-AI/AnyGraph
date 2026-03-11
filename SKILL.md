@@ -419,3 +419,37 @@ Project plans in `plans/` directory are parsed into Task/Milestone/Sprint nodes 
 - Corpus graphs — Bible, Quran, structured texts
 - Document graphs — legal filings, evidence
 - Plan graphs — task tracking, cross-domain linking
+
+---
+
+## Process Runbook (Not Just Schema)
+
+Use this skill as an operational procedure, not only a query reference.
+
+### A) Orient
+1. List projects
+2. Identify active plan project(s)
+3. Run plan status + priority
+
+### B) Decide
+- Work top-ranked unblock tasks first
+- If blocked, choose next independent high-value task
+
+### C) Execute
+- Safety gate (`pre_edit_check` → `simulate_edit` if needed)
+- Implement change
+- Refresh graph
+
+### D) Validate
+- Re-check drift
+- Apply self-audit verdicts
+- Update plan markers
+
+### E) Close
+- Recompute priority
+- Commit code + plan + docs in same change set
+
+### Operational Guardrails
+- Never trust plan checkboxes without evidence links
+- Never trust evidence links without self-audit on high-drift projects
+- Never trust priority output if dependency edges are missing
