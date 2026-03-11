@@ -9,6 +9,8 @@ import { createCheckParseStatusTool } from './check-parse-status.tool.js';
 import { createDetectDeadCodeTool } from './detect-dead-code.tool.js';
 import { createDetectDuplicateCodeTool } from './detect-duplicate-code.tool.js';
 import { createDetectHotspotsTool } from './detect-hotspots.tool.js';
+import { createStateImpactTool } from './state-impact.tool.js';
+import { createRegistrationMapTool } from './registration-map.tool.js';
 import { createHelloTool } from './hello.tool.js';
 import { createImpactAnalysisTool } from './impact-analysis.tool.js';
 import { createListProjectsTool } from './list-projects.tool.js';
@@ -118,4 +120,8 @@ export const registerAllTools = (server: McpServer): void => {
   // Register edit safety tools
   createSimulateEditTool(server);
   createPreEditCheckTool(server);
+
+  // Register analysis tools
+  createStateImpactTool(server);
+  createRegistrationMapTool(server);
 };

@@ -88,11 +88,23 @@ RETURN 'Promoted riskLevel v2 on ' + toString(count(f)) + ' nodes' AS status
 "
 
 echo ""
-echo "=== 11/12: Test coverage mapping ==="
+echo "=== 11/15: Provenance + confidence on edges ==="
+npx tsx add-provenance.ts 2>&1 | grep -v "dotenv\|tip:"
+
+echo ""
+echo "=== 12/15: Unresolved reference nodes ==="
+npx tsx create-unresolved-nodes.ts 2>&1 | grep -v "dotenv\|tip:"
+
+echo ""
+echo "=== 13/15: Audit subgraph (invariant checks) ==="
+npx tsx run-audit.ts 2>&1 | grep -v "dotenv\|tip:"
+
+echo ""
+echo "=== 14/15: Test coverage mapping ==="
 npx tsx seed-test-coverage.ts . 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 12/12: Embeddings (OpenAI) ==="
+echo "=== 15/15: Embeddings (OpenAI) ==="
 npx tsx embed-nodes.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
