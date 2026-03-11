@@ -37,6 +37,7 @@ import { createSwarmSenseTool } from './swarm-sense.tool.js';
 import { createTestNeo4jConnectionTool } from './test-neo4j-connection.tool.js';
 import { createTraverseFromNodeTool } from './traverse-from-node.tool.js';
 import { createPlanStatusTool, createPlanDriftTool, createPlanGapsTool, createPlanQueryTool } from './plan-status.tool.js';
+import { createClaimStatusTool, createEvidenceForTool, createContradictionsTool, createHypothesesTool, createClaimGenerateTool } from './claim-tools.tool.js';
 
 // Track tool calls for debugging
 let globalToolCallCount = 0;
@@ -131,4 +132,11 @@ export const registerAllTools = (server: McpServer): void => {
   createPlanDriftTool(server);
   createPlanGapsTool(server);
   createPlanQueryTool(server);
+
+  // Register claim layer tools
+  createClaimStatusTool(server);
+  createEvidenceForTool(server);
+  createContradictionsTool(server);
+  createHypothesesTool(server);
+  createClaimGenerateTool(server);
 };
