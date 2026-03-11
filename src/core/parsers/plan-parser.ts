@@ -863,10 +863,29 @@ export async function enrichCrossDomain(
           const planPid = linkRec.get('planPid');
           const codePid = linkRec.get('codePid');
 
+          // Get project name for context-aware noise filtering
+          const projNameResult = await session.run(
+            `MATCH (pp:PlanProject {projectId: $planPid}) RETURN pp.name AS name`,
+            { planPid },
+          );
+          const projName = projNameResult.records[0]?.get('name')?.toLowerCase() || '';
+
+          // Project-specific noise: if the project IS a parser, "parser" is noise
+          // These are terms so common in the project's domain they match everything
+          const projectNoise: Record<string, string[]> = {
+            'codegraph': ['parser', 'graph', 'node', 'edge', 'project', 'import', 'code', 'json', 'schema', 'core', 'current', 'land', 'build', 'agent', 'service'],
+            'godspeed': ['token', 'user', 'wallet', 'callback'],
+            'bible-graph': ['verse', 'node', 'edge', 'book', 'chapter'],
+            'plan-graph': ['plan', 'task', 'node', 'edge'],
+          };
+          const extraNoise = projectNoise[projName] || [];
+
           // Get tasks without evidence in this plan project
+          // Skip tasks already audited as FALSE_POSITIVE — don't re-create bad edges
           const tasks = await session.run(
             `MATCH (t:Task {projectId: $planPid})
              WHERE (t.hasCodeEvidence IS NULL OR t.hasCodeEvidence = false)
+             AND (t.auditVerdict IS NULL OR t.auditVerdict <> 'FALSE_POSITIVE')
              RETURN t.id AS id, t.name AS name`,
             { planPid },
           );
@@ -881,7 +900,9 @@ export async function enrichCrossDomain(
               'used', 'uses', 'none', 'auto', 'adds', 'also', 'same', 'first', 'after', 'before',
               'button', 'toggle', 'display', 'success', 'default', 'setting', 'settings', 'command',
               'notification', 'position', 'positions', 'order', 'orders', 'field', 'fields', 'input',
-              'custom', 'amount', 'number', 'text', 'value']);
+              'custom', 'amount', 'number', 'text', 'value', 'build', 'write', 'define', 'create',
+              'implement', 'refactor', 'based', 'using', 'existing', 'across', 'enable', 'source',
+              ...extraNoise]);
             const keywords = taskName
               .toLowerCase()
               .replace(/[^a-z0-9\s-_]/g, ' ')
@@ -891,9 +912,9 @@ export async function enrichCrossDomain(
             if (keywords.length === 0) continue;
 
             // Build keyword match: function name must contain at least one keyword
-            // and not be a super-generic name
+            // Require 5+ chars for stronger signal (avoids "core", "land", "json" collisions)
             for (const keyword of keywords) {
-              if (keyword.length < 4) continue;
+              if (keyword.length < 5) continue;
               const result = await session.run(
                 `MATCH (f {projectId: $codePid})
                  WHERE f.coreType IN ['FunctionDeclaration', 'ArrowFunction', 'MethodDeclaration']
