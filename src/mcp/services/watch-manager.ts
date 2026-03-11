@@ -352,6 +352,11 @@ class WatchManager {
         edgesUpdated: result.edgesUpdated,
       });
 
+      // Post-incremental enrichment: recompute metrics on affected nodes
+      if (result.nodesUpdated > 0 || result.edgesUpdated > 0) {
+        await this.runPostIncrementalEnrichment(state.projectId);
+      }
+
       state.lastUpdateTime = new Date();
       const elapsedMs = Date.now() - startTime;
 
@@ -540,6 +545,72 @@ class WatchManager {
     const projectIds = Array.from(this.watchers.keys());
     await Promise.all(projectIds.map((id) => this.stopWatching(id)));
     console.error(`[WatchManager] Stopped all ${projectIds.length} watchers`);
+  }
+
+  /**
+   * Run lightweight post-incremental enrichment on changed nodes.
+   * Recomputes fanIn/fanOut, riskLevel, riskTier for the entire project.
+   * This is fast (~50-100ms) because it runs on the existing graph.
+   */
+  private async runPostIncrementalEnrichment(projectId: string): Promise<void> {
+    try {
+      const { Neo4jService } = await import('../../storage/neo4j/neo4j.service.js');
+      const neo4j = new Neo4jService();
+      
+      // 1. Recompute fanIn/fanOut
+      await neo4j.run(`
+        MATCH (fn:CodeNode {projectId: $projectId})
+        WHERE fn.riskLevel IS NOT NULL OR fn:Function OR fn:Method
+        OPTIONAL MATCH (caller)-[:CALLS]->(fn)
+        WITH fn, count(DISTINCT caller) AS fanIn
+        OPTIONAL MATCH (fn)-[:CALLS]->(callee)
+        WITH fn, fanIn, count(DISTINCT callee) AS fanOut
+        SET fn.fanInCount = fanIn, fn.fanOutCount = fanOut
+      `, { projectId });
+      
+      // 2. Recompute riskLevel
+      await neo4j.run(`
+        MATCH (fn:CodeNode {projectId: $projectId})
+        WHERE fn.fanInCount IS NOT NULL AND fn.fanOutCount IS NOT NULL
+        WITH fn,
+          fn.fanInCount * fn.fanOutCount * log(toFloat(coalesce(fn.lineCount, 1)) + 1.0) AS baseRisk,
+          coalesce(fn.temporalCoupling, 0) AS tc,
+          coalesce(fn.authorEntropy, 1) AS ae
+        SET fn.riskLevel = baseRisk * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15),
+            fn.riskTier = CASE
+              WHEN baseRisk * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15) > 500 THEN 'CRITICAL'
+              WHEN baseRisk * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15) > 100 THEN 'HIGH'
+              WHEN baseRisk * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15) > 20 THEN 'MEDIUM'
+              ELSE 'LOW'
+            END
+      `, { projectId });
+      
+      // 3. Cross-file classification on CALLS edges
+      await neo4j.run(`
+        MATCH (src:CodeNode {projectId: $projectId})-[r:CALLS]->(tgt:CodeNode)
+        SET r.crossFile = (src.filePath <> tgt.filePath)
+      `, { projectId });
+      
+      // 4. Registration property promotion (for Grammy/framework handlers)
+      await neo4j.run(`
+        MATCH (e:Entrypoint {projectId: $projectId})
+        WHERE e.context IS NOT NULL
+        WITH e, apoc.convert.fromJsonMap(e.context) AS ctx
+        SET e.registrationKind = ctx.entrypointKind,
+            e.registrationTrigger = ctx.trigger,
+            e.framework = ctx.framework
+        WITH count(e) AS done
+        MATCH (h {projectId: $projectId})-[:REGISTERED_BY]->(e2:Entrypoint)
+        WHERE e2.registrationKind IS NOT NULL
+        SET h.registrationKind = e2.registrationKind,
+            h.registrationTrigger = e2.registrationTrigger
+      `, { projectId });
+      
+      console.error(`[WatchManager] Post-incremental enrichment complete for ${projectId}`);
+    } catch (error) {
+      console.error(`[WatchManager] Post-incremental enrichment failed: ${error}`);
+      // Non-fatal — the parse still succeeded
+    }
   }
 
   /**

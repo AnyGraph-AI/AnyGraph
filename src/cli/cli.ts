@@ -1,339 +1,642 @@
 #!/usr/bin/env node
 /**
- * CLI Entry Point for Code Graph Context
+ * CodeGraph CLI
  *
- * Handles CLI commands (init, status, stop) and delegates to MCP server
+ * Commands:
+ *   init          - Set up Neo4j (native or Docker) and verify connection
+ *   parse <dir>   - Parse a TypeScript project into the graph
+ *   enrich [id]   - Run post-ingest enrichment pipeline
+ *   serve         - Start the MCP server
+ *   risk <target> - Query blast radius for a function
+ *   analyze <dir> - Parse + enrich + report (one-shot)
+ *   status        - Show Neo4j and project status
+ *   stop          - Stop Neo4j (Docker mode only)
  */
 
-import { readFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
+import { dirname, join, resolve, basename } from 'path';
 import { fileURLToPath } from 'url';
+import { execSync, spawn } from 'child_process';
+import { createHash } from 'crypto';
 
 import { Command } from 'commander';
-
-import {
-  NEO4J_CONFIG,
-  createContainer,
-  getContainerStatus,
-  getFullStatus,
-  isApocAvailable,
-  isDockerInstalled,
-  isDockerRunning,
-  removeContainer,
-  startContainer,
-  stopContainer,
-  waitForNeo4j,
-} from './neo4j-docker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// ANSI colors
-const c = {
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-  dim: '\x1b[2m',
-  green: '\x1b[32m',
-  red: '\x1b[31m',
-  yellow: '\x1b[33m',
-  blue: '\x1b[34m',
-  cyan: '\x1b[36m',
-} as const;
-
-const sym = {
-  ok: `${c.green}✓${c.reset}`,
-  err: `${c.red}✗${c.reset}`,
-  warn: `${c.yellow}⚠${c.reset}`,
-  info: `${c.blue}ℹ${c.reset}`,
-} as const;
-
-const log = (symbol: string, msg: string): void => {
-  console.log(`  ${symbol} ${msg}`);
-};
-
-const header = (text: string): void => {
-  console.log(`\n${c.bold}${text}${c.reset}\n`);
-};
-
-/**
- * Spinner for async operations
- */
-const spinner = (msg: string): { stop: (ok: boolean, finalMsg?: string) => void } => {
-  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-  let i = 0;
-  const interval = setInterval(() => {
-    process.stdout.write(`\r  ${c.blue}${frames[i]}${c.reset} ${msg}`);
-    i = (i + 1) % frames.length;
-  }, 80);
-
-  return {
-    stop: (ok: boolean, finalMsg?: string) => {
-      clearInterval(interval);
-      process.stdout.write(`\r  ${ok ? sym.ok : sym.err} ${finalMsg || msg}\n`);
-    },
-  };
-};
-
-/**
- * Print config instructions
- */
-const printConfigInstructions = (password: string, boltPort: number): void => {
-  console.log(`
-${c.bold}Next steps:${c.reset}
-
-  1. Add to Claude Code:
-     ${c.dim}claude mcp add code-graph-context code-graph-context${c.reset}
-
-  2. Configure in ${c.cyan}~/.config/claude/config.json${c.reset}:
-
-     ${c.dim}{
-       "mcpServers": {
-         "code-graph-context": {
-           "command": "code-graph-context",
-           "env": {
-             "OPENAI_API_KEY": "sk-..."${
-               password !== NEO4J_CONFIG.defaultPassword
-                 ? `,
-             "NEO4J_PASSWORD": "${password}"`
-                 : ''
-             }${
-               boltPort !== NEO4J_CONFIG.boltPort
-                 ? `,
-             "NEO4J_URI": "bolt://localhost:${boltPort}"`
-                 : ''
-             }
-           }
-         }
-       }
-     }${c.reset}
-
-     ${c.yellow}Get your OpenAI API key:${c.reset} https://platform.openai.com/api-keys
-
-  3. Restart Claude Code
-`);
-};
-
-interface InitOptions {
-  port?: string;
-  httpPort?: string;
-  password?: string;
-  memory?: string;
-  force?: boolean;
+function getVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8'));
+    return pkg.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
 }
 
-/**
- * Init command - set up Neo4j
- */
-const runInit = async (options: InitOptions): Promise<void> => {
-  const boltPort = options.port ? parseInt(options.port, 10) : NEO4J_CONFIG.boltPort;
-  const httpPort = options.httpPort ? parseInt(options.httpPort, 10) : NEO4J_CONFIG.httpPort;
-  const password = options.password || NEO4J_CONFIG.defaultPassword;
-  const memory = options.memory || '4G';
+// ─── Neo4j Connection ───────────────────────────────────────────────────────
 
-  header('Code Graph Context Setup');
+function getNeo4jConfig() {
+  return {
+    uri: process.env.NEO4J_URI || 'bolt://localhost:7687',
+    user: process.env.NEO4J_USER || 'neo4j',
+    password: process.env.NEO4J_PASSWORD || 'codegraph',
+  };
+}
 
-  // Check Docker
-  if (!isDockerInstalled()) {
-    log(sym.err, 'Docker is not installed');
-    console.log(`\n  Install Docker: ${c.cyan}https://docs.docker.com/get-docker/${c.reset}\n`);
-    process.exit(1);
-  }
-  log(sym.ok, 'Docker installed');
-
-  if (!isDockerRunning()) {
-    log(sym.err, 'Docker daemon is not running');
-    console.log(`\n  Start Docker Desktop or run: ${c.dim}sudo systemctl start docker${c.reset}\n`);
-    process.exit(1);
-  }
-  log(sym.ok, 'Docker daemon running');
-
-  // Handle existing container
-  const status = getContainerStatus();
-
-  if (status === 'running' && !options.force) {
-    log(sym.ok, 'Neo4j container already running');
-
-    const apocOk = isApocAvailable(NEO4J_CONFIG.containerName, password);
-    log(apocOk ? sym.ok : sym.warn, apocOk ? 'APOC plugin available' : 'APOC plugin not detected');
-
-    console.log(`\n  ${c.dim}Use --force to recreate the container${c.reset}`);
-    printConfigInstructions(password, boltPort);
-    return;
-  }
-
-  if (status !== 'not-found' && options.force) {
-    const s = spinner('Removing existing container...');
-    stopContainer();
-    removeContainer();
-    s.stop(true, 'Removed existing container');
-  }
-
-  if (status === 'stopped' && !options.force) {
-    const s = spinner('Starting existing container...');
-    const started = startContainer();
-    if (!started) {
-      s.stop(false, 'Failed to start container');
-      console.log(`\n  Try: ${c.dim}code-graph-context init --force${c.reset}\n`);
-      process.exit(1);
-    }
-    s.stop(true, 'Container started');
-  } else if (status === 'not-found' || options.force) {
-    const s = spinner('Creating Neo4j container...');
-    const created = createContainer({ httpPort, boltPort, password, memory });
-    if (!created) {
-      s.stop(false, 'Failed to create container');
-      console.log(`
-  Check if ports are in use:
-    ${c.dim}lsof -i :${httpPort}${c.reset}
-    ${c.dim}lsof -i :${boltPort}${c.reset}
-`);
-      process.exit(1);
-    }
-    s.stop(true, 'Container created');
-  }
-
-  // Wait for Neo4j
-  const healthSpinner = spinner('Waiting for Neo4j to be ready (this may take a minute)...');
-  const ready = await waitForNeo4j(NEO4J_CONFIG.containerName, password);
-  healthSpinner.stop(ready, ready ? 'Neo4j is ready' : 'Neo4j failed to start');
-
-  if (!ready) {
-    console.log(`\n  Check logs: ${c.dim}docker logs ${NEO4J_CONFIG.containerName}${c.reset}\n`);
-    process.exit(1);
-  }
-
-  // Check APOC
-  const apocOk = isApocAvailable(NEO4J_CONFIG.containerName, password);
-  log(apocOk ? sym.ok : sym.warn, apocOk ? 'APOC plugin verified' : 'APOC still loading (should be ready shortly)');
-
-  // Print connection info
-  console.log(`
-${c.bold}Neo4j is ready${c.reset}
-
-  Browser:     ${c.cyan}http://localhost:${httpPort}${c.reset}
-  Bolt URI:    ${c.cyan}bolt://localhost:${boltPort}${c.reset}
-  Credentials: ${c.dim}neo4j / ${password}${c.reset}`);
-
-  printConfigInstructions(password, boltPort);
-};
-
-/**
- * Status command
- */
-const runStatus = (): void => {
-  header('Code Graph Context Status');
-
-  const status = getFullStatus();
-
-  log(status.dockerInstalled ? sym.ok : sym.err, `Docker installed: ${status.dockerInstalled ? 'yes' : 'no'}`);
-
-  if (!status.dockerInstalled) {
-    console.log(`\n  Install: ${c.cyan}https://docs.docker.com/get-docker/${c.reset}\n`);
-    return;
-  }
-
-  log(status.dockerRunning ? sym.ok : sym.err, `Docker running: ${status.dockerRunning ? 'yes' : 'no'}`);
-
-  if (!status.dockerRunning) {
-    console.log(`\n  Start Docker Desktop or: ${c.dim}sudo systemctl start docker${c.reset}\n`);
-    return;
-  }
-
-  const containerIcon =
-    status.containerStatus === 'running' ? sym.ok : status.containerStatus === 'stopped' ? sym.warn : sym.err;
-  log(containerIcon, `Container: ${status.containerStatus}`);
-
-  if (status.containerStatus === 'running') {
-    log(status.neo4jReady ? sym.ok : sym.warn, `Neo4j responding: ${status.neo4jReady ? 'yes' : 'no'}`);
-    log(
-      status.apocAvailable ? sym.ok : sym.warn,
-      `APOC plugin: ${status.apocAvailable ? 'available' : 'not available'}`,
-    );
-  }
-
-  console.log('');
-
-  if (status.containerStatus !== 'running') {
-    console.log(`  Run ${c.dim}code-graph-context init${c.reset} to start Neo4j\n`);
-  } else if (!status.apocAvailable) {
-    console.log(`  APOC may still be loading. Wait a moment and check again.\n`);
-  }
-};
-
-/**
- * Stop command
- */
-const runStop = (): void => {
-  const status = getContainerStatus();
-
-  if (status === 'not-found') {
-    log(sym.info, 'No Neo4j container found');
-    return;
-  }
-
-  if (status === 'stopped') {
-    log(sym.info, 'Container already stopped');
-    return;
-  }
-
-  const s = spinner('Stopping Neo4j...');
-  const stopped = stopContainer();
-  s.stop(stopped, stopped ? 'Neo4j stopped' : 'Failed to stop container');
-};
-
-/**
- * Start MCP server
- */
-const startMcpServer = async (): Promise<void> => {
-  // The MCP server is in a sibling directory after build
-  // cli/cli.js -> mcp/mcp.server.js
-  const mcpPath = join(__dirname, '..', 'mcp', 'mcp.server.js');
-  await import(mcpPath);
-};
-
-/**
- * Get package version
- */
-const getVersion = (): string => {
+async function checkNeo4j(): Promise<boolean> {
+  const config = getNeo4jConfig();
   try {
-    // Go up from dist/cli to root
-    const pkgPath = join(__dirname, '..', '..', 'package.json');
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    return pkg.version;
+    const neo4j = await import('neo4j-driver');
+    const driver = neo4j.default.driver(config.uri, neo4j.default.auth.basic(config.user, config.password));
+    const session = driver.session();
+    await session.run('RETURN 1');
+    await session.close();
+    await driver.close();
+    return true;
   } catch {
-    return 'unknown';
+    return false;
   }
-};
+}
 
-// Build CLI
+async function queryNeo4j(cypher: string, params: Record<string, any> = {}): Promise<any[]> {
+  const config = getNeo4jConfig();
+  const neo4j = await import('neo4j-driver');
+  const driver = neo4j.default.driver(config.uri, neo4j.default.auth.basic(config.user, config.password));
+  const session = driver.session();
+  try {
+    const result = await session.run(cypher, params);
+    return result.records.map(r => {
+      const obj: any = {};
+      r.keys.forEach(k => {
+        const val = r.get(k);
+        obj[k] = typeof val?.toNumber === 'function' ? val.toNumber() : val;
+      });
+      return obj;
+    });
+  } finally {
+    await session.close();
+    await driver.close();
+  }
+}
+
+// ─── Project Detection ──────────────────────────────────────────────────────
+
+function detectTsconfig(dir: string): string | null {
+  const candidates = ['tsconfig.json', 'tsconfig.build.json'];
+  for (const c of candidates) {
+    if (existsSync(join(dir, c))) return c;
+  }
+  return null;
+}
+
+function generateProjectId(dir: string): string {
+  const hash = createHash('md5').update(resolve(dir)).digest('hex').slice(0, 12);
+  return `proj_${hash}`;
+}
+
+function detectProjectName(dir: string): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8'));
+    return pkg.name || basename(dir);
+  } catch {
+    return basename(dir);
+  }
+}
+
+// ─── Commands ───────────────────────────────────────────────────────────────
+
+async function runInit() {
+  console.log('🔧 CodeGraph Init\n');
+  
+  // Check Neo4j
+  console.log('Checking Neo4j connection...');
+  const config = getNeo4jConfig();
+  const connected = await checkNeo4j();
+  
+  if (connected) {
+    console.log(`  ✅ Neo4j is running at ${config.uri}`);
+    
+    // Check APOC
+    try {
+      const rows = await queryNeo4j('RETURN apoc.version() AS v');
+      console.log(`  ✅ APOC ${rows[0]?.v || 'available'}`);
+    } catch {
+      console.log('  ⚠️ APOC not installed — some features may be limited');
+      console.log('     Install: download APOC JAR → neo4j plugins/ → restart');
+    }
+    
+    // Check vector index
+    try {
+      const rows = await queryNeo4j("SHOW INDEXES YIELD name WHERE name = 'codenode_embeddings' RETURN name");
+      if (rows.length > 0) {
+        console.log('  ✅ Vector index exists');
+      } else {
+        console.log('  ⚠️ No vector index — run `codegraph enrich` to create one');
+      }
+    } catch {
+      console.log('  ⚠️ Could not check vector index');
+    }
+    
+    // List projects
+    const projects = await queryNeo4j('MATCH (p:Project) RETURN p.name AS name, p.projectId AS id, p.nodeCount AS nodes, p.edgeCount AS edges');
+    if (projects.length > 0) {
+      console.log('\n📊 Existing projects:');
+      for (const p of projects) {
+        console.log(`  • ${p.name} (${p.id}) — ${p.nodes || '?'} nodes, ${p.edges || '?'} edges`);
+      }
+    }
+    
+    console.log('\n✅ Ready. Run `codegraph parse <dir>` to graph a project.');
+  } else {
+    console.log(`  ❌ Neo4j not reachable at ${config.uri}`);
+    console.log('\n  To install Neo4j natively (recommended for WSL):');
+    console.log('    wget -O - https://debian.neo4j.com/neotechnology.gpg.key | sudo apt-key add -');
+    console.log('    echo "deb https://debian.neo4j.com stable latest" | sudo tee /etc/apt/sources.list.d/neo4j.list');
+    console.log('    sudo apt update && sudo apt install neo4j');
+    console.log('    sudo neo4j start');
+    console.log(`    cypher-shell -u ${config.user} -p ${config.password} "RETURN 1"`);
+    console.log('\n  Or set NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD env vars for a remote instance.');
+  }
+}
+
+async function runParse(dir: string, options: { tsconfig?: string; projectId?: string; name?: string }) {
+  const absDir = resolve(dir);
+  if (!existsSync(absDir)) {
+    console.error(`❌ Directory not found: ${absDir}`);
+    process.exit(1);
+  }
+  
+  const tsconfig = options.tsconfig || detectTsconfig(absDir);
+  if (!tsconfig) {
+    console.error('❌ No tsconfig.json found. Create one or pass --tsconfig <path>');
+    process.exit(1);
+  }
+  
+  const projectId = options.projectId || generateProjectId(absDir);
+  const projectName = options.name || detectProjectName(absDir);
+  
+  console.log(`📝 Parsing: ${absDir}`);
+  console.log(`   tsconfig: ${tsconfig}`);
+  console.log(`   projectId: ${projectId}`);
+  console.log(`   name: ${projectName}\n`);
+  
+  // Check Neo4j
+  if (!await checkNeo4j()) {
+    console.error('❌ Neo4j not running. Run `codegraph init` first.');
+    process.exit(1);
+  }
+  
+  // Dynamic import parser
+  const { TypeScriptParser } = await import('../core/parsers/typescript-parser.js');
+  const { CORE_TYPESCRIPT_SCHEMA } = await import('../core/config/schema.js');
+  const { Neo4jService } = await import('../../src/storage/neo4j/neo4j.service.js');
+  
+  // Check for framework schemas
+  let frameworkSchemas: any[] = [];
+  const codegraphYml = join(absDir, '.codegraph.yml');
+  if (existsSync(codegraphYml)) {
+    console.log('   Found .codegraph.yml — loading framework config');
+    // TODO: load framework schemas from yml
+  }
+  
+  // Parse
+  console.log('Parsing TypeScript files...');
+  const startParse = Date.now();
+  const parser = new TypeScriptParser(absDir, tsconfig, CORE_TYPESCRIPT_SCHEMA, frameworkSchemas, undefined, projectId);
+  await parser.parseWorkspace();
+  const { nodes, edges } = parser.exportToJson();
+  const parseMs = Date.now() - startParse;
+  console.log(`  ✅ Parsed ${nodes.length} nodes, ${edges.length} edges in ${parseMs}ms`);
+  
+  // Ingest
+  console.log('Ingesting to Neo4j...');
+  const startIngest = Date.now();
+  const neo4jService = new Neo4jService();
+  
+  // Clear existing project nodes
+  await neo4jService.run('MATCH (n {projectId: $projectId}) DETACH DELETE n', { projectId });
+  
+  // Batch ingest nodes
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
+    const batch = nodes.slice(i, i + BATCH_SIZE);
+    await neo4jService.run(`
+      UNWIND $nodes AS node
+      CREATE (n:CodeNode)
+      SET n = node
+    `, { nodes: batch.map((n: any) => ({ ...n, projectId })) });
+  }
+  
+  // Batch ingest edges
+  for (let i = 0; i < edges.length; i += BATCH_SIZE) {
+    const batch = edges.slice(i, i + BATCH_SIZE);
+    for (const edge of batch) {
+      await neo4jService.run(`
+        MATCH (s:CodeNode {nodeId: $sourceId, projectId: $projectId})
+        MATCH (t:CodeNode {nodeId: $targetId, projectId: $projectId})
+        CREATE (s)-[r:${edge.type}]->(t)
+        SET r = $props
+      `, { 
+        sourceId: (edge as any).sourceId, 
+        targetId: (edge as any).targetId, 
+        projectId,
+        props: Object.fromEntries(Object.entries(edge).filter(([k]) => !['type', 'sourceId', 'targetId'].includes(k)))
+      });
+    }
+  }
+  
+  const ingestMs = Date.now() - startIngest;
+  console.log(`  ✅ Ingested to Neo4j in ${ingestMs}ms`);
+  
+  // Create project node
+  await neo4jService.run(`
+    MERGE (p:Project {projectId: $projectId})
+    SET p.name = $name, p.path = $path, p.nodeCount = $nodes, p.edgeCount = $edges,
+        p.status = 'parsed', p.updatedAt = datetime()
+  `, { projectId, name: projectName, path: absDir, nodes: nodes.length, edges: edges.length });
+  
+  console.log(`\n✅ Project "${projectName}" parsed. Run \`codegraph enrich ${projectId}\` next.`);
+}
+
+async function runEnrich(projectIdArg?: string) {
+  if (!await checkNeo4j()) {
+    console.error('❌ Neo4j not running.');
+    process.exit(1);
+  }
+  
+  // Auto-detect project if not specified
+  let projectId = projectIdArg;
+  if (!projectId) {
+    const projects = await queryNeo4j('MATCH (p:Project) RETURN p.projectId AS id, p.name AS name');
+    if (projects.length === 0) {
+      console.error('❌ No projects found. Run `codegraph parse <dir>` first.');
+      process.exit(1);
+    } else if (projects.length === 1) {
+      projectId = projects[0].id;
+      console.log(`Auto-detected project: ${projects[0].name} (${projectId})`);
+    } else {
+      console.error('Multiple projects found. Specify one:');
+      projects.forEach(p => console.error(`  ${p.id} — ${p.name}`));
+      process.exit(1);
+    }
+  }
+  
+  console.log(`🔬 Enriching project: ${projectId}\n`);
+  
+  // Step 1: Fan metrics + risk
+  console.log('1/6: Computing fan metrics + risk levels...');
+  await queryNeo4j(`
+    MATCH (fn:CodeNode {projectId: $pid})
+    WHERE fn.startLine IS NOT NULL
+    OPTIONAL MATCH (caller)-[:CALLS]->(fn)
+    WITH fn, count(DISTINCT caller) AS fanIn
+    OPTIONAL MATCH (fn)-[:CALLS]->(callee)
+    WITH fn, fanIn, count(DISTINCT callee) AS fanOut
+    SET fn.fanInCount = fanIn, fn.fanOutCount = fanOut,
+        fn.lineCount = CASE WHEN fn.endLine IS NOT NULL THEN fn.endLine - fn.startLine ELSE null END
+  `, { pid: projectId });
+  
+  await queryNeo4j(`
+    MATCH (fn:CodeNode {projectId: $pid})
+    WHERE fn.fanInCount IS NOT NULL AND fn.fanOutCount IS NOT NULL
+    WITH fn,
+      fn.fanInCount * fn.fanOutCount * log(toFloat(coalesce(fn.lineCount, 1)) + 1.0) AS risk
+    SET fn.riskLevel = risk,
+        fn.riskTier = CASE
+          WHEN risk > 500 THEN 'CRITICAL'
+          WHEN risk > 100 THEN 'HIGH'
+          WHEN risk > 20 THEN 'MEDIUM'
+          ELSE 'LOW'
+        END
+  `, { pid: projectId });
+  console.log('  ✅ Done');
+  
+  // Step 2: Cross-file classification
+  console.log('2/6: Classifying CALLS edges...');
+  await queryNeo4j(`
+    MATCH (src:CodeNode {projectId: $pid})-[r:CALLS]->(tgt:CodeNode)
+    SET r.crossFile = (src.filePath <> tgt.filePath)
+  `, { pid: projectId });
+  console.log('  ✅ Done');
+  
+  // Step 3: Registration properties
+  console.log('3/6: Promoting registration properties...');
+  try {
+    await queryNeo4j(`
+      MATCH (e:Entrypoint {projectId: $pid})
+      WHERE e.context IS NOT NULL
+      WITH e, apoc.convert.fromJsonMap(e.context) AS ctx
+      SET e.registrationKind = ctx.entrypointKind,
+          e.registrationTrigger = ctx.trigger,
+          e.framework = ctx.framework
+    `, { pid: projectId });
+    await queryNeo4j(`
+      MATCH (h {projectId: $pid})-[:REGISTERED_BY]->(e:Entrypoint)
+      WHERE e.registrationKind IS NOT NULL
+      SET h.registrationKind = e.registrationKind,
+          h.registrationTrigger = e.registrationTrigger
+    `, { pid: projectId });
+  } catch { /* APOC may not be available */ }
+  console.log('  ✅ Done');
+  
+  // Step 4: File metrics
+  console.log('4/6: Computing file metrics...');
+  await queryNeo4j(`
+    MATCH (sf:CodeNode {projectId: $pid})
+    WHERE sf:SourceFile OR sf.type = 'SourceFile'
+    OPTIONAL MATCH (sf)-[:CONTAINS]->(n)
+    WITH sf, count(n) AS nodeCount
+    OPTIONAL MATCH (sf)-[:IMPORTS]->(other)
+    WITH sf, nodeCount, count(other) AS impCount
+    OPTIONAL MATCH (dep)-[:IMPORTS]->(sf)
+    WITH sf, nodeCount, impCount, count(dep) AS depCount
+    SET sf.nodeCount = nodeCount, sf.importCount = impCount, sf.dependentCount = depCount
+  `, { pid: projectId });
+  console.log('  ✅ Done');
+  
+  // Step 5: Project node update
+  console.log('5/6: Updating project node...');
+  await queryNeo4j(`
+    MERGE (p:Project {projectId: $pid})
+    WITH p
+    OPTIONAL MATCH (n:CodeNode {projectId: $pid})
+    WITH p, count(n) AS nodes
+    OPTIONAL MATCH (:CodeNode {projectId: $pid})-[r]->(:CodeNode {projectId: $pid})
+    WITH p, nodes, count(r) AS edges
+    SET p.nodeCount = nodes, p.edgeCount = edges, p.status = 'enriched', p.updatedAt = datetime()
+  `, { pid: projectId });
+  console.log('  ✅ Done');
+  
+  // Step 6: Risk tier summary
+  console.log('6/6: Generating summary...');
+  const tiers = await queryNeo4j(`
+    MATCH (fn:CodeNode {projectId: $pid})
+    WHERE fn.riskTier IS NOT NULL
+    RETURN fn.riskTier AS tier, count(fn) AS count
+    ORDER BY count DESC
+  `, { pid: projectId });
+  
+  const top = await queryNeo4j(`
+    MATCH (fn:CodeNode {projectId: $pid})
+    WHERE fn.riskLevel IS NOT NULL AND fn.riskLevel > 0
+    RETURN fn.name AS name, fn.filePath AS file, 
+      round(fn.riskLevel * 10) / 10 AS risk, fn.riskTier AS tier
+    ORDER BY fn.riskLevel DESC LIMIT 10
+  `, { pid: projectId });
+  
+  console.log('\n📊 Risk Distribution:');
+  for (const t of tiers) {
+    const bar = '█'.repeat(Math.min(Math.ceil(t.count / 5), 40));
+    console.log(`  ${t.tier.padEnd(10)} ${String(t.count).padStart(4)} ${bar}`);
+  }
+  
+  if (top.length > 0) {
+    console.log('\n🔥 Top 10 Riskiest Functions:');
+    console.log(`  ${'Name'.padEnd(35)} ${'Risk'.padStart(8)} ${'Tier'.padEnd(10)} File`);
+    console.log('  ' + '-'.repeat(80));
+    for (const f of top) {
+      const file = (f.file || '').split('/').slice(-2).join('/');
+      console.log(`  ${String(f.name).padEnd(35)} ${String(f.risk).padStart(8)} ${(f.tier || '').padEnd(10)} ${file}`);
+    }
+  }
+  
+  console.log('\n✅ Enrichment complete. Run `codegraph serve` to start the MCP server.');
+  console.log('   For deeper enrichment (git history, embeddings), run the individual scripts:');
+  console.log('   • npx tsx temporal-coupling.ts <project>');
+  console.log('   • npx tsx seed-author-ownership.ts <project>');
+  console.log('   • npx tsx seed-architecture-layers.ts <project>');
+  console.log('   • npx tsx embed-nodes.ts');
+}
+
+async function runServe() {
+  console.log('🚀 Starting CodeGraph MCP server...\n');
+  
+  if (!await checkNeo4j()) {
+    console.error('❌ Neo4j not running. Run `codegraph init` first.');
+    process.exit(1);
+  }
+  
+  // Import and start the server
+  const serverPath = join(__dirname, '../mcp/mcp.server.js');
+  const child = spawn('node', [serverPath], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  
+  child.on('exit', (code) => process.exit(code || 0));
+  process.on('SIGINT', () => child.kill('SIGINT'));
+  process.on('SIGTERM', () => child.kill('SIGTERM'));
+}
+
+async function runRisk(target: string) {
+  if (!await checkNeo4j()) {
+    console.error('❌ Neo4j not running.');
+    process.exit(1);
+  }
+  
+  // Parse target: could be "functionName" or "file.ts:functionName"
+  let funcName = target;
+  let filePath: string | null = null;
+  
+  if (target.includes(':')) {
+    const parts = target.split(':');
+    filePath = parts[0];
+    funcName = parts[1];
+  }
+  
+  // Find the function
+  let query: string;
+  let params: Record<string, any>;
+  
+  if (filePath) {
+    query = `
+      MATCH (f:CodeNode)
+      WHERE f.name = $name AND f.filePath CONTAINS $filePath
+      RETURN f.name AS name, f.filePath AS file, f.riskLevel AS risk, f.riskTier AS tier,
+        f.fanInCount AS fanIn, f.fanOutCount AS fanOut, f.lineCount AS lines,
+        f.gitChangeFrequency AS gcf, f.authorEntropy AS ae, f.projectId AS pid
+    `;
+    params = { name: funcName, filePath };
+  } else {
+    query = `
+      MATCH (f:CodeNode)
+      WHERE f.name = $name AND f.riskLevel IS NOT NULL
+      RETURN f.name AS name, f.filePath AS file, f.riskLevel AS risk, f.riskTier AS tier,
+        f.fanInCount AS fanIn, f.fanOutCount AS fanOut, f.lineCount AS lines,
+        f.gitChangeFrequency AS gcf, f.authorEntropy AS ae, f.projectId AS pid
+      ORDER BY f.riskLevel DESC
+    `;
+    params = { name: funcName };
+  }
+  
+  const funcs = await queryNeo4j(query, params);
+  
+  if (funcs.length === 0) {
+    console.error(`❌ Function "${funcName}" not found in graph.`);
+    process.exit(1);
+  }
+  
+  for (const f of funcs) {
+    const file = (f.file || '').split('/').slice(-2).join('/');
+    console.log(`\n🎯 ${f.name} (${file})`);
+    console.log(`   Project: ${f.pid}`);
+    console.log(`   Risk: ${(f.risk || 0).toFixed(1)} (${f.tier || 'N/A'})`);
+    console.log(`   Fan-in: ${f.fanIn || 0} | Fan-out: ${f.fanOut || 0} | Lines: ${f.lines || '?'}`);
+    if (f.gcf) console.log(`   Change frequency: ${f.gcf.toFixed(3)}`);
+    if (f.ae) console.log(`   Author entropy: ${f.ae}`);
+    
+    // Blast radius
+    const blast = await queryNeo4j(`
+      MATCH (f:CodeNode {name: $name, projectId: $pid})<-[:CALLS*1..3]-(caller:CodeNode)
+      WHERE f.filePath CONTAINS $filePath OR $filePath = ''
+      RETURN DISTINCT caller.name AS name, caller.filePath AS file,
+        caller.riskTier AS tier
+      ORDER BY caller.name
+      LIMIT 30
+    `, { name: f.name, pid: f.pid, filePath: filePath || '' });
+    
+    if (blast.length > 0) {
+      console.log(`\n   📡 Blast radius (${blast.length} transitive callers, max depth 3):`);
+      for (const c of blast) {
+        const cFile = (c.file || '').split('/').slice(-1)[0];
+        console.log(`     ${c.name} (${cFile}) [${c.tier || '?'}]`);
+      }
+    }
+    
+    // State access
+    const state = await queryNeo4j(`
+      MATCH (f:CodeNode {name: $name, projectId: $pid})-[r:READS_STATE|WRITES_STATE]->(field:Field)
+      WHERE f.filePath CONTAINS $filePath OR $filePath = ''
+      RETURN type(r) AS access, field.name AS field
+    `, { name: f.name, pid: f.pid, filePath: filePath || '' });
+    
+    if (state.length > 0) {
+      const reads = state.filter(s => s.access === 'READS_STATE').map(s => s.field);
+      const writes = state.filter(s => s.access === 'WRITES_STATE').map(s => s.field);
+      if (reads.length > 0) console.log(`\n   📖 Reads: ${reads.join(', ')}`);
+      if (writes.length > 0) console.log(`   ✏️ Writes: ${writes.join(', ')}`);
+    }
+  }
+}
+
+async function runAnalyze(dir: string, options: { tsconfig?: string; projectId?: string; name?: string }) {
+  console.log('🔍 CodeGraph Analyze — Parse + Enrich + Report\n');
+  
+  const absDir = resolve(dir);
+  const projectId = options.projectId || generateProjectId(absDir);
+  
+  // Step 1: Parse
+  await runParse(dir, { ...options, projectId });
+  console.log('');
+  
+  // Step 2: Enrich
+  await runEnrich(projectId);
+}
+
+async function runStatus() {
+  console.log('📊 CodeGraph Status\n');
+  
+  const config = getNeo4jConfig();
+  const connected = await checkNeo4j();
+  console.log(`Neo4j: ${connected ? '✅ running' : '❌ not reachable'} (${config.uri})`);
+  
+  if (!connected) {
+    console.log('\nRun `codegraph init` to set up Neo4j.');
+    return;
+  }
+  
+  const projects = await queryNeo4j(`
+    MATCH (p:Project)
+    RETURN p.name AS name, p.projectId AS id, p.path AS path,
+      p.nodeCount AS nodes, p.edgeCount AS edges, p.status AS status,
+      p.updatedAt AS updated
+    ORDER BY p.name
+  `);
+  
+  if (projects.length === 0) {
+    console.log('\nNo projects. Run `codegraph parse <dir>` to get started.');
+    return;
+  }
+  
+  console.log(`\nProjects: ${projects.length}`);
+  for (const p of projects) {
+    console.log(`\n  📁 ${p.name} (${p.id})`);
+    console.log(`     Path: ${p.path || '?'}`);
+    console.log(`     Nodes: ${p.nodes || '?'} | Edges: ${p.edges || '?'} | Status: ${p.status || '?'}`);
+    if (p.updated) console.log(`     Updated: ${p.updated}`);
+    
+    // Risk tier breakdown
+    const tiers = await queryNeo4j(`
+      MATCH (fn:CodeNode {projectId: $pid})
+      WHERE fn.riskTier IS NOT NULL
+      RETURN fn.riskTier AS tier, count(fn) AS count
+      ORDER BY count DESC
+    `, { pid: p.id });
+    
+    if (tiers.length > 0) {
+      const tierStr = tiers.map(t => `${t.tier}: ${t.count}`).join(' | ');
+      console.log(`     Risk: ${tierStr}`);
+    }
+  }
+}
+
+// ─── Program ────────────────────────────────────────────────────────────────
+
 const program = new Command();
 
-program.name('code-graph-context').description('MCP server for code graph analysis with Neo4j').version(getVersion());
+program
+  .name('codegraph')
+  .description('AI code knowledge graph — structural awareness for coding agents')
+  .version(getVersion());
 
 program
   .command('init')
-  .description('Set up Neo4j container and show configuration steps')
-  .option('-p, --port <port>', 'Neo4j Bolt port', '7687')
-  .option('--http-port <port>', 'Neo4j Browser port', '7474')
-  .option('--password <password>', 'Neo4j password', 'PASSWORD')
-  .option('-m, --memory <size>', 'Max heap memory (e.g., 2G, 4G)', '4G')
-  .option('-f, --force', 'Recreate container even if exists')
+  .description('Set up Neo4j and verify connection')
   .action(runInit);
 
-program.command('status').description('Check Neo4j and Docker status').action(runStatus);
+program
+  .command('parse <dir>')
+  .description('Parse a TypeScript project into the graph')
+  .option('--tsconfig <path>', 'Path to tsconfig.json (auto-detected)')
+  .option('--project-id <id>', 'Custom project ID (auto-generated from path)')
+  .option('--name <name>', 'Project name (from package.json or dir name)')
+  .action(runParse);
 
-program.command('stop').description('Stop the Neo4j container').action(runStop);
+program
+  .command('enrich [projectId]')
+  .description('Run post-ingest enrichment (risk scoring, metrics)')
+  .action(runEnrich);
 
-// Default action: start MCP server if no command given
-const knownCommands = ['init', 'status', 'stop', 'help'];
-const args = process.argv.slice(2);
-const hasCommand = args.some((arg) => knownCommands.includes(arg) || arg.startsWith('-'));
+program
+  .command('serve')
+  .description('Start the MCP server (30 tools)')
+  .action(runServe);
 
-if (args.length === 0 || !hasCommand) {
-  startMcpServer().catch((err) => {
-    console.error('Failed to start MCP server:', err);
+program
+  .command('risk <target>')
+  .description('Query blast radius for a function (e.g., "createBot" or "index.ts:createBot")')
+  .action(runRisk);
+
+program
+  .command('analyze <dir>')
+  .description('Parse + enrich + report in one shot')
+  .option('--tsconfig <path>', 'Path to tsconfig.json')
+  .option('--project-id <id>', 'Custom project ID')
+  .option('--name <name>', 'Project name')
+  .action(runAnalyze);
+
+program
+  .command('status')
+  .description('Show Neo4j and project status')
+  .action(runStatus);
+
+async function main() {
+  try {
+    await program.parseAsync();
+  } catch (error) {
+    console.error('Error:', error instanceof Error ? error.message : error);
     process.exit(1);
-  });
-} else {
-  program.parse();
+  }
 }
+
+main();

@@ -1,12 +1,12 @@
 {
-  "name": "code-graph-context",
+  "name": "codegraph",
   "version": "2.9.0",
   "description": "MCP server that builds code graphs to provide rich context to LLMs",
   "type": "module",
-  "homepage": "https://github.com/drewdrewH/code-graph-context#readme",
+  "homepage": "https://github.com/JTheWatcher/codegraph#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/drewdrewH/code-graph-context.git"
+    "url": "git+https://github.com/JTheWatcher/codegraph.git"
   },
   "keywords": [
     "mcp",
@@ -30,7 +30,7 @@
   "license": "MIT",
   "main": "dist/mcp/mcp.server.js",
   "bin": {
-    "code-graph-context": "dist/cli/cli.js"
+    "codegraph": "dist/cli/cli.js"
   },
   "files": [
     "dist/**/*",

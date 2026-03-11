@@ -69,7 +69,30 @@ echo "=== 9/10: Architecture layers ==="
 npx tsx seed-architecture-layers.ts godspeed 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 10/10: Embeddings (OpenAI) ==="
+echo "=== 10/11: riskLevel v2 promotion (temporal coupling + author entropy) ==="
+cypher-shell -u neo4j -p codegraph "
+MATCH (f:CodeNode)
+WHERE f.riskLevel IS NOT NULL
+WITH f,
+  coalesce(f.temporalCoupling, 0) AS tc,
+  coalesce(f.authorEntropy, 1) AS ae,
+  f.riskLevel AS base
+SET f.riskLevel = base * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15),
+    f.riskTier = CASE
+      WHEN base * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15) > 500 THEN 'CRITICAL'
+      WHEN base * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15) > 100 THEN 'HIGH'
+      WHEN base * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15) > 20 THEN 'MEDIUM'
+      ELSE 'LOW'
+    END
+RETURN 'Promoted riskLevel v2 on ' + toString(count(f)) + ' nodes' AS status
+"
+
+echo ""
+echo "=== 11/12: Test coverage mapping ==="
+npx tsx seed-test-coverage.ts . 2>&1 | grep -v "dotenv\|tip:"
+
+echo ""
+echo "=== 12/12: Embeddings (OpenAI) ==="
 npx tsx embed-nodes.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""

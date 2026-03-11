@@ -271,7 +271,7 @@ codegraph/
 ## Key Design Decisions
 
 - **ts-morph over tree-sitter**: Semantic type resolution catches what syntax-only parsing misses
-- **Forked from code-graph-context v2.9.0**: Gave us ~60% of Phase 1 for free
+- **Forked from drewdrewH/code-graph-context v2.9.0**: Gave us ~60% of Phase 1 for free
 - **Pre-computed risk scores**: Agents check one property, not run a scoring query every time
 - **Edit simulation before writing**: Shows exactly what breaks, not just what might
 - **Graph informs, not gatekeeps**: SKILL.md sets expectations, no compliance theater
