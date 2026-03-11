@@ -50,6 +50,7 @@ export const TOOL_NAMES = {
   swarmMessage: 'swarm_message',
   simulateEdit: 'simulate_edit',
   preEditCheck: 'pre_edit_check',
+  swarmGraphRefresh: 'swarm_graph_refresh',
 } as const;
 
 // Tool Metadata
@@ -390,6 +391,21 @@ Parameters:
 - filePath (optional): Disambiguate if multiple functions share the name
 
 ALWAYS call this before editing a function. It takes 1 second and can prevent breakage.`,
+  },
+  [TOOL_NAMES.swarmGraphRefresh]: {
+    title: 'Swarm Graph Refresh',
+    description: `Re-parse changed files and update the CodeGraph after real edits.
+
+Workers MUST call this after editing files and BEFORE calling swarm_complete_task.
+Without this, the next agent's pre_edit_check and simulate_edit will operate on stale graph data.
+
+Uses the existing incremental parse pipeline: detects changes, saves cross-file edges,
+deletes old subgraphs, reparses with ts-morph, reimports to Neo4j.
+
+Parameters:
+- projectId (required): Project ID, name, or path
+
+Returns: count of files reparsed, nodes updated, edges updated.`,
   },
   [TOOL_NAMES.swarmMessage]: {
     title: 'Swarm Message',

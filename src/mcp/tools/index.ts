@@ -23,6 +23,7 @@ import { createRecallSessionNotesTool, createSaveSessionNoteTool } from './sessi
 import { createStartWatchProjectTool } from './start-watch-project.tool.js';
 import { createStopWatchProjectTool } from './stop-watch-project.tool.js';
 import { createSwarmClaimTaskTool } from './swarm-claim-task.tool.js';
+import { createSwarmGraphRefreshTool } from './swarm-graph-refresh.tool.js';
 import { createSwarmCleanupTool } from './swarm-cleanup.tool.js';
 import { createSwarmCompleteTaskTool } from './swarm-complete-task.tool.js';
 import { createSwarmGetTasksTool } from './swarm-get-tasks.tool.js';
@@ -97,6 +98,9 @@ export const registerAllTools = (server: McpServer): void => {
 
   // Register swarm messaging tools (direct agent-to-agent communication)
   createSwarmMessageTool(server);
+
+  // Register swarm graph refresh (incremental reparse after edits)
+  createSwarmGraphRefreshTool(server);
 
   // Register session bookmark tools (cross-session context continuity)
   createSaveSessionBookmarkTool(server);
