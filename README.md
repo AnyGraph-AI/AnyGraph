@@ -1,613 +1,279 @@
-# Code Graph Context
+# CodeGraph
 
-[![npm version](https://badge.fury.io/js/code-graph-context.svg)](https://www.npmjs.com/package/code-graph-context)
-[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-007ACC?logo=typescript&logoColor=white)](https://typescriptlang.org/)
-[![Neo4j](https://img.shields.io/badge/Neo4j-5.23+-018bff?logo=neo4j&logoColor=white)](https://neo4j.com/)
-[![NestJS](https://img.shields.io/badge/NestJS-Compatible-E0234E?logo=nestjs&logoColor=white)](https://nestjs.com/)
-[![OpenAI](https://img.shields.io/badge/OpenAI-Powered-412991?logo=openai&logoColor=white)](https://openai.com/)
-[![MCP](https://img.shields.io/badge/MCP-Server-blue)](https://modelcontextprotocol.io/)
+A Neo4j code knowledge graph that gives AI coding agents structural awareness before they edit. Parses TypeScript codebases into nodes (every function, class, method, variable, import, type) and edges (calls, imports, containment, state access, temporal coupling, ownership, architecture layers). Pre-computes risk scores, blast radius, and change impact.
 
-**Give your AI coding assistant a photographic memory of your codebase.**
-
-Code Graph Context is an MCP server that builds a semantic graph of your TypeScript codebase, enabling Claude to understand not just individual files, but how your entire system fits together.
-
-> **Config-Driven & Extensible**: Define custom framework schemas to capture domain-specific patterns beyond the included NestJS support. The parser is fully configurable to recognize your architectural patterns, decorators, and relationships.
-
-```
-                    ┌─────────────────────────────────────────────────────────────┐
-                    │                     YOUR CODEBASE                           │
-                    │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-                    │  │ Service  │  │Controller│  │  Module  │  │  Entity  │    │
-                    │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘    │
-                    └───────┼─────────────┼─────────────┼─────────────┼──────────┘
-                            │             │             │             │
-                            ▼             ▼             ▼             ▼
-                    ┌─────────────────────────────────────────────────────────────┐
-                    │                   CODE GRAPH CONTEXT                        │
-                    │                                                             │
-                    │   AST Parser ──► Neo4j Graph ──► Vector Embeddings          │
-                    │   (ts-morph)     (Relationships)  (OpenAI)                  │
-                    │                                                             │
-                    └─────────────────────────────────────────────────────────────┘
-                                                │
-                                                ▼
-                    ┌─────────────────────────────────────────────────────────────┐
-                    │                      CLAUDE CODE                            │
-                    │                                                             │
-                    │   "What services depend on UserService?"                    │
-                    │   "What's the blast radius if I change this function?"      │
-                    │   "Find all HTTP endpoints that accept a UserDTO"           │
-                    │   "Refactor this across all 47 files that use it"           │
-                    │                                                             │
-                    └─────────────────────────────────────────────────────────────┘
-```
-
-## Why Code Graph Context?
-
-| Without Code Graph | With Code Graph |
-|---|---|
-| Claude reads files one at a time | Claude understands the entire dependency tree |
-| "What uses this?" requires manual searching | Instant impact analysis with risk scoring |
-| Refactoring misses edge cases | Graph traversal finds every reference |
-| Large codebases overwhelm context | Semantic search finds exactly what's relevant |
-| Multi-file changes are error-prone | Swarm agents coordinate parallel changes |
-
-## Features
-
-- **Multi-Project Support**: Parse and query multiple projects in a single database with complete isolation
-- **Semantic Search**: Vector-based search using OpenAI embeddings to find relevant code
-- **Natural Language Querying**: Convert questions into Cypher queries
-- **Framework-Aware**: Built-in NestJS schema with ability to define custom framework patterns
-- **Weighted Graph Traversal**: Intelligent traversal scoring paths by importance and relevance
-- **Workspace Support**: Auto-detects Nx, Turborepo, pnpm, Yarn, and npm workspaces
-- **Parallel & Async Parsing**: Multi-threaded parsing with Worker threads for large codebases
-- **Streaming Import**: Chunked processing for projects with 100+ files
-- **Incremental Parsing**: Only reparse changed files
-- **File Watching**: Real-time graph updates on file changes
-- **Impact Analysis**: Assess refactoring risk (LOW/MEDIUM/HIGH/CRITICAL)
-- **Dead Code Detection**: Find unreferenced exports with confidence scoring
-- **Duplicate Detection**: Structural (AST hash) and semantic (embedding similarity) duplicates
-- **Swarm Coordination**: Multi-agent stigmergic coordination with pheromone decay
-
-## Architecture
-
-```
-TypeScript Source → AST Parser (ts-morph) → Neo4j Graph + Vector Embeddings → MCP Tools
-```
-
-**Core Components:**
-- `src/core/parsers/typescript-parser.ts` - AST parsing with ts-morph
-- `src/storage/neo4j/neo4j.service.ts` - Graph storage and queries
-- `src/core/embeddings/embeddings.service.ts` - OpenAI embeddings
-- `src/mcp/mcp.server.ts` - MCP server and tool registration
-
-**Dual-Schema System:**
-- **Core Schema**: AST-level nodes (ClassDeclaration, MethodDeclaration, ImportDeclaration, etc.)
-- **Framework Schema**: Semantic interpretation (NestController, NestService, HttpEndpoint, etc.)
-
-Nodes have both `coreType` (AST) and `semanticType` (framework meaning), enabling queries like "find all controllers" while maintaining AST precision.
+**The thesis:** AI agents break things because they can't see the full dependency web. CodeGraph makes hidden connections queryable — the same way a document investigation graph makes hidden relationships in a corpus queryable.
 
 ## Quick Start
 
 ### Prerequisites
+- Node.js 22+
+- Neo4j (installed natively on WSL, not Docker)
+- `npm install` in this directory
 
-- **Node.js** >= 18
-- **Docker** (for Neo4j)
-- **OpenAI API Key**
-
-
-
-### 1. Install
-
+### Start Neo4j
 ```bash
-npm install -g code-graph-context
-code-graph-context init  # Sets up Neo4j via Docker
+sudo neo4j start
 ```
+Auth: `neo4j` / `codegraph` — `bolt://localhost:7687`
 
-### 2. Configure Claude Code
+### Graph a TypeScript project
 
-Add to Claude Code with your OpenAI API key:
-
-```bash
-claude mcp add --scope user code-graph-context \
-  -e OPENAI_API_KEY=sk-your-key-here \
-  -- code-graph-context
-```
-
-**That's it.** Restart Claude Code and you're ready to go.
-
-### 3. Parse Your Project
-
-In Claude Code, say:
-> "Parse this project and build the code graph"
-
-Claude will run `parse_typescript_project` and index your codebase.
-
----
-
-## Configuration Files
-
-Claude Code stores MCP server configs in JSON files. The location depends on scope:
-
-| Scope | File | Use Case |
-|-------|------|----------|
-| User (global) | `~/.claude.json` | Available in all projects |
-| Project | `.claude.json` in project root | Project-specific config |
-| Local | `.mcp.json` in project root | Git-ignored local overrides |
-
-### Manual Configuration
-
-If you prefer to edit the config files directly:
-
-**~/.claude.json** (user scope - recommended):
+**Step 1: Create a tsconfig.json** in the target project (if it doesn't have one):
 ```json
 {
-  "mcpServers": {
-    "code-graph-context": {
-      "command": "code-graph-context",
-      "env": {
-        "OPENAI_API_KEY": "sk-your-key-here"
-      }
-    }
-  }
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "esModuleInterop": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"]
 }
 ```
 
-**From source installation:**
-```json
+**Step 2: Edit `parse-and-ingest.ts`** — update the project path, ID, and tsconfig location. Or create a new script:
+```typescript
+import { TypeScriptParser } from './src/core/parsers/typescript-parser.js';
+import { CORE_TYPESCRIPT_SCHEMA } from './src/core/config/schema.js';
+
+const PROJECT_PATH = '/path/to/your/project/';
+const PROJECT_ID = 'proj_your_project_id';
+const TSCONFIG = 'tsconfig.json';
+
+const parser = new TypeScriptParser(PROJECT_PATH, TSCONFIG, CORE_TYPESCRIPT_SCHEMA, [], undefined, PROJECT_ID);
+await parser.parseWorkspace();
+const { nodes, edges } = parser.exportToJson();
+// ... ingest to Neo4j (see parse-and-ingest.ts for full pipeline)
+```
+
+**Step 3: Run the parser + ingest:**
+```bash
+cd codegraph && npx tsx parse-and-ingest.ts
+```
+
+**Step 4: Run post-ingest enrichment (10 steps):**
+```bash
+cd codegraph && bash post-ingest-all.sh
+```
+This adds: risk scoring, state edges, git frequency, POSSIBLE_CALL, virtual dispatch, registration properties, project node, author ownership, architecture layers, embeddings.
+
+**Step 5: Query the graph:**
+```bash
+cypher-shell -u neo4j -p codegraph "MATCH (p:Project) RETURN p.name, p.nodeCount, p.edgeCount"
+```
+
+### Graph CodeGraph itself (self-graph)
+```bash
+cd codegraph && npx tsx parse-and-ingest-self.ts
+```
+
+## What's In The Graph
+
+### Node Types (15)
+| Type | What It Represents |
+|------|-------------------|
+| `SourceFile` | A `.ts` file |
+| `Function` | Named function (top-level or inner) |
+| `Method` | Class method |
+| `Class` | Class declaration |
+| `Interface` | Interface declaration |
+| `TypeAlias` | `type X = ...` |
+| `Variable` | const/let/var (exported AND non-exported) |
+| `Property` | Class property |
+| `Parameter` | Function/method parameter |
+| `Import` | Import statement |
+| `Field` | Tracked state field (e.g., `ctx.session.pendingBuy`) |
+| `Entrypoint` | Framework registration (command, callback, event) |
+| `Author` | Git author (from `git blame`) |
+| `ArchitectureLayer` | Inferred layer (Presentation, Domain, Data, etc.) |
+| `Project` | Top-level project with stats |
+
+### Edge Types (13)
+| Edge | Meaning |
+|------|---------|
+| `CALLS` | Function invocation (with conditional, isAsync, crossFile, resolutionKind) |
+| `CONTAINS` | Parent → child |
+| `IMPORTS` | File-level import (with dynamic flag) |
+| `RESOLVES_TO` | Import symbol → canonical declaration |
+| `REGISTERED_BY` | Handler → entrypoint |
+| `READS_STATE` / `WRITES_STATE` | Function → state Field |
+| `POSSIBLE_CALL` | Dynamic dispatch (with confidence) |
+| `CO_CHANGES_WITH` | Temporal coupling from git (with coChangeCount, strength) |
+| `OWNED_BY` | SourceFile → Author |
+| `BELONGS_TO_LAYER` | SourceFile → ArchitectureLayer |
+| `HAS_PARAMETER` | Function → Parameter |
+| `HAS_MEMBER` | Class/Interface → Method/Property |
+
+### Key Properties
+- `riskLevel` / `riskTier` (LOW/MEDIUM/HIGH/CRITICAL) — pre-computed risk score
+- `riskLevelV2` — risk with temporal coupling + author entropy
+- `fanInCount` / `fanOutCount` — caller/callee counts
+- `sourceCode` — full source text (read implementations without opening files)
+- `authorEntropy` — number of distinct git authors (fragmented ownership)
+- `architectureLayer` — inferred from directory structure
+- `gitChangeFrequency` — 0.0-1.0, how often the file changes
+
+## MCP Server
+
+29 tools available via MCP:
+
+```bash
+# Start the server
+node codegraph/dist/mcp/mcp.server.js
+
+# Or configure for Claude Code (.mcp.json):
 {
   "mcpServers": {
-    "code-graph-context": {
+    "codegraph": {
       "command": "node",
-      "args": ["/absolute/path/to/code-graph-context/dist/cli/cli.js"],
-      "env": {
-        "OPENAI_API_KEY": "sk-your-key-here"
-      }
+      "args": ["/path/to/codegraph/dist/mcp/mcp.server.js"]
     }
   }
 }
 ```
 
-### Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `OPENAI_API_KEY` | **Yes** | - | For embeddings and NL queries |
-| `NEO4J_URI` | No | `bolt://localhost:7687` | Neo4j connection URI |
-| `NEO4J_USER` | No | `neo4j` | Neo4j username |
-| `NEO4J_PASSWORD` | No | `PASSWORD` | Neo4j password |
-
----
-
-## Core Capabilities
-
-### Semantic Code Search
-
-Find code by describing what you need, not by memorizing file paths:
-
-```
-"Find where user authentication tokens are validated"
-"Show me the database connection pooling logic"
-"What handles webhook signature verification?"
-```
-
-### Impact Analysis
-
-Before you refactor, understand the blast radius:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Impact Analysis: UserService.findById()                     │
-├─────────────────────────────────────────────────────────────┤
-│ Risk Level: HIGH                                            │
-│                                                             │
-│ Direct Dependents (12):                                     │
-│   └── AuthController.login()                                │
-│   └── ProfileController.getProfile()                        │
-│   └── AdminService.getUserDetails()                         │
-│   └── ... 9 more                                            │
-│                                                             │
-│ Transitive Dependents (34):                                 │
-│   └── 8 controllers, 15 services, 11 tests                  │
-│                                                             │
-│ Affected Files: 23                                          │
-│ Recommendation: Add deprecation warning before changing     │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Graph Traversal
-
-Explore relationships in any direction:
-
-```
-UserController
-    │
-    ├── INJECTS ──► UserService
-    │                   │
-    │                   ├── INJECTS ──► UserRepository
-    │                   │                   │
-    │                   │                   └── MANAGES ──► User (Entity)
-    │                   │
-    │                   └── INJECTS ──► CacheService
-    │
-    └── EXPOSES ──► POST /users
-                        │
-                        └── ACCEPTS ──► CreateUserDTO
-```
-
-### Dead Code Detection
-
-Find code that can be safely removed:
-
-```
-Dead Code Analysis: 47 items found
-├── HIGH confidence (23): Exported but never imported
-│   └── formatLegacyDate() in src/utils/date.ts:45
-│   └── UserV1DTO in src/dto/legacy/user.dto.ts:12
-│   └── ... 21 more
-├── MEDIUM confidence (18): Private, never called
-└── LOW confidence (6): May be used dynamically
-```
-
-### Duplicate Code Detection
-
-Identify DRY violations across your codebase:
-
-```
-Duplicate Groups Found: 8
-
-Group 1 (Structural - 100% identical):
-├── validateEmail() in src/auth/validation.ts:23
-└── validateEmail() in src/user/validation.ts:45
-    Recommendation: Extract to shared utils
-
-Group 2 (Semantic - 94% similar):
-├── parseUserInput() in src/api/parser.ts:78
-└── sanitizeInput() in src/webhook/parser.ts:34
-    Recommendation: Review for consolidation
-```
-
----
-
-## Swarm Coordination
-
-**Execute complex, multi-file changes with parallel AI agents.**
-
-The swarm system enables multiple Claude agents to work on your codebase simultaneously, coordinating through the code graph without stepping on each other.
-
-```
-                         ┌──────────────────┐
-                         │   ORCHESTRATOR   │
-                         │                  │
-                         │ "Add JSDoc to    │
-                         │  all services"   │
-                         └────────┬─────────┘
-                                  │
-                    ┌─────────────┼─────────────┐
-                    │             │             │
-                    ▼             ▼             ▼
-             ┌──────────┐  ┌──────────┐  ┌──────────┐
-             │ Worker 1 │  │ Worker 2 │  │ Worker 3 │
-             │          │  │          │  │          │
-             │ Claiming │  │ Working  │  │ Claiming │
-             │ AuthSvc  │  │ UserSvc  │  │ PaySvc   │
-             └──────────┘  └──────────┘  └──────────┘
-                    │             │             │
-                    └─────────────┼─────────────┘
-                                  │
-                                  ▼
-                    ┌─────────────────────────────┐
-                    │      PHEROMONE TRAILS       │
-                    │                             │
-                    │  AuthService: [claimed]     │
-                    │  UserService: [modifying]   │
-                    │  PayService:  [claimed]     │
-                    │  CacheService: [available]  │
-                    │                             │
-                    └─────────────────────────────┘
-```
-
-### Two Coordination Mechanisms
-
-#### 1. Pheromone System (Stigmergic)
-
-Agents leave markers on code nodes that decay over time—like ants leaving scent trails:
-
-| Pheromone | Half-Life | Meaning |
-|-----------|-----------|---------|
-| `exploring` | 2 min | "I'm looking at this" |
-| `claiming` | 1 hour | "This is my territory" |
-| `modifying` | 10 min | "I'm actively changing this" |
-| `completed` | 24 hours | "I finished work here" |
-| `warning` | Never | "Don't touch this" |
-| `blocked` | 5 min | "I'm stuck" |
-
-**Self-healing**: If an agent crashes, its pheromones decay and the work becomes available again.
-
-#### 2. Task Queue (Blackboard)
-
-Explicit task management with dependencies:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        TASK QUEUE                           │
-├─────────────────────────────────────────────────────────────┤
-│ [available] Add JSDoc to UserService         priority: high │
-│ [claimed]   Add JSDoc to AuthService         agent: worker1 │
-│ [blocked]   Update API docs ─────────────────► depends on ──┤
-│ [in_progress] Add JSDoc to PaymentService    agent: worker2 │
-│ [completed] Add JSDoc to CacheService        ✓              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Swarm Tools
-
+### Core Tools
 | Tool | Purpose |
 |------|---------|
-| `swarm_post_task` | Add a task to the queue |
-| `swarm_get_tasks` | Query tasks with filters |
-| `swarm_claim_task` | Claim/start/release a task |
-| `swarm_complete_task` | Complete/fail/request review |
-| `swarm_pheromone` | Leave a marker on a code node |
-| `swarm_sense` | Query what other agents are doing |
-| `swarm_cleanup` | Remove pheromones after completion |
+| `pre_edit_check` | **Gate.** Call before editing any function. Returns verdict. |
+| `simulate_edit` | Preview graph delta of a change before applying it. |
+| `impact_analysis` | Deep blast radius with transitive dependents. |
+| `search_codebase` | Natural language search (vector embeddings). |
+| `natural_language_to_cypher` | Ask questions in English → Cypher. |
+| `traverse_from_node` | Walk the graph from a node. |
+| `detect_dead_code` | Find unused exports. |
+| `swarm_graph_refresh` | Re-parse changed files after edits. |
 
-### Example: Parallel Refactoring
+### Swarm Tools (multi-agent coordination)
+| Tool | Purpose |
+|------|---------|
+| `swarm_post_task` | Post task with dependencies, context, priority. |
+| `swarm_claim_task` | Claim a pending task. Returns unread messages. |
+| `swarm_complete_task` | Complete/fail/request_review/approve/reject. |
+| `swarm_get_tasks` | Query tasks by status/agent/swarm. |
+| `swarm_message` | Agent-to-agent messaging (blocked/conflict/alert/handoff). |
+| `swarm_pheromone` | Deposit coordination signals on nodes. |
+| `swarm_sense` | Read pheromones near a node. |
+| `swarm_graph_refresh` | Re-parse after edits so next agent has fresh data. |
 
-```typescript
-// Orchestrator decomposes the task and creates individual work items
-swarm_post_task({
-  projectId: "backend",
-  swarmId: "swarm_rename_user",
-  title: "Update UserService.findUserById",
-  description: "Rename getUserById to findUserById in UserService",
-  type: "refactor",
-  createdBy: "orchestrator"
-})
+## Agent Workflows
 
-// Workers claim and execute tasks
-swarm_claim_task({ projectId: "backend", swarmId: "swarm_rename_user", agentId: "worker_1" })
-// ... do work ...
-swarm_complete_task({ taskId: "task_1", agentId: "worker_1", action: "complete", summary: "Renamed method" })
+### For coding agents editing this codebase
+Read `AGENTS.md` — full schema, queries, pre-edit protocol.
+
+### For coding agents editing any CodeGraph-tracked project
+Read `SKILL.md` — universal agent skill with pre-edit gate, query cookbook, decision tables.
+
+### For multi-agent refactoring swarms
+Read `swarm/COORDINATOR.md` (decomposition algorithm) + `swarm/WORKER.md` (worker protocol).
+
+## Operations
+
+| Command | What It Does |
+|---------|-------------|
+| `npx tsx parse-and-ingest.ts` | Parse GodSpeed + ingest to Neo4j |
+| `npx tsx parse-and-ingest-self.ts` | Parse CodeGraph itself (self-graph) |
+| `bash post-ingest-all.sh` | Run all 10 post-ingest enrichment passes |
+| `npx tsx edit-simulation.ts <file> <modified>` | Preview graph delta |
+| `npx tsx temporal-coupling.ts codegraph` | Mine git co-change patterns |
+| `npx tsx seed-author-ownership.ts codegraph` | Git blame → Author nodes |
+| `npx tsx seed-architecture-layers.ts codegraph` | Directory → layer classification |
+| `npx tsx seed-git-frequency.ts` | Git log → change frequency |
+| `npx tsx watch.ts codegraph` | File watcher (incremental re-parse) |
+| `npx tsx compute-reparse-set.ts FILE.ts` | What files need reparsing if X changes |
+| `npx tsx verify-completeness.ts` | Verify 100% declaration coverage |
+| `npx vitest run tests/graph-integrity.test.ts` | Run 19 integrity tests |
+| `npx tsx embed-nodes.ts` | Generate OpenAI embeddings for all nodes |
+
+## Current Graphs
+
+| Project | ID | Nodes | Edges | Files |
+|---------|-----|-------|-------|-------|
+| GodSpeed (Telegram trading bot) | `proj_60d5feed0001` | 2,095 | 4,458 | 36 |
+| CodeGraph (self-graph) | `proj_c0d3e9a1f200` | 2,107 | 3,468 | 95 |
+
+Both coexist in the same Neo4j instance, separated by `projectId`.
+
+## Extending to Non-Code Corpora
+
+The graph schema is general. The same architecture can graph any structured corpus:
+
+| Code Concept | Corpus Equivalent |
+|-------------|-------------------|
+| Function | Document / Entity |
+| CALLS | REFERENCES / MENTIONS |
+| IMPORTS | CITES / LINKS_TO |
+| CONTAINS | SECTION_OF / PART_OF |
+| Field | Metadata field / Tag |
+| READS_STATE / WRITES_STATE | USES_CONCEPT / DEFINES_CONCEPT |
+| CO_CHANGES_WITH | CO_OCCURS_WITH |
+| OWNED_BY | AUTHORED_BY |
+| ArchitectureLayer | Category / Topic |
+| riskLevel | Importance / Centrality score |
+
+To graph a corpus:
+1. Write a parser that emits nodes and edges in the same JSON format as the TypeScript parser
+2. Use `ingest-to-neo4j.ts` to load into Neo4j (it's schema-agnostic — it just reads nodes/edges arrays)
+3. Write post-ingest enrichment passes for your domain (risk scoring, co-occurrence, authorship)
+4. The MCP tools (`search_codebase`, `traverse_from_node`, `impact_analysis`) work on any graph shape
+
+The GOYFILES investigation graph (Epstein document corpus) is the proof that this pattern works at scale: 200K+ nodes, millions of edges, same Neo4j + agent + query pattern.
+
+## Architecture
+
+```
+codegraph/
+├── src/
+│   ├── core/
+│   │   ├── parsers/          # ts-morph TypeScript parser (the engine)
+│   │   ├── config/           # Schema definitions + framework schemas
+│   │   ├── embeddings/       # OpenAI embeddings + NL→Cypher
+│   │   ├── utils/            # File change detection, graph factory
+│   │   └── workspace/        # Project detection
+│   ├── mcp/
+│   │   ├── tools/            # 29 MCP tools
+│   │   ├── handlers/         # Graph generation, traversal, incremental parse
+│   │   ├── services/         # Watch manager, job manager
+│   │   └── mcp.server.ts     # MCP server entry point
+│   └── storage/
+│       └── neo4j/            # Neo4j service + queries
+├── swarm/
+│   ├── COORDINATOR.md        # Multi-agent coordinator protocol
+│   └── WORKER.md             # Worker protocol
+├── AGENTS.md                 # Agent instructions for editing CodeGraph
+├── SKILL.md                  # Universal agent skill for any project
+├── PLAN.md                   # Architecture plan + design decisions
+├── parse-and-ingest.ts       # GodSpeed parser + ingest script
+├── parse-and-ingest-self.ts  # Self-graph script
+├── post-ingest-all.sh        # 10-step enrichment pipeline
+├── edit-simulation.ts        # Delta graph preview
+├── temporal-coupling.ts      # Git co-change mining
+├── seed-author-ownership.ts  # Git blame → Author nodes
+├── seed-architecture-layers.ts # Directory → layer classification
+├── verify-completeness.ts    # Declaration coverage verification
+└── .codegraph.yml            # Project-specific config (framework, state roots, risk)
 ```
 
-### Install the Swarm Skill
+## Tech Stack
 
-For optimal swarm execution, install the included Claude Code skill that teaches agents the coordination protocol:
+- **Parser**: ts-morph (semantic TypeScript parsing — resolves types, not just syntax)
+- **Graph**: Neo4j + APOC (same as GOYFILES investigation graph)
+- **MCP**: @modelcontextprotocol/sdk (29 tools)
+- **Embeddings**: OpenAI text-embedding-3-large (optional, for semantic search)
+- **NL→Cypher**: OpenAI gpt-4o (optional, for natural language queries)
+- **Tests**: Vitest (19 integrity tests)
+- **File watching**: @parcel/watcher (native inotify)
 
-```bash
-# Copy to your global skills directory
-mkdir -p ~/.claude/skills
-cp -r skills/swarm ~/.claude/skills/
-```
+## Key Design Decisions
 
-Or for a specific project:
-```bash
-cp -r skills/swarm .claude/skills/
-```
-
-The skill provides:
-- Worker agent protocol with step-by-step workflow
-- Multi-phase orchestration patterns (discovery, contracts, implementation, validation)
-- Common failure modes and how to prevent them
-- Complete tool reference
-
-Once installed, just say "swarm" or "parallel agents" and Claude will use the skill automatically.
-
-See [`skills/swarm/SKILL.md`](skills/swarm/SKILL.md) for the full documentation.
-
----
-
-## All Tools
-
-| Tool | Description |
-|------|-------------|
-| **Discovery** | |
-| `list_projects` | List parsed projects in the database |
-| `search_codebase` | Semantic search using vector embeddings |
-| `traverse_from_node` | Explore relationships from a node |
-| `natural_language_to_cypher` | Convert questions to Cypher queries |
-| **Analysis** | |
-| `impact_analysis` | Assess refactoring risk (LOW/MEDIUM/HIGH/CRITICAL) |
-| `detect_dead_code` | Find unreferenced exports and methods |
-| `detect_duplicate_code` | Find structural and semantic duplicates |
-| **Parsing** | |
-| `parse_typescript_project` | Build the graph from source |
-| `check_parse_status` | Monitor async parsing jobs |
-| `start_watch_project` | Auto-update graph on file changes |
-| `stop_watch_project` | Stop file watching |
-| `list_watchers` | List active file watchers |
-| **Swarm** | |
-| `swarm_post_task` | Add task to the queue |
-| `swarm_get_tasks` | Query tasks |
-| `swarm_claim_task` | Claim/start/release tasks |
-| `swarm_complete_task` | Complete/fail/review tasks |
-| `swarm_pheromone` | Leave coordination markers |
-| `swarm_sense` | Query what others are doing |
-| `swarm_cleanup` | Clean up after swarm completion |
-| **Utility** | |
-| `test_neo4j_connection` | Verify database connectivity |
-
-### Tool Workflow Patterns
-
-**Pattern 1: Discovery → Focus → Deep Dive**
-```
-list_projects → search_codebase → traverse_from_node → traverse (with skip for pagination)
-```
-
-**Pattern 2: Pre-Refactoring Safety**
-```
-search_codebase("function to change") → impact_analysis(nodeId) → review risk level
-```
-
-**Pattern 3: Code Health Audit**
-```
-detect_dead_code → detect_duplicate_code → prioritize cleanup
-```
-
-**Pattern 4: Multi-Agent Work**
-```
-swarm_post_task → swarm_claim_task → swarm_complete_task → swarm_get_tasks(includeStats) → swarm_cleanup
-```
-
-### Multi-Project Support
-
-All query tools require `projectId` for isolation. You can use:
-- **Project ID**: `proj_a1b2c3d4e5f6` (auto-generated)
-- **Project name**: `my-backend` (from package.json)
-- **Project path**: `/path/to/project` (resolved automatically)
-
-```typescript
-// These all work:
-search_codebase({ projectId: "my-backend", query: "auth" })
-search_codebase({ projectId: "proj_a1b2c3d4e5f6", query: "auth" })
-search_codebase({ projectId: "/path/to/my-backend", query: "auth" })
-```
-
----
-
-## Framework Support
-
-### NestJS (Built-in)
-
-Deep understanding of NestJS patterns:
-
-- **Controllers** with route analysis (`@Controller`, `@Get`, `@Post`, etc.)
-- **Services** with dependency injection mapping (`@Injectable`)
-- **Modules** with import/export relationships (`@Module`)
-- **Guards, Pipes, Interceptors** as middleware chains
-- **DTOs** with validation decorators (`@IsString`, `@IsEmail`, etc.)
-- **Entities** with TypeORM relationship mapping
-
-**NestJS-Specific Relationships:**
-- `INJECTS` - Dependency injection
-- `EXPOSES` - Controller exposes HTTP endpoint
-- `MODULE_IMPORTS`, `MODULE_PROVIDES`, `MODULE_EXPORTS` - Module system
-- `GUARDED_BY`, `TRANSFORMED_BY`, `INTERCEPTED_BY` - Middleware
-
-### Custom Framework Schemas
-
-The parser is **config-driven**. Define your own framework patterns:
-
-```typescript
-// Example: Custom React schema
-const REACT_SCHEMA = {
-  name: 'react',
-  decoratorPatterns: [
-    { pattern: /^use[A-Z]/, semanticType: 'ReactHook' },
-    { pattern: /^with[A-Z]/, semanticType: 'HOC' },
-  ],
-  nodeTypes: [
-    { coreType: 'FunctionDeclaration', condition: (node) => node.name?.endsWith('Provider'), semanticType: 'ContextProvider' },
-  ],
-  relationships: [
-    { type: 'PROVIDES_CONTEXT', from: 'ContextProvider', to: 'ReactHook' },
-  ]
-};
-```
-
-The dual-schema system means every node has:
-- `coreType`: AST-level (ClassDeclaration, FunctionDeclaration)
-- `semanticType`: Framework meaning (NestController, ReactHook)
-
-This enables queries like "find all hooks that use context" while maintaining AST precision for refactoring.
-
----
-
-## Troubleshooting
-
-### MCP Server Not Connecting
-
-```bash
-# Check the server is registered
-claude mcp list
-
-# Verify Neo4j is running
-docker ps | grep neo4j
-
-# Test manually
-code-graph-context status
-```
-
-### Missing OPENAI_API_KEY
-
-Symptoms: "Failed to generate embedding" errors
-
-Fix: Ensure the key is in your config file:
-```bash
-# Check current config
-cat ~/.claude.json | grep -A5 "code-graph-context"
-
-# Re-add with key
-claude mcp remove code-graph-context
-claude mcp add --scope user code-graph-context \
-  -e OPENAI_API_KEY=sk-your-key-here \
-  -- code-graph-context
-```
-
-### Neo4j Memory Issues
-
-For large codebases, increase memory limits:
-
-```bash
-# Stop and recreate with more memory
-code-graph-context stop
-code-graph-context init --memory 4G
-```
-
-### Parsing Timeouts
-
-Use async mode for large projects:
-```typescript
-parse_typescript_project({
-  projectPath: "/path/to/project",
-  tsconfigPath: "/path/to/project/tsconfig.json",
-  async: true  // Returns immediately, poll with check_parse_status
-})
-```
-
----
-
-## CLI Commands
-
-```bash
-code-graph-context init [options]   # Set up Neo4j container
-code-graph-context status           # Check Docker/Neo4j status
-code-graph-context stop             # Stop Neo4j container
-```
-
-**Init options:**
-- `-p, --port <port>` - Bolt port (default: 7687)
-- `--http-port <port>` - Browser port (default: 7474)
-- `--password <password>` - Neo4j password (default: PASSWORD)
-- `-m, --memory <size>` - Heap memory (default: 2G)
-- `-f, --force` - Recreate container
-
----
-
-## Contributing
-
-```bash
-git clone https://github.com/drewdrewH/code-graph-context.git
-cd code-graph-context
-npm install
-npm run build
-npm run dev  # Watch mode
-```
-
-Conventional Commits: `feat|fix|docs|refactor(scope): description`
-
----
-
-## License
-
-MIT - see [LICENSE](LICENSE)
-
----
-
-## Links
-
-- [Issues](https://github.com/drewdrewH/code-graph-context/issues)
-- [MCP Documentation](https://modelcontextprotocol.io/docs)
-- [Neo4j](https://neo4j.com/)
+- **ts-morph over tree-sitter**: Semantic type resolution catches what syntax-only parsing misses
+- **Forked from code-graph-context v2.9.0**: Gave us ~60% of Phase 1 for free
+- **Pre-computed risk scores**: Agents check one property, not run a scoring query every time
+- **Edit simulation before writing**: Shows exactly what breaks, not just what might
+- **Graph informs, not gatekeeps**: SKILL.md sets expectations, no compliance theater
+- **100% declaration coverage**: Every const, let, var, function, class in source = a node
+- **Separate projectId**: Multiple codebases coexist in one Neo4j instance
