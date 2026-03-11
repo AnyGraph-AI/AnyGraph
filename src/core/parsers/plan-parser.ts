@@ -739,7 +739,7 @@ export async function enrichCrossDomain(
               }
 
               await session.run(
-                `MATCH (t:CodeNode {id: $taskId})
+                `MATCH (t {id: $taskId})
                  SET t.hasCodeEvidence = true,
                      t.codeEvidenceCount = $count`,
                 { taskId: ref.taskId, count: result.records.length },
@@ -777,7 +777,7 @@ export async function enrichCrossDomain(
               }
 
               await session.run(
-                `MATCH (t:CodeNode {id: $taskId})
+                `MATCH (t {id: $taskId})
                  SET t.hasCodeEvidence = true,
                      t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + $count`,
                 { taskId: ref.taskId, count: result.records.length },
@@ -895,7 +895,7 @@ export async function enrichCrossDomain(
             for (const keyword of keywords) {
               if (keyword.length < 4) continue;
               const result = await session.run(
-                `MATCH (f:CodeNode {projectId: $codePid})
+                `MATCH (f {projectId: $codePid})
                  WHERE f.coreType IN ['FunctionDeclaration', 'ArrowFunction', 'MethodDeclaration']
                  AND toLower(f.name) CONTAINS $keyword
                  RETURN f.id AS id, f.name AS name
@@ -920,7 +920,7 @@ export async function enrichCrossDomain(
                 }
 
                 await session.run(
-                  `MATCH (t:CodeNode {id: $taskId})
+                  `MATCH (t {id: $taskId})
                    SET t.hasCodeEvidence = true,
                        t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + $cnt`,
                   { taskId, cnt: result.records.length },
