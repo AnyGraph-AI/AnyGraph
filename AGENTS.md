@@ -301,11 +301,11 @@ MCP config for Claude Code (`.mcp.json` in project root):
 cd codegraph && npx tsx parse-and-ingest.ts
 ```
 
-### Full post-ingest pipeline (15 steps):
+### Full post-ingest pipeline (16 steps):
 ```bash
 cd codegraph && bash post-ingest-all.sh
 ```
-Steps: risk scoring → state edges → git frequency → POSSIBLE_CALL → virtual dispatch → registration properties → project node → author ownership → architecture layers → riskLevel v2 promotion → provenance + confidence → unresolved reference nodes → audit subgraph → test coverage mapping → embeddings
+Steps: risk scoring → state edges → git frequency → POSSIBLE_CALL → virtual dispatch → registration properties → project node → author ownership → architecture layers → riskLevel v2 promotion → provenance + confidence → unresolved reference nodes → audit subgraph → test coverage mapping → embeddings → evaluation (regression detection)
 
 ### Run evaluation (regression detection):
 ```bash

@@ -1,6 +1,6 @@
 {
   "name": "codegraph",
-  "version": "2.9.0",
+  "version": "0.1.0",
   "description": "MCP server that builds code graphs to provide rich context to LLMs",
   "type": "module",
   "homepage": "https://github.com/JTheWatcher/codegraph#readme",

@@ -55,11 +55,11 @@ const { nodes, edges } = parser.exportToJson();
 cd codegraph && npx tsx parse-and-ingest.ts
 ```
 
-**Step 4: Run post-ingest enrichment (15 steps):**
+**Step 4: Run post-ingest enrichment (16 steps):**
 ```bash
 cd codegraph && bash post-ingest-all.sh
 ```
-This adds: risk scoring, state edges, git frequency, POSSIBLE_CALL, virtual dispatch, registration properties, project node, author ownership, architecture layers, riskLevel v2 promotion, provenance + confidence, unresolved reference nodes, audit subgraph, test coverage mapping, embeddings.
+This adds: risk scoring, state edges, git frequency, POSSIBLE_CALL, virtual dispatch, registration properties, project node, author ownership, architecture layers, riskLevel v2 promotion, provenance + confidence, unresolved reference nodes, audit subgraph, test coverage mapping, embeddings, evaluation (regression detection).
 
 **Step 5: Query the graph:**
 ```bash
@@ -119,7 +119,7 @@ cd codegraph && npx tsx parse-and-ingest-self.ts
 
 ## MCP Server
 
-29 tools available via MCP:
+33 tools available via MCP:
 
 ```bash
 # Start the server
@@ -146,6 +146,9 @@ node codegraph/dist/mcp/mcp.server.js
 | `natural_language_to_cypher` | Ask questions in English → Cypher. |
 | `traverse_from_node` | Walk the graph from a node. |
 | `detect_dead_code` | Find unused exports. |
+| `detect_hotspots` | Ranked functions by risk × change frequency. |
+| `state_impact` | State field access patterns, race condition detection. |
+| `registration_map` | Query framework entrypoints by trigger. |
 | `swarm_graph_refresh` | Re-parse changed files after edits. |
 
 ### Swarm Tools (multi-agent coordination)
@@ -177,7 +180,7 @@ Read `swarm/COORDINATOR.md` (decomposition algorithm) + `swarm/WORKER.md` (worke
 |---------|-------------|
 | `npx tsx parse-and-ingest.ts` | Parse GodSpeed + ingest to Neo4j |
 | `npx tsx parse-and-ingest-self.ts` | Parse CodeGraph itself (self-graph) |
-| `bash post-ingest-all.sh` | Run all 10 post-ingest enrichment passes |
+| `bash post-ingest-all.sh` | Run all 16 post-ingest enrichment passes |
 | `npx tsx edit-simulation.ts <file> <modified>` | Preview graph delta |
 | `npx tsx temporal-coupling.ts codegraph` | Mine git co-change patterns |
 | `npx tsx seed-author-ownership.ts codegraph` | Git blame → Author nodes |
@@ -246,10 +249,10 @@ codegraph/
 │   └── WORKER.md             # Worker protocol
 ├── AGENTS.md                 # Agent instructions for editing CodeGraph
 ├── SKILL.md                  # Universal agent skill for any project
-├── PLAN.md                   # Architecture plan + design decisions
+├── CHANGELOG.md              # Version history
 ├── parse-and-ingest.ts       # GodSpeed parser + ingest script
 ├── parse-and-ingest-self.ts  # Self-graph script
-├── post-ingest-all.sh        # 10-step enrichment pipeline
+├── post-ingest-all.sh        # 16-step enrichment pipeline
 ├── edit-simulation.ts        # Delta graph preview
 ├── temporal-coupling.ts      # Git co-change mining
 ├── seed-author-ownership.ts  # Git blame → Author nodes
@@ -262,7 +265,7 @@ codegraph/
 
 - **Parser**: ts-morph (semantic TypeScript parsing — resolves types, not just syntax)
 - **Graph**: Neo4j + APOC (same as GOYFILES investigation graph)
-- **MCP**: @modelcontextprotocol/sdk (29 tools)
+- **MCP**: @modelcontextprotocol/sdk (33 tools)
 - **Embeddings**: OpenAI text-embedding-3-large (optional, for semantic search)
 - **NL→Cypher**: OpenAI gpt-4o (optional, for natural language queries)
 - **Tests**: Vitest (19 integrity tests)
