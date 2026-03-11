@@ -19,7 +19,32 @@ echo "=== 3/5: Git change frequency ==="
 npx tsx seed-git-frequency.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
-echo "=== 4/5: Project node ==="
+echo "=== 4/8: POSSIBLE_CALL edges (dynamic dispatch) ==="
+npx tsx create-possible-call-edges.ts 2>&1 | grep -v "dotenv\|tip:"
+
+echo ""
+echo "=== 5/8: Virtual dispatch (interface/inheritance) ==="
+npx tsx create-virtual-dispatch-edges.ts 2>&1 | grep -v "dotenv\|tip:"
+
+echo ""
+echo "=== 6/8: Registration properties (registrationKind/Trigger) ==="
+cypher-shell -u neo4j -p codegraph "
+MATCH (e:Entrypoint)
+WHERE e.context IS NOT NULL
+WITH e, apoc.convert.fromJsonMap(e.context) AS ctx
+SET e.registrationKind = ctx.entrypointKind,
+    e.registrationTrigger = ctx.trigger,
+    e.framework = ctx.framework
+WITH count(e) AS entrypoints
+MATCH (h)-[:REGISTERED_BY]->(e2:Entrypoint)
+WHERE e2.registrationKind IS NOT NULL
+SET h.registrationKind = e2.registrationKind,
+    h.registrationTrigger = e2.registrationTrigger
+RETURN 'Promoted registrationKind/Trigger to ' + toString(count(h)) + ' handlers' AS status
+"
+
+echo ""
+echo "=== 7/8: Project node ==="
 cypher-shell -u neo4j -p codegraph "
 MERGE (p:Project {projectId: 'proj_60d5feed0001'})
 SET p.name = 'GodSpeed',
@@ -36,7 +61,7 @@ RETURN 'Project node updated: ' + toString(nodes) + ' nodes, ' + toString(edges)
 "
 
 echo ""
-echo "=== 5/5: Embeddings (OpenAI) ==="
+echo "=== 8/8: Embeddings (OpenAI) ==="
 npx tsx embed-nodes.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
