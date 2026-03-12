@@ -61,6 +61,7 @@
     "verification:pilot:vg5:thresholds": "node --loader ts-node/esm src/utils/verification-vg5-thresholds.ts",
     "verification:proof:record": "node --loader ts-node/esm src/utils/verification-invariant-proof-records.ts",
     "verification:proof:status": "node --loader ts-node/esm src/utils/verification-done-vs-proven.ts",
+    "verification:recommendation:mismatch": "node --loader ts-node/esm src/utils/verification-recommendation-mismatch.ts",
 
     "registry:reconcile": "node --loader ts-node/esm reconcile-project-registry.ts",
     "registry:verify": "node --loader ts-node/esm verify-project-registry.ts",
