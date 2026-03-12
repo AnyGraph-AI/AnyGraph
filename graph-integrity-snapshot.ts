@@ -57,8 +57,12 @@ async function main(): Promise<void> {
   )) as Array<Record<string, unknown>>;
 
   const violationRows = (await neo4j.run(
-    `MATCH (a:AuditCheck)-[:FOUND]->(v:InvariantViolation)
-     RETURN a.projectId AS projectId, count(v) AS invariantViolationCount
+    `MATCH (a:AuditCheck)
+     WHERE a.projectId IS NOT NULL AND a.timestamp IS NOT NULL
+     WITH a.projectId AS projectId, max(a.timestamp) AS latestAuditTs
+     MATCH (latest:AuditCheck {projectId: projectId, timestamp: latestAuditTs})
+     OPTIONAL MATCH (latest)-[:FOUND]->(v:InvariantViolation)
+     RETURN projectId, count(v) AS invariantViolationCount
      ORDER BY projectId`,
   )) as Array<Record<string, unknown>>;
 
