@@ -31,6 +31,66 @@ function planProjectId(filter: string): string {
   return 'plan_' + filter.replace(/-/g, '_');
 }
 
+interface FreshnessCheckResult {
+  ok: boolean;
+  maxAgeMinutes: number;
+  checkedProjectCount: number;
+  staleProjects: Array<{ projectId: string; ageMinutes: number | null; lastParsed: string }>;
+}
+
+async function checkPlanFreshness(
+  neo4jService: Neo4jService,
+  projectFilter?: string,
+  maxAgeMinutes = 30,
+): Promise<FreshnessCheckResult> {
+  const params: Record<string, unknown> = {};
+  const filterClause = projectFilter
+    ? 'AND p.projectId = $projectId'
+    : '';
+
+  if (projectFilter) {
+    params.projectId = planProjectId(projectFilter);
+  }
+
+  const rows = await neo4jService.run(
+    `MATCH (p:Project)
+     WHERE p.projectId STARTS WITH 'plan_' ${filterClause}
+     RETURN p.projectId AS projectId, p.lastParsed AS lastParsed`,
+    params,
+  );
+
+  const now = Date.now();
+  const staleProjects: Array<{ projectId: string; ageMinutes: number | null; lastParsed: string }> = [];
+
+  for (const row of rows) {
+    const projectId = str(row.projectId);
+    const lastParsed = str(row.lastParsed);
+
+    if (!lastParsed) {
+      staleProjects.push({ projectId, ageMinutes: null, lastParsed: '(missing)' });
+      continue;
+    }
+
+    const parsedTs = Date.parse(lastParsed);
+    if (!Number.isFinite(parsedTs)) {
+      staleProjects.push({ projectId, ageMinutes: null, lastParsed });
+      continue;
+    }
+
+    const ageMinutes = (now - parsedTs) / 60000;
+    if (ageMinutes > maxAgeMinutes) {
+      staleProjects.push({ projectId, ageMinutes: Math.round(ageMinutes), lastParsed });
+    }
+  }
+
+  return {
+    ok: staleProjects.length === 0,
+    maxAgeMinutes,
+    checkedProjectCount: rows.length,
+    staleProjects,
+  };
+}
+
 // ============================================================================
 // plan_status — Full status overview
 // ============================================================================
@@ -412,6 +472,12 @@ export function createPlanPriorityTool(server: McpServer) {
       limit: z.number().optional().describe(
         'Max tasks to return (default 20)',
       ),
+      freshnessMaxMinutes: z.number().optional().describe(
+        'Plan ingest freshness threshold in minutes before recommendations are considered stale (default 30).',
+      ),
+      allowStale: z.boolean().optional().describe(
+        'Override freshness guard and return recommendations even when plan ingest is stale (default false).',
+      ),
     },
     async (args) => {
       try {
@@ -419,6 +485,22 @@ export function createPlanPriorityTool(server: McpServer) {
           ? `AND t.projectId = '${planProjectId(args.projectFilter)}'`
           : '';
         const limit = args.limit ?? 20;
+        const freshnessMaxMinutes = args.freshnessMaxMinutes ?? 30;
+
+        if (!args.allowStale) {
+          const freshness = await checkPlanFreshness(neo4jService, args.projectFilter, freshnessMaxMinutes);
+          if (!freshness.ok) {
+            const sample = freshness.staleProjects
+              .slice(0, 5)
+              .map((p) => `${p.projectId} age=${p.ageMinutes ?? 'unknown'}m lastParsed=${p.lastParsed}`)
+              .join(' | ');
+            return createErrorResponse(
+              `PLAN_FRESHNESS_GUARD_FAILED: ${freshness.staleProjects.length}/${freshness.checkedProjectCount} plan project(s) are stale (> ${freshness.maxAgeMinutes}m). ` +
+              `Re-ingest plans before requesting priority recommendations (npx tsx src/core/parsers/plan-parser.ts /home/jonathan/.openclaw/workspace/plans --ingest --enrich). ` +
+              `Sample: ${sample}`,
+            );
+          }
+        }
 
         const results = await neo4jService.run(
           `MATCH (t:Task {status: 'planned'})
@@ -494,6 +576,12 @@ export function createPlanNextTasksTool(server: McpServer) {
         'Filter to a specific plan project (e.g., "codegraph", "godspeed", "runtime-graph"). Omit for all.',
       ),
       limit: z.number().optional().describe('Max tasks to return (default 15)'),
+      freshnessMaxMinutes: z.number().optional().describe(
+        'Plan ingest freshness threshold in minutes before recommendations are considered stale (default 30).',
+      ),
+      allowStale: z.boolean().optional().describe(
+        'Override freshness guard and return recommendations even when plan ingest is stale (default false).',
+      ),
     },
     async (args) => {
       try {
@@ -501,6 +589,22 @@ export function createPlanNextTasksTool(server: McpServer) {
         const filterClause = args.projectFilter
           ? `AND t.projectId = '${planProjectId(args.projectFilter)}'`
           : '';
+        const freshnessMaxMinutes = args.freshnessMaxMinutes ?? 30;
+
+        if (!args.allowStale) {
+          const freshness = await checkPlanFreshness(neo4jService, args.projectFilter, freshnessMaxMinutes);
+          if (!freshness.ok) {
+            const sample = freshness.staleProjects
+              .slice(0, 5)
+              .map((p) => `${p.projectId} age=${p.ageMinutes ?? 'unknown'}m lastParsed=${p.lastParsed}`)
+              .join(' | ');
+            return createErrorResponse(
+              `PLAN_FRESHNESS_GUARD_FAILED: ${freshness.staleProjects.length}/${freshness.checkedProjectCount} plan project(s) are stale (> ${freshness.maxAgeMinutes}m). ` +
+              `Re-ingest plans before requesting next-task recommendations (npx tsx src/core/parsers/plan-parser.ts /home/jonathan/.openclaw/workspace/plans --ingest --enrich). ` +
+              `Sample: ${sample}`,
+            );
+          }
+        }
 
         const rows = await neo4jService.run(
           `MATCH (t:Task {status: 'planned'})

@@ -766,7 +766,6 @@ export async function enrichCrossDomain(
                  AND (
                    target.id = $token
                    OR toLower(target.name) = toLower($tokenNormalized)
-                   OR toLower(target.name) CONTAINS toLower($tokenNormalized)
                    OR ($milestoneNum IS NOT NULL AND target.coreType = 'Milestone' AND target.number = toInteger($milestoneNum))
                  )
                  WITH target,
