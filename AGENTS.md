@@ -556,3 +556,46 @@ Checkpoint/resume options:
 - `npm run ir:parity:resume` (resume + retry failed targets)
 - `npm run ir:parity -- --force-target=<name>` to run a single target (`codegraph|godspeed|bible-graph`)
 - `npm run ir:parity -- --fresh` to ignore prior state and start clean
+
+### Verification Pipeline (SARIF → Scope → Gate → Runtime Truth)
+
+The verification subsystem ingests tool findings, enforces governance, and captures execution proof in the graph.
+
+**Commands (in pipeline order):**
+```bash
+# 1. Import SARIF findings into VerificationRun + AdjudicationRecord + AnalysisScope nodes
+npm run verification:sarif:import -- <projectId> <sarifPath>
+
+# 2. Scope-aware resolver: recompute scope, downgrade clean runs, enforce UNKNOWN_FOR, detect contradictions
+npm run verification:scope:resolve -- <projectId>
+
+# 3. Exception enforcement: waiver policy (dual approval, expiry, ticket linkage, truth/gate separation)
+npm run verification:exception:enforce -- <projectId>
+
+# 4. Advisory gate: compute advisory decisions, persist decision logs + replayability hashes
+npm run verification:advisory:gate -- <projectId> [policyBundleId]
+
+# 5. Runtime truth capture: run done-check, capture git state + gate decision + artifact hash into graph
+npm run verification:done-check:capture -- [projectId] [policyBundleId]
+
+# 6. Commit audit: invariant checks over a commit range (schema, edge taxonomy, deps, parser contracts, coverage drift)
+npm run commit:audit:verify -- <baseRef> <headRef>
+```
+
+**Graph nodes produced:**
+- `VerificationRun` — tool finding with attestation, provenance, lifecycle state
+- `AdjudicationRecord` — suppression/waiver with policy compliance fields
+- `AnalysisScope` — scope completeness metadata
+- `AdvisoryGateDecision` — deterministic gate decision with replay hash
+- `GateDecision` — runtime gate pass/fail with decision hash
+- `CommitSnapshot` — HEAD sha + branch at execution time
+- `WorkingTreeSnapshot` — dirty flag + diff hash at execution time
+- `Artifact` — integrity snapshot file hash
+
+**Key edges:**
+- `CAPTURED_COMMIT`, `CAPTURED_WORKTREE`, `EMITS_GATE_DECISION`, `BASED_ON_RUN`, `GENERATED_ARTIFACT`
+- `ADVISES_ON` (advisory gate → verification run)
+- `ADJUDICATES` (adjudication → verification run)
+- `HAS_SCOPE` (verification run → analysis scope)
+
+**MCP tool:** `commit_audit_status` — shows latest commit audit results from `artifacts/commit-audit/latest.json`

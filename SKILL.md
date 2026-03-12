@@ -479,3 +479,17 @@ Supports deterministic recovery:
 - `npm run ir:parity:resume`
 - `npm run ir:parity -- --force-target=<name>`
 - `npm run ir:parity -- --fresh`
+
+### Verification Pipeline
+Post-ingestion verification chain (SARIF → scope → governance → runtime proof):
+
+```bash
+npm run verification:sarif:import -- <projectId> <sarifPath>
+npm run verification:scope:resolve -- <projectId>
+npm run verification:exception:enforce -- <projectId>
+npm run verification:advisory:gate -- <projectId> [policyBundleId]
+npm run verification:done-check:capture -- [projectId] [policyBundleId]
+npm run commit:audit:verify -- <baseRef> <headRef>
+```
+
+Use `verification:done-check:capture` to record a graph-proven execution trace (git state, gate result, artifact hash). Use `commit:audit:verify` to run invariant checks (schema, edge taxonomy, dependency, parser contract, coverage drift) over any commit range.

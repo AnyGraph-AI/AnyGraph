@@ -328,3 +328,24 @@ Resume controls:
 - `npm run ir:parity:resume`
 - `npm run ir:parity -- --force-target=<name>`
 - `npm run ir:parity -- --fresh`
+
+### Verification Pipeline Commands
+```bash
+# Import SARIF findings
+npm run verification:sarif:import -- <projectId> <sarifPath>
+
+# Scope-aware resolver (downgrade clean runs, enforce UNKNOWN_FOR, detect contradictions)
+npm run verification:scope:resolve -- <projectId>
+
+# Exception enforcement (waiver policy, truth/gate separation)
+npm run verification:exception:enforce -- <projectId>
+
+# Advisory gate (decision logs + replayability hashes)
+npm run verification:advisory:gate -- <projectId> [policyBundleId]
+
+# Runtime truth capture (done-check + git state + decision/artifact hashes into graph)
+npm run verification:done-check:capture -- [projectId] [policyBundleId]
+
+# Commit audit (invariants over a commit range)
+npm run commit:audit:verify -- <baseRef> <headRef>
+```
