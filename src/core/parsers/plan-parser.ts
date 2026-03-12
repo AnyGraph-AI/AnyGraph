@@ -779,7 +779,7 @@ export async function enrichCrossDomain(
                  WHERE score > 0
                  RETURN target.id AS id
                  ORDER BY score DESC
-                 LIMIT 5`,
+                 LIMIT 1`,
                 {
                   sourceProjectId,
                   token: tokenNormalized,
