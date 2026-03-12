@@ -13,6 +13,7 @@ import { deterministicId } from './utils.js';
 import { extractPdfText } from './pdf-extractor.js';
 import { ingestPlainText } from './text-ingester.js';
 import { extractEntities } from './entity-extractor.js';
+import { extractEntitiesWithLlm } from './llm-entity-extractor.js';
 import type { IrDocument } from '../../ir/ir-v1.schema.js';
 
 const TEXT_EXTS = new Set(['.txt', '.md', '.csv', '.json', '.log']);
@@ -21,6 +22,7 @@ export interface ParseDocumentCollectionOptions {
   projectId: string;
   sourcePath: string;
   collectionName?: string;
+  enableLlmEntityExtraction?: boolean;
 }
 
 async function collectFiles(path: string): Promise<string[]> {
@@ -109,7 +111,8 @@ export async function parseDocumentCollection(
       createdAt: new Date().toISOString(),
     });
 
-    paraTexts.forEach((p, idx) => {
+    for (let idx = 0; idx < paraTexts.length; idx++) {
+      const p = paraTexts[idx];
       const ordinal = idx + 1;
       const paragraphId = deterministicId(options.projectId, documentId, 'Paragraph', ordinal);
       const paragraph: Paragraph = {
@@ -122,15 +125,28 @@ export async function parseDocumentCollection(
       };
 
       paragraphs.push(paragraph);
-      entities.push(
-        ...extractEntities({
+
+      const heuristic = extractEntities({
+        projectId: options.projectId,
+        documentId,
+        paragraphId,
+        text: p.text,
+      });
+      entities.push(...heuristic);
+
+      const llmEntities = await extractEntitiesWithLlm(
+        {
           projectId: options.projectId,
           documentId,
           paragraphId,
           text: p.text,
-        }),
+        },
+        heuristic,
+        { enabled: options.enableLlmEntityExtraction },
       );
-    });
+
+      entities.push(...llmEntities);
+    }
   }
 
   return {
