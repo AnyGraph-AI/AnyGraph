@@ -542,3 +542,16 @@ Rules:
 - Record gate failure in plan/task notes and continue remediation.
 - Do not mark plan checkboxes complete without integrity evidence artifact (command output + commit).
 - Temporary threshold overrides must be explicit and documented in commit message (no silent relaxations).
+
+### IR Parity Gate (Required for IR pipeline changes)
+When touching parser/IR/materializer paths, also run:
+
+```bash
+node --loader ts-node/esm src/utils/ir-parity-gate.ts
+```
+
+Checkpoint/resume options:
+- `--resume` to continue from `artifacts/ir-parity/state.json`
+- `--retry-failed` to retry only failed targets during resume
+- `--force-target=<name>` to run a single target (`codegraph|godspeed|bible-graph`)
+- `--fresh` to ignore prior state and start clean

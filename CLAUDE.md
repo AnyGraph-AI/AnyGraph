@@ -314,3 +314,16 @@ Threshold policy:
 - Ratchet policy: once debt is reduced, lower thresholds back to strict defaults.
 
 Do not announce “done” when `done-check` is red.
+
+### IR Parity Gate (for IR-path changes)
+When parser/IR/materializer code changes, run parity as a second gate:
+
+```bash
+node --loader ts-node/esm src/utils/ir-parity-gate.ts
+```
+
+Resume controls:
+- `--resume`
+- `--retry-failed`
+- `--force-target=<name>`
+- `--fresh`

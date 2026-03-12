@@ -467,3 +467,16 @@ If it fails:
 - Work is still in-progress.
 - Record the failing condition (build/integrity/staleness/threshold) in task notes.
 - Remediate or explicitly apply documented temporary threshold policy.
+
+### IR Parity Gate (when editing IR flow)
+Run this after `done-check` for parser/IR/materializer edits:
+
+```bash
+node --loader ts-node/esm src/utils/ir-parity-gate.ts
+```
+
+Supports deterministic recovery:
+- `--resume`
+- `--retry-failed`
+- `--force-target=<name>`
+- `--fresh`

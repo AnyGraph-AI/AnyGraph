@@ -577,7 +577,9 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
         [CoreNodeType.FUNCTION_DECLARATION]: CoreEdgeType.CONTAINS,
         [CoreNodeType.IMPORT_DECLARATION]: CoreEdgeType.CONTAINS,
         [CoreNodeType.ENUM_DECLARATION]: CoreEdgeType.CONTAINS,
-        [CoreNodeType.VARIABLE_DECLARATION]: CoreEdgeType.CONTAINS,
+        // SourceFile-level variables are parsed manually from VariableStatement nodes in
+        // typescript-parser.ts (parseCoreTypeScript), because VariableDeclaration getters
+        // are defined on VariableStatement (`getDeclarations`), not on SourceFile.
         [CoreNodeType.TYPE_ALIAS]: CoreEdgeType.CONTAINS,
       },
       neo4j: {
