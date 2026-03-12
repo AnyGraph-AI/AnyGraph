@@ -58,6 +58,7 @@
     "verification:advisory:gate": "node --loader ts-node/esm src/utils/verification-advisory-gate.ts",
     "verification:done-check:capture": "node --loader ts-node/esm src/utils/verification-done-check-capture.ts",
     "verification:pilot:ir:validate": "node --loader ts-node/esm src/utils/verification-ir-pilot-validate.ts",
+    "verification:pilot:vg5:thresholds": "node --loader ts-node/esm src/utils/verification-vg5-thresholds.ts",
 
     "registry:reconcile": "node --loader ts-node/esm reconcile-project-registry.ts",
     "registry:verify": "node --loader ts-node/esm verify-project-registry.ts",
