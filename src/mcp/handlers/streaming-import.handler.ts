@@ -8,6 +8,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 import { Neo4jNode, Neo4jEdge } from '../../core/config/schema.js';
+import { convertNeo4jGraphToIrDocument, materializeIrDocument } from '../../core/ir/index.js';
 import { StreamingParser } from '../../core/parsers/typescript-parser.js';
 import { ProgressCallback, ProgressReporter } from '../../core/utils/progress-reporter.js';
 import { DEFAULTS } from '../constants.js';
@@ -95,7 +96,7 @@ export class StreamingImportHandler {
             totalChunks: chunks.length,
             nodeCount: nodes.length,
           });
-          await this.importChunkToNeo4j(nodes, edges);
+          await this.importChunkToNeo4j(nodes, edges, config.projectId);
           totalNodesImported += nodes.length;
           totalEdgesImported += edges.length;
         } else {
@@ -168,7 +169,18 @@ export class StreamingImportHandler {
     return result;
   }
 
-  private async importChunkToNeo4j(nodes: Neo4jNode[], edges: Neo4jEdge[]): Promise<void> {
+  private async importChunkToNeo4j(nodes: Neo4jNode[], edges: Neo4jEdge[], projectId: string): Promise<void> {
+    const useIrMaterializer = process.env.PARSE_USE_IR_MATERIALIZER !== 'false';
+
+    if (useIrMaterializer) {
+      const irDoc = convertNeo4jGraphToIrDocument(nodes, edges, projectId);
+      await materializeIrDocument(irDoc, {
+        batchSize: DEFAULTS.batchSize,
+        clearProjectFirst: false,
+      });
+      return;
+    }
+
     const tempPath = generateTempPath('chunk');
     const fs = await import('fs/promises');
 
