@@ -753,7 +753,8 @@ export async function enrichCrossDomain(
               .map((t) => t.replace(/[\*]/g, '').trim())
               .filter(Boolean);
 
-            for (const targetToken of targets) {
+            for (let tokenIndex = 0; tokenIndex < targets.length; tokenIndex++) {
+              const targetToken = targets[tokenIndex];
               const tokenNormalized = targetToken.replace(/[\*]/g, '').replace(/\s+/g, ' ').trim();
               const m = tokenNormalized.match(/^M(\d+)\b/i);
               const milestoneNum = m ? parseInt(m[1], 10) : null;
@@ -799,6 +800,9 @@ export async function enrichCrossDomain(
                      SET r.projectId = $projectId,
                          r.refType = $refType,
                          r.refValue = $refValue,
+                         r.rawRefValue = $rawRefValue,
+                         r.tokenCount = $tokenCount,
+                         r.tokenIndex = $tokenIndex,
                          r.resolvedAt = datetime()`,
                     {
                       srcId: ref.taskId,
@@ -806,6 +810,9 @@ export async function enrichCrossDomain(
                       projectId: sourceProjectId,
                       refType: ref.refType,
                       refValue: tokenNormalized,
+                      rawRefValue: ref.refValue,
+                      tokenCount: targets.length,
+                      tokenIndex,
                     },
                   );
                 }

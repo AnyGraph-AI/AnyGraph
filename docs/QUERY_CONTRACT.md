@@ -109,19 +109,37 @@ RETURN type(r) AS edgeType, count(*) AS unscopedCount
 ORDER BY unscopedCount DESC
 ```
 
+## Q9 — Plan Dependency Integrity (directive-token fidelity)
+
+```cypher
+MATCH (src)-[r:DEPENDS_ON|BLOCKS]->(dst)
+WHERE r.projectId STARTS WITH 'plan_'
+  AND coalesce(r.refType, '') IN ['depends_on', 'blocks']
+RETURN
+  r.projectId AS projectId,
+  count(r) AS dependencyEdges,
+  sum(CASE WHEN r.rawRefValue IS NULL OR trim(r.rawRefValue) = '' THEN 1 ELSE 0 END) AS missingRawRefValue,
+  sum(CASE WHEN r.refValue IS NULL OR trim(r.refValue) = '' THEN 1 ELSE 0 END) AS missingRefValue,
+  sum(CASE WHEN r.tokenCount IS NULL OR r.tokenCount < 1 THEN 1 ELSE 0 END) AS invalidTokenCount,
+  sum(CASE WHEN r.tokenIndex IS NULL OR r.tokenIndex < 0 OR r.tokenIndex >= coalesce(r.tokenCount, 1) THEN 1 ELSE 0 END) AS invalidTokenIndex,
+  sum(CASE WHEN coalesce(r.tokenCount, 1) > 1 AND (r.rawRefValue IS NULL OR NOT r.rawRefValue CONTAINS ';') THEN 1 ELSE 0 END) AS tokenizedWithoutSemicolon
+ORDER BY projectId
+```
+
 ---
 
 ## Enforcement
 
 - New metrics must be added to this file first.
-- Tooling should reference query IDs (`Q1..Q7`) rather than copying raw Cypher.
+- Tooling should reference query IDs (`Q1..Q9`) rather than copying raw Cypher.
 - CI gate should fail if dashboard/report scripts introduce uncontracted project-metric queries.
 
 ---
 
 ## Versioning
 
-- Contract version: `v1.1`
+- Contract version: `v1.2`
+- Migration note (v1.2): Added Q9 dependency-integrity contract (raw directive fidelity + tokenization sanity) to support graph-native commit auditing and `plan:deps:verify` gating.
 - Migration note (v1.1): Q7 now reports invariant violations from the latest audit run per project (high-severity checks), matching `graph-integrity-snapshot.ts` and `verify-graph-integrity.ts` semantics.
 - Affected surfaces: graph status reports, integrity dashboards, and any tooling that previously treated Q7 as lifetime aggregate violations.
 - Changes must include migration note and affected tool/report list.

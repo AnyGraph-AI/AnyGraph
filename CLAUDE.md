@@ -303,6 +303,8 @@ npm run plan:evidence:recompute
 npm run registry:reconcile
 npm run registry:verify
 npm run edges:verify
+npm run parser:contracts:verify
+npm run plan:deps:verify
 npm run integrity:snapshot
 npm run integrity:verify
 ```

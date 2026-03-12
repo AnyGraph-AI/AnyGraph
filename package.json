@@ -63,7 +63,8 @@
     "integrity:snapshot": "node --loader ts-node/esm graph-integrity-snapshot.ts",
     "integrity:verify": "node --loader ts-node/esm verify-graph-integrity.ts",
     "parser:contracts:verify": "node --loader ts-node/esm verify-parser-contracts.ts",
-    "done-check": "npm run build && npm run edges:normalize && npm run plan:evidence:recompute && npm run registry:reconcile && npm run registry:verify && npm run edges:verify && npm run parser:contracts:verify && npm run integrity:snapshot && npm run integrity:verify"
+    "plan:deps:verify": "node --loader ts-node/esm verify-plan-dependency-integrity.ts",
+    "done-check": "npm run build && npm run edges:normalize && npm run plan:evidence:recompute && npm run registry:reconcile && npm run registry:verify && npm run edges:verify && npm run parser:contracts:verify && npm run plan:deps:verify && npm run integrity:snapshot && npm run integrity:verify"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.15.1",
