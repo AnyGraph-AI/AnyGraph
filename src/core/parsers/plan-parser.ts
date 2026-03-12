@@ -745,9 +745,11 @@ export async function enrichCrossDomain(
             const sourceProjectId = ref.taskId.split(':')[0];
             const relType = ref.refType === 'depends_on' ? PlanEdgeType.DEPENDS_ON : PlanEdgeType.BLOCKS;
 
-            // Support comma/semicolon-separated dependency tokens.
+            // Support semicolon-separated dependency tokens.
+            // Do NOT split on commas — task names commonly contain commas
+            // (e.g., "Add exception enforcement pass (expiry, approval mode, ticket linkage)").
             const targets = ref.refValue
-              .split(/[,;]+|\s+and\s+/i)
+              .split(/;/)
               .map((t) => t.replace(/[\*]/g, '').trim())
               .filter(Boolean);
 
