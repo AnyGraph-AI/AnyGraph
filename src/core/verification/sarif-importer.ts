@@ -20,10 +20,12 @@ interface SarifRun {
   automationDetails?: { id?: string };
   baselineGuid?: string;
   invocations?: Array<{ executionSuccessful?: boolean; commandLine?: string; toolConfigurationNotifications?: unknown[] }>;
+  artifacts?: Array<{ location?: { uri?: string } }>;
   results?: SarifResult[];
 }
 
 interface SarifResult {
+  kind?: string;
   ruleId?: string;
   level?: string;
   message?: { text?: string };
@@ -49,10 +51,16 @@ export interface SarifImportOptions {
   toolFilter?: 'codeql' | 'semgrep' | 'any';
   baselineRef?: string;
   mergeBase?: string;
+  attestationRefBase?: string;
+  predicateType?: string;
 }
 
 function hash(...parts: Array<string | number | undefined>): string {
   return createHash('sha1').update(parts.map((p) => String(p ?? '')).join('|')).digest('hex').slice(0, 20);
+}
+
+function sha256Digest(...parts: Array<string | number | undefined>): string {
+  return createHash('sha256').update(parts.map((p) => String(p ?? '')).join('|')).digest('hex');
 }
 
 function normalizeToolName(name?: string): string {
@@ -91,6 +99,58 @@ function chooseFingerprint(result: SarifResult): string {
   );
 }
 
+function mapSuppressionState(status?: string): 'open' | 'reviewing' | 'to_fix' | 'ignored' | 'dismissed' | 'fixed' | 'closed' | 'reopened' | 'provisionally_ignored' {
+  const normalized = (status ?? '').toLowerCase();
+  if (normalized.includes('review')) return 'reviewing';
+  if (normalized.includes('reject')) return 'reopened';
+  if (normalized.includes('dismiss') || normalized.includes('accept') || normalized.includes('approved')) return 'dismissed';
+  if (normalized.includes('fixed') || normalized.includes('resolved') || normalized.includes('close')) return 'fixed';
+  return 'ignored';
+}
+
+function mapSuppressionReason(justification?: string): 'false_positive' | 'acceptable_risk' | 'wont_fix' | 'used_in_tests' | 'no_time_to_fix' | 'compensating_control' | 'other' {
+  const text = (justification ?? '').toLowerCase();
+  if (text.includes('false positive')) return 'false_positive';
+  if (text.includes('acceptable risk') || text.includes('accepted risk')) return 'acceptable_risk';
+  if (text.includes("won't fix") || text.includes('wont fix')) return 'wont_fix';
+  if (text.includes('test') || text.includes('testing')) return 'used_in_tests';
+  if (text.includes('no time') || text.includes('time constraint')) return 'no_time_to_fix';
+  if (text.includes('compensating control')) return 'compensating_control';
+  return 'other';
+}
+
+function extractTicketRef(text?: string): string | undefined {
+  if (!text) return undefined;
+  const m = text.match(/\b([A-Z][A-Z0-9]+-\d+)\b/);
+  return m?.[1];
+}
+
+function mapAdjudicationSource(kind?: string): string {
+  const normalized = (kind ?? '').toLowerCase();
+  if (normalized.includes('external')) return 'external_dismissal';
+  if (normalized.includes('insource') || normalized.includes('in_source') || normalized.includes('in-source')) return 'inline_suppression';
+  return 'sarif_suppression';
+}
+
+function computeScopeCompleteness(params: {
+  targetFileCount?: number;
+  analyzedFileCount?: number;
+  skippedFileCount?: number;
+  analysisErrorCount?: number;
+}): 'complete' | 'partial' | 'unknown' {
+  const target = params.targetFileCount ?? 0;
+  const analyzed = params.analyzedFileCount ?? 0;
+  const skipped = params.skippedFileCount ?? 0;
+  const errors = params.analysisErrorCount ?? 0;
+
+  if (errors > 0) return 'partial';
+  if (target > 0 && analyzed >= target && skipped === 0) return 'complete';
+  if (target > 0 && analyzed > 0) return 'partial';
+  if (target > 0 && analyzed === 0) return 'unknown';
+  if (analyzed > 0) return 'complete';
+  return 'unknown';
+}
+
 export async function importSarifToVerificationBundle(
   options: SarifImportOptions,
 ): Promise<VerificationFoundationBundle> {
@@ -104,6 +164,9 @@ export async function importSarifToVerificationBundle(
   const adjudications: VerificationFoundationBundle['adjudications'] = [];
   const pathWitnesses: VerificationFoundationBundle['pathWitnesses'] = [];
 
+  const attestationRefBase = options.attestationRefBase ?? 'urn:codegraph:attestation';
+  const predicateType = options.predicateType ?? 'https://in-toto.io/Statement/v1';
+
   for (const run of runs) {
     if (!matchesTool(run, options.toolFilter ?? 'codeql')) continue;
 
@@ -113,6 +176,13 @@ export async function importSarifToVerificationBundle(
 
     const results = run.results ?? [];
     const includedPaths = new Set<string>();
+    const artifactPaths = new Set<string>();
+    const runIdsForScope: string[] = [];
+
+    for (const artifact of run.artifacts ?? []) {
+      const uri = artifact.location?.uri;
+      if (uri) artifactPaths.add(uri);
+    }
 
     for (const result of results) {
       const fingerprint = chooseFingerprint(result);
@@ -128,6 +198,9 @@ export async function importSarifToVerificationBundle(
         const uri = loc.physicalLocation?.artifactLocation?.uri;
         if (uri) includedPaths.add(uri);
       }
+
+      const digest = `sha256:${sha256Digest(options.projectId, toolName, result.ruleId, fingerprint, runConfigHash)}`;
+      const attestationRef = `${attestationRefBase}/${normalizeToolName(toolName)}/${runConfigHash}/${digest.slice(7, 27)}`;
 
       const runNode = {
         id: rid,
@@ -151,6 +224,14 @@ export async function importSarifToVerificationBundle(
         runConfigHash,
         createdAt: now,
         updatedAt: now,
+
+        // VerificationRun attestation/provenance refs
+        attestationRef,
+        subjectDigest: digest,
+        predicateType,
+        verifierId: toolVersion ? `${toolName}@${toolVersion}` : toolName,
+        timeVerified: now,
+
         // path witness summary (compact v1)
         externalContextSnapshotRef: relatedLocationCount > 0 || codeFlowCount > 0
           ? JSON.stringify({ relatedLocations: relatedLocationCount, codeFlows: codeFlowCount })
@@ -158,6 +239,7 @@ export async function importSarifToVerificationBundle(
       };
 
       verificationRuns.push(runNode);
+      runIdsForScope.push(rid);
 
       if ((criticality === 'high' || criticality === 'safety_critical') && (relatedLocationCount > 0 || codeFlowCount > 0)) {
         pathWitnesses.push({
@@ -174,59 +256,106 @@ export async function importSarifToVerificationBundle(
         });
       }
 
-      // Suppressions are adjudication evidence, not safety proof
+      // Suppressions are adjudication evidence, not safety proof.
+      // Normalize inline suppressions + external dismissals into AdjudicationRecord.
       for (const sup of result.suppressions ?? []) {
+        const source = mapAdjudicationSource(sup.kind);
+        const comment = sup.justification ?? sup.status ?? 'SARIF suppression imported';
         adjudications.push({
-          id: `adj:${hash(rid, sup.kind, sup.justification)}`,
+          id: `adj:${hash(rid, source, sup.status, comment)}`,
           projectId: options.projectId,
           targetNodeId: rid,
-          adjudicationState: 'ignored',
-          adjudicationReason: 'other',
-          adjudicationComment: sup.justification ?? sup.status ?? 'SARIF suppression imported',
-          adjudicationSource: 'sarif_import',
+          adjudicationState: mapSuppressionState(sup.status),
+          adjudicationReason: mapSuppressionReason(comment),
+          adjudicationComment: comment,
+          adjudicationSource: source,
           requestedAt: now,
+          ticketRef: extractTicketRef(comment),
           requiresRevalidation: true,
         });
       }
     }
 
-    const scopeId = `scope:${options.projectId}:${normalizeToolName(toolName)}:${hash(runConfigHash, now)}`;
+    // Clean run evidence (no findings): capture as SATISFIES candidate, later subject to scope-aware correction.
+    if (results.length === 0) {
+      const cleanFingerprint = `clean:${hash(runConfigHash, options.baselineRef, options.mergeBase)}`;
+      const cleanRunId = `vr:${options.projectId}:${normalizeToolName(toolName)}:clean:${hash(cleanFingerprint, runConfigHash)}`;
+      const digest = `sha256:${sha256Digest(options.projectId, toolName, cleanFingerprint, runConfigHash)}`;
+
+      verificationRuns.push({
+        id: cleanRunId,
+        projectId: options.projectId,
+        tool: toolName,
+        toolVersion,
+        status: 'satisfies',
+        criticality: 'medium',
+        confidence: 0.7,
+        evidenceGrade: 'A2',
+        freshnessTs: now,
+        reproducible: true,
+        resultFingerprint: cleanFingerprint,
+        lifecycleState: 'clean',
+        firstSeenTs: now,
+        lastSeenTs: now,
+        baselineRef: options.baselineRef,
+        mergeBase: options.mergeBase,
+        queryPackId: run.automationDetails?.id,
+        ruleId: '__clean_run__',
+        runConfigHash,
+        attestationRef: `${attestationRefBase}/${normalizeToolName(toolName)}/${runConfigHash}/${digest.slice(7, 27)}`,
+        subjectDigest: digest,
+        predicateType,
+        verifierId: toolVersion ? `${toolName}@${toolVersion}` : toolName,
+        timeVerified: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      runIdsForScope.push(cleanRunId);
+    }
+
+    const scopeSeed = Array.from(new Set([...includedPaths, ...artifactPaths]));
     const invocation = run.invocations?.[0];
     const executionSuccessful = invocation?.executionSuccessful;
-
-    const scopeCompleteness: 'partial' | 'complete' = executionSuccessful === false ? 'partial' : 'complete';
+    const warningCount = invocation?.toolConfigurationNotifications?.length ?? 0;
+    const targetFileCount = scopeSeed.length;
+    const analyzedFileCount = scopeSeed.length;
+    const skippedFileCount = 0;
+    const analysisErrorCount = executionSuccessful === false ? 1 : 0;
 
     const scopeTemplate = {
       projectId: options.projectId,
       scanRoots: [] as string[],
-      includedPaths: Array.from(includedPaths),
+      includedPaths: scopeSeed,
       excludedPaths: [] as string[],
       buildMode: 'custom' as const,
       supportedLanguages: [] as string[],
       analyzedLanguages: [] as string[],
-      targetFileCount: includedPaths.size,
-      analyzedFileCount: includedPaths.size,
-      skippedFileCount: 0,
-      analysisErrorCount: executionSuccessful === false ? 1 : 0,
-      warningCount: 0,
+      targetFileCount,
+      analyzedFileCount,
+      skippedFileCount,
+      analysisErrorCount,
+      warningCount,
       suppressedErrors: false,
-      scopeCompleteness,
+      scopeCompleteness: computeScopeCompleteness({
+        targetFileCount,
+        analyzedFileCount,
+        skippedFileCount,
+        analysisErrorCount,
+      }),
       scopeEvidenceRef: options.sarifPath,
       unscannedTargetNodeIds: [] as string[],
     };
 
-    // Attach one scope per imported finding run
-    const start = verificationRuns.length - (results.length || 0);
-    const end = verificationRuns.length;
-    let ordinal = 0;
-    for (let i = start; i < end; i++) {
-      if (!verificationRuns[i]) continue;
+    // Attach one scope per imported verification run from this SARIF run.
+    const scopeIdBase = `scope:${options.projectId}:${normalizeToolName(toolName)}:${hash(runConfigHash, now)}`;
+    for (let i = 0; i < runIdsForScope.length; i++) {
+      const runId = runIdsForScope[i];
       analysisScopes.push({
-        id: `${scopeId}:${ordinal}`,
-        verificationRunId: verificationRuns[i].id,
+        id: `${scopeIdBase}:${i}`,
+        verificationRunId: runId,
         ...scopeTemplate,
       });
-      ordinal++;
     }
   }
 

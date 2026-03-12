@@ -53,6 +53,7 @@
     "doc:ingest": "node --loader ts-node/esm src/utils/document-adapter-ingest.ts",
     "verification:ingest": "node --loader ts-node/esm src/utils/verification-foundation-ingest.ts",
     "verification:sarif:import": "node --loader ts-node/esm src/utils/verification-sarif-import.ts",
+    "verification:scope:resolve": "node --loader ts-node/esm src/utils/verification-scope-resolve.ts",
 
     "registry:reconcile": "node --loader ts-node/esm reconcile-project-registry.ts",
     "registry:verify": "node --loader ts-node/esm verify-project-registry.ts",
