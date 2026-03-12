@@ -58,7 +58,7 @@ async function main(): Promise<void> {
     }
 
     const scopeDebtTotal = scopeDebtRows.reduce((sum, row) => sum + Number(row.count ?? 0), 0);
-    const maxScopeDebt = Number(process.env.MAX_UNSCOPED_SCOPE_DEBT ?? 700);
+    const maxScopeDebt = Number(process.env.MAX_UNSCOPED_SCOPE_DEBT ?? 0);
 
     if (scopeDebtTotal > maxScopeDebt) {
       fail(`Known scope-debt edges exceeded threshold (${scopeDebtTotal} > ${maxScopeDebt})`);
