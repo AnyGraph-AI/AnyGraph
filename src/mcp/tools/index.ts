@@ -40,6 +40,7 @@ import { createPlanStatusTool, createPlanDriftTool, createPlanGapsTool, createPl
 import { createClaimStatusTool, createEvidenceForTool, createContradictionsTool, createHypothesesTool, createClaimGenerateTool } from './claim-tools.tool.js';
 import { createSelfAuditTool } from './self-audit.tool.js';
 import { createParserContractStatusTool } from './parser-contract.tool.js';
+import { createCommitAuditStatusTool } from './commit-audit-status.tool.js';
 
 // Track tool calls for debugging
 let globalToolCallCount = 0;
@@ -149,4 +150,7 @@ export const registerAllTools = (server: McpServer): void => {
 
   // Register parser contract tool
   createParserContractStatusTool(server);
+
+  // Register commit audit status tool
+  createCommitAuditStatusTool(server);
 };

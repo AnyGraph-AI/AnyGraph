@@ -1,0 +1,589 @@
+#!/usr/bin/env node
+
+import { execFileSync } from 'child_process';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
+
+import { Neo4jService } from './src/storage/neo4j/neo4j.service.js';
+
+type InvariantKey =
+  | 'schema_integrity'
+  | 'edge_taxonomy_integrity'
+  | 'dependency_integrity'
+  | 'parser_contract_integrity'
+  | 'coverage_drift_guardrails';
+
+interface InvariantResult {
+  key: InvariantKey;
+  ok: boolean;
+  summary: string;
+  details: Record<string, unknown>;
+}
+
+interface SnapshotDelta {
+  projectId: string;
+  nodeCountDelta: number;
+  edgeCountDelta: number;
+  unresolvedLocalDelta: number;
+  invariantViolationDelta: number;
+  duplicateSourceSuspicionDelta: number;
+}
+
+interface CommitAuditReport {
+  ok: boolean;
+  generatedAt: string;
+  baseRef: string;
+  headRef: string;
+  commitCount: number;
+  changedFiles: string[];
+  invariants: InvariantResult[];
+  failingInvariantKeys: InvariantKey[];
+  confidence: number;
+  anomalyDeltas: SnapshotDelta[];
+  roadmapTaskLinks: Array<{ invariant: InvariantKey; task: string; line: number }>;
+}
+
+const EXPECTED_GLOBAL_EDGE_TYPES = new Set<string>([
+  'MENTIONS_PERSON',
+  'NEXT_VERSE',
+  'PART_OF',
+  'SUPPORTED_BY',
+  'CONTRADICTED_BY',
+  'HAS_CODE_EVIDENCE',
+  'BLOCKS',
+]);
+
+const KNOWN_SCOPE_DEBT_EDGE_TYPES = new Set<string>([
+  'ORIGINATES_IN',
+  'READS_STATE',
+  'WRITES_STATE',
+  'FOUND',
+  'OWNED_BY',
+  'BELONGS_TO_LAYER',
+  'MEASURED',
+  'POSSIBLE_CALL',
+  'TESTED_BY',
+]);
+
+const ROADMAP_LINKS: Record<InvariantKey, Array<{ task: string; line: number }>> = {
+  schema_integrity: [
+    {
+      task: 'Invariants v1: schema integrity, edge taxonomy integrity, dependency integrity, parser-contract integrity, coverage drift guardrails',
+      line: 834,
+    },
+  ],
+  edge_taxonomy_integrity: [
+    {
+      task: 'Invariants v1: schema integrity, edge taxonomy integrity, dependency integrity, parser-contract integrity, coverage drift guardrails',
+      line: 834,
+    },
+  ],
+  dependency_integrity: [
+    { task: 'Add `verify-plan-dependency-integrity.ts` gate script', line: 827 },
+    { task: 'Wire `plan:deps:verify` into `done-check`', line: 828 },
+    { task: 'Add query contract metric for dependency integrity (Q9)', line: 829 },
+  ],
+  parser_contract_integrity: [
+    {
+      task: 'Invariants v1: schema integrity, edge taxonomy integrity, dependency integrity, parser-contract integrity, coverage drift guardrails',
+      line: 834,
+    },
+  ],
+  coverage_drift_guardrails: [
+    {
+      task: 'Invariants v1: schema integrity, edge taxonomy integrity, dependency integrity, parser-contract integrity, coverage drift guardrails',
+      line: 834,
+    },
+  ],
+};
+
+function toNum(value: unknown, fallback = 0): number {
+  const maybe = value as { toNumber?: () => number } | null | undefined;
+  if (maybe?.toNumber) return maybe.toNumber();
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function unique<T>(items: T[]): T[] {
+  return Array.from(new Set(items));
+}
+
+function getChangedFiles(baseRef: string, headRef: string): string[] {
+  const out = execFileSync('git', ['diff', '--name-only', `${baseRef}..${headRef}`], {
+    encoding: 'utf8',
+  });
+  return out
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function getCommitCount(baseRef: string, headRef: string): number {
+  const out = execFileSync('git', ['rev-list', '--count', `${baseRef}..${headRef}`], {
+    encoding: 'utf8',
+  }).trim();
+  return Number(out || 0);
+}
+
+function readSnapshotDeltas(): SnapshotDelta[] {
+  const dir = join(process.cwd(), 'artifacts', 'integrity-snapshots');
+  let files: string[] = [];
+  try {
+    files = readdirSync(dir)
+      .filter((f) => f.endsWith('.jsonl'))
+      .sort();
+  } catch {
+    return [];
+  }
+
+  if (files.length === 0) return [];
+
+  const latestFile = join(dir, files[files.length - 1]);
+  const lines = readFileSync(latestFile, 'utf8')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) return [];
+
+  const rows = lines
+    .map((line) => {
+      try {
+        return JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean) as Array<Record<string, unknown>>;
+
+  const timestamps = unique(rows.map((r) => String(r.timestamp ?? '')).filter(Boolean)).sort();
+  if (timestamps.length < 2) return [];
+
+  const prevTs = timestamps[timestamps.length - 2];
+  const currTs = timestamps[timestamps.length - 1];
+
+  const prevRows = rows.filter((r) => String(r.timestamp) === prevTs);
+  const currRows = rows.filter((r) => String(r.timestamp) === currTs);
+
+  const prevByProject = new Map<string, Record<string, unknown>>();
+  for (const row of prevRows) prevByProject.set(String(row.projectId), row);
+
+  const deltas: SnapshotDelta[] = [];
+  for (const curr of currRows) {
+    const projectId = String(curr.projectId ?? '');
+    if (!projectId) continue;
+    const prev = prevByProject.get(projectId) ?? {};
+
+    const delta: SnapshotDelta = {
+      projectId,
+      nodeCountDelta: toNum(curr.nodeCount) - toNum(prev.nodeCount),
+      edgeCountDelta: toNum(curr.edgeCount) - toNum(prev.edgeCount),
+      unresolvedLocalDelta: toNum(curr.unresolvedLocalCount) - toNum(prev.unresolvedLocalCount),
+      invariantViolationDelta: toNum(curr.invariantViolationCount) - toNum(prev.invariantViolationCount),
+      duplicateSourceSuspicionDelta:
+        toNum(curr.duplicateSourceSuspicionCount) - toNum(prev.duplicateSourceSuspicionCount),
+    };
+
+    if (
+      delta.nodeCountDelta !== 0 ||
+      delta.edgeCountDelta !== 0 ||
+      delta.unresolvedLocalDelta !== 0 ||
+      delta.invariantViolationDelta !== 0 ||
+      delta.duplicateSourceSuspicionDelta !== 0
+    ) {
+      deltas.push(delta);
+    }
+  }
+
+  return deltas;
+}
+
+async function checkSchemaIntegrity(neo4j: Neo4jService): Promise<InvariantResult> {
+  const projectMissing = await neo4j.run(
+    `MATCH (p:Project)
+     WHERE p.projectId IS NULL OR trim(coalesce(p.projectId, '')) = '' OR trim(coalesce(p.name, '')) = ''
+     RETURN count(p) AS c`,
+  );
+
+  const verificationMissing = await neo4j.run(
+    `MATCH (v:VerificationRun)
+     WHERE v.id IS NULL OR v.projectId IS NULL OR v.status IS NULL
+     RETURN count(v) AS c`,
+  );
+
+  const projectMissingCount = toNum(projectMissing[0]?.c);
+  const verificationMissingCount = toNum(verificationMissing[0]?.c);
+  const total = projectMissingCount + verificationMissingCount;
+
+  return {
+    key: 'schema_integrity',
+    ok: total === 0,
+    summary: total === 0 ? 'Schema integrity checks passed.' : `Schema integrity violations: ${total}`,
+    details: {
+      projectMissingCount,
+      verificationMissingCount,
+      total,
+    },
+  };
+}
+
+async function checkEdgeTaxonomyIntegrity(neo4j: Neo4jService): Promise<InvariantResult> {
+  const rows = (await neo4j.run(
+    `MATCH ()-[r]->()
+     WHERE r.projectId IS NULL
+     RETURN type(r) AS edgeType, count(*) AS count
+     ORDER BY count DESC`,
+  )) as Array<Record<string, unknown>>;
+
+  const unknown = rows.filter((r) => {
+    const edgeType = String(r.edgeType ?? '');
+    return !EXPECTED_GLOBAL_EDGE_TYPES.has(edgeType) && !KNOWN_SCOPE_DEBT_EDGE_TYPES.has(edgeType);
+  });
+
+  const scopeDebtRows = rows.filter((r) => KNOWN_SCOPE_DEBT_EDGE_TYPES.has(String(r.edgeType ?? '')));
+  const scopeDebtTotal = scopeDebtRows.reduce((sum, row) => sum + toNum(row.count), 0);
+  const maxScopeDebt = Number(process.env.MAX_UNSCOPED_SCOPE_DEBT ?? 0);
+
+  const ok = unknown.length === 0 && scopeDebtTotal <= maxScopeDebt;
+
+  return {
+    key: 'edge_taxonomy_integrity',
+    ok,
+    summary: ok
+      ? 'Edge taxonomy integrity checks passed.'
+      : `Edge taxonomy failed (unknown=${unknown.length}, scopeDebt=${scopeDebtTotal}/${maxScopeDebt})`,
+    details: {
+      unknown,
+      scopeDebtTotal,
+      maxScopeDebt,
+      totalUnscopedTypes: rows.length,
+    },
+  };
+}
+
+async function checkDependencyIntegrity(neo4j: Neo4jService): Promise<InvariantResult> {
+  const rows = (await neo4j.run(
+    `MATCH (src)-[r:DEPENDS_ON|BLOCKS]->(dst)
+     WHERE r.projectId STARTS WITH 'plan_'
+       AND coalesce(r.refType, '') IN ['depends_on', 'blocks']
+     RETURN r.projectId AS projectId,
+            src.id AS sourceId,
+            dst.id AS targetId,
+            dst.name AS targetName,
+            r.refValue AS refValue,
+            r.rawRefValue AS rawRefValue,
+            r.tokenCount AS tokenCount,
+            r.tokenIndex AS tokenIndex`,
+  )) as Array<Record<string, unknown>>;
+
+  let missingRawRefValue = 0;
+  let missingRefValue = 0;
+  let invalidTokenCount = 0;
+  let invalidTokenIndex = 0;
+  let tokenizedWithoutSemicolon = 0;
+  let lowFidelityRefToken = 0;
+
+  for (const row of rows) {
+    const refValue = String(row.refValue ?? '').trim();
+    const rawRefValue = String(row.rawRefValue ?? '').trim();
+    const tokenCount = toNum(row.tokenCount, 0);
+    const tokenIndex = toNum(row.tokenIndex, -1);
+    const targetName = String(row.targetName ?? '').trim().toLowerCase();
+
+    if (!rawRefValue) missingRawRefValue++;
+    if (!refValue) missingRefValue++;
+    if (tokenCount <= 0) invalidTokenCount++;
+    if (tokenIndex < 0 || tokenIndex >= Math.max(1, tokenCount)) invalidTokenIndex++;
+    if (tokenCount > 1 && !rawRefValue.includes(';')) tokenizedWithoutSemicolon++;
+
+    const isMilestoneShorthand = /^m\d+(?:[-_: ].+)?$/i.test(refValue);
+    const refNorm = refValue.toLowerCase();
+    if (
+      !isMilestoneShorthand &&
+      refNorm &&
+      targetName &&
+      !targetName.includes(refNorm) &&
+      !refNorm.includes(targetName)
+    ) {
+      lowFidelityRefToken++;
+    }
+  }
+
+  const totalViolations =
+    missingRawRefValue +
+    missingRefValue +
+    invalidTokenCount +
+    invalidTokenIndex +
+    tokenizedWithoutSemicolon +
+    lowFidelityRefToken;
+
+  return {
+    key: 'dependency_integrity',
+    ok: totalViolations === 0,
+    summary:
+      totalViolations === 0
+        ? 'Dependency integrity checks passed.'
+        : `Dependency integrity violations: ${totalViolations}`,
+    details: {
+      checkedEdges: rows.length,
+      missingRawRefValue,
+      missingRefValue,
+      invalidTokenCount,
+      invalidTokenIndex,
+      tokenizedWithoutSemicolon,
+      lowFidelityRefToken,
+      totalViolations,
+    },
+  };
+}
+
+async function checkParserContractIntegrity(neo4j: Neo4jService): Promise<InvariantResult> {
+  const contractNodes = await neo4j.run(`MATCH (c:ParserContract) RETURN count(c) AS c`);
+  const stages = await neo4j.run(
+    `MATCH (c:ParserContract {parserName: 'plan-parser'})
+     RETURN collect(DISTINCT c.stage) AS stages, count(c) AS c`,
+  );
+  const edgeTypes = await neo4j.run(
+    `MATCH (:ParserContract)-[r]->(:CodeNode)
+     RETURN type(r) AS type, count(r) AS c`,
+  );
+  const funcs = await neo4j.run(
+    `MATCH (c:ParserContract {parserName: 'plan-parser'})
+     RETURN collect(DISTINCT c.functionName) AS funcs`,
+  );
+
+  const contractNodeCount = toNum(contractNodes[0]?.c);
+  const stageList = ((stages[0]?.stages as string[] | undefined) ?? []).filter(Boolean);
+  const funcList = ((funcs[0]?.funcs as string[] | undefined) ?? []).filter(Boolean);
+
+  const requiredStages = ['parse', 'enrich', 'materialize'];
+  const requiredEdgeTypes = [
+    'NEXT_STAGE',
+    'EMITS_NODE_TYPE',
+    'EMITS_EDGE_TYPE',
+    'READS_PLAN_FIELD',
+    'MUTATES_TASK_FIELD',
+  ];
+  const requiredFuncs = ['parsePlanDirectory', 'enrichCrossDomain', 'ingestToNeo4j'];
+
+  const edgeTypeCounts: Record<string, number> = {};
+  for (const row of edgeTypes) edgeTypeCounts[String(row.type)] = toNum(row.c);
+
+  const missingStages = requiredStages.filter((s) => !stageList.includes(s));
+  const missingEdgeTypes = requiredEdgeTypes.filter((e) => (edgeTypeCounts[e] ?? 0) === 0);
+  const missingFuncs = requiredFuncs.filter((f) => !funcList.includes(f));
+
+  const ok =
+    contractNodeCount > 0 &&
+    missingStages.length === 0 &&
+    missingEdgeTypes.length === 0 &&
+    missingFuncs.length === 0;
+
+  return {
+    key: 'parser_contract_integrity',
+    ok,
+    summary: ok
+      ? 'Parser contract integrity checks passed.'
+      : `Parser contract integrity failed (missingStages=${missingStages.length}, missingEdgeTypes=${missingEdgeTypes.length}, missingFuncs=${missingFuncs.length})`,
+    details: {
+      contractNodeCount,
+      stageList,
+      edgeTypeCounts,
+      funcList,
+      missingStages,
+      missingEdgeTypes,
+      missingFuncs,
+    },
+  };
+}
+
+async function checkCoverageDriftGuardrails(
+  neo4j: Neo4jService,
+  changedFiles: string[],
+): Promise<InvariantResult> {
+  const changedSourceFiles = changedFiles.filter((f) => f.startsWith('src/') && f.endsWith('.ts'));
+  const changedPlanFiles = changedFiles.filter((f) => f.startsWith('plans/') && f.endsWith('.md'));
+
+  let mappedSource: string[] = [];
+  let unmappedSource: string[] = [];
+
+  if (changedSourceFiles.length > 0) {
+    const rows = await neo4j.run(
+      `UNWIND $files AS f
+       OPTIONAL MATCH (sf:SourceFile)
+       WHERE sf.projectId = $projectId
+         AND (sf.filePath ENDS WITH f OR sf.name = last(split(f, '/')))
+       WITH f, count(sf) AS matches
+       RETURN f AS file, matches`,
+      {
+        files: changedSourceFiles,
+        projectId: 'proj_c0d3e9a1f200',
+      },
+    );
+
+    for (const row of rows) {
+      const file = String(row.file ?? '');
+      const matches = toNum(row.matches);
+      if (!file) continue;
+      if (matches > 0) mappedSource.push(file);
+      else unmappedSource.push(file);
+    }
+  }
+
+  let mappedPlans: string[] = [];
+  let unmappedPlans: string[] = [];
+
+  if (changedPlanFiles.length > 0) {
+    const rows = await neo4j.run(
+      `UNWIND $files AS f
+       WITH f, last(split(f, '/')) AS filename
+       OPTIONAL MATCH (n:CodeNode)
+       WHERE n.filePath = filename
+         AND n.projectId STARTS WITH 'plan_'
+         AND n.coreType IN ['Task', 'Milestone', 'Section', 'Sprint', 'Decision', 'PlanProject']
+       WITH f, count(n) AS matches
+       RETURN f AS file, matches`,
+      { files: changedPlanFiles },
+    );
+
+    for (const row of rows) {
+      const file = String(row.file ?? '');
+      const matches = toNum(row.matches);
+      if (!file) continue;
+      if (matches > 0) mappedPlans.push(file);
+      else unmappedPlans.push(file);
+    }
+  }
+
+  const sourceCoverage =
+    changedSourceFiles.length > 0 ? mappedSource.length / changedSourceFiles.length : 1;
+  const planCoverage = changedPlanFiles.length > 0 ? mappedPlans.length / changedPlanFiles.length : 1;
+
+  const minSourceCoverage = Number(process.env.MIN_CHANGED_FILE_GRAPH_COVERAGE ?? 0.85);
+  const minPlanCoverage = Number(process.env.MIN_CHANGED_PLAN_GRAPH_COVERAGE ?? 1.0);
+
+  const ok =
+    sourceCoverage >= minSourceCoverage &&
+    planCoverage >= minPlanCoverage &&
+    unmappedSource.length === 0 &&
+    unmappedPlans.length === 0;
+
+  return {
+    key: 'coverage_drift_guardrails',
+    ok,
+    summary: ok
+      ? 'Coverage drift guardrails passed.'
+      : `Coverage drift guardrail failed (source=${sourceCoverage.toFixed(2)}, plan=${planCoverage.toFixed(2)})`,
+    details: {
+      changedSourceFiles,
+      changedPlanFiles,
+      mappedSource,
+      unmappedSource,
+      mappedPlans,
+      unmappedPlans,
+      sourceCoverage,
+      planCoverage,
+      minSourceCoverage,
+      minPlanCoverage,
+    },
+  };
+}
+
+function computeConfidence(invariants: InvariantResult[]): number {
+  const total = invariants.length;
+  if (total === 0) return 0;
+  const failed = invariants.filter((i) => !i.ok).length;
+  const score = Math.max(0, 1 - failed / total);
+  return Number(score.toFixed(2));
+}
+
+function buildRoadmapLinks(failingKeys: InvariantKey[]): Array<{ invariant: InvariantKey; task: string; line: number }> {
+  const links: Array<{ invariant: InvariantKey; task: string; line: number }> = [];
+  for (const key of failingKeys) {
+    for (const link of ROADMAP_LINKS[key] ?? []) {
+      links.push({ invariant: key, task: link.task, line: link.line });
+    }
+  }
+  return links;
+}
+
+function writeAuditArtifact(report: CommitAuditReport): string {
+  const dir = join(process.cwd(), 'artifacts', 'commit-audit');
+  mkdirSync(dir, { recursive: true });
+
+  const stamp = report.generatedAt.replace(/[:.]/g, '-');
+  const outPath = join(dir, `${stamp}.json`);
+  writeFileSync(outPath, JSON.stringify(report, null, 2), 'utf8');
+  writeFileSync(join(dir, 'latest.json'), JSON.stringify(report, null, 2), 'utf8');
+  return outPath;
+}
+
+async function main(): Promise<void> {
+  const baseRef = process.argv[2] ?? 'HEAD~1';
+  const headRef = process.argv[3] ?? 'HEAD';
+  const generatedAt = new Date().toISOString();
+
+  const changedFiles = getChangedFiles(baseRef, headRef);
+  const commitCount = getCommitCount(baseRef, headRef);
+
+  const neo4j = new Neo4jService();
+
+  try {
+    const invariants: InvariantResult[] = [];
+    invariants.push(await checkSchemaIntegrity(neo4j));
+    invariants.push(await checkEdgeTaxonomyIntegrity(neo4j));
+    invariants.push(await checkDependencyIntegrity(neo4j));
+    invariants.push(await checkParserContractIntegrity(neo4j));
+    invariants.push(await checkCoverageDriftGuardrails(neo4j, changedFiles));
+
+    const failingInvariantKeys = invariants.filter((i) => !i.ok).map((i) => i.key);
+    const confidence = computeConfidence(invariants);
+    const anomalyDeltas = readSnapshotDeltas();
+    const roadmapTaskLinks = buildRoadmapLinks(failingInvariantKeys);
+
+    const report: CommitAuditReport = {
+      ok: failingInvariantKeys.length === 0,
+      generatedAt,
+      baseRef,
+      headRef,
+      commitCount,
+      changedFiles,
+      invariants,
+      failingInvariantKeys,
+      confidence,
+      anomalyDeltas,
+      roadmapTaskLinks,
+    };
+
+    const outPath = writeAuditArtifact(report);
+
+    console.log(
+      JSON.stringify({
+        ok: report.ok,
+        baseRef,
+        headRef,
+        commitCount,
+        changedFiles: changedFiles.length,
+        failingInvariantKeys,
+        confidence,
+        anomalyDeltaProjects: anomalyDeltas.length,
+        roadmapLinks: roadmapTaskLinks.length,
+        outPath,
+      }),
+    );
+
+    process.exit(report.ok ? 0 : 1);
+  } finally {
+    await neo4j.getDriver().close();
+  }
+}
+
+main().catch((error) => {
+  console.error(
+    JSON.stringify({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }),
+  );
+  process.exit(1);
+});
