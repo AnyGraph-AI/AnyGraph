@@ -14,6 +14,7 @@ import neo4j from 'neo4j-driver';
 import dotenv from 'dotenv';
 import { existsSync, watch as fsWatch, type FSWatcher } from 'fs';
 import { parsePlanDirectory, ingestToNeo4j, enrichCrossDomain } from './src/core/parsers/plan-parser.js';
+import { emitPlanParserContracts } from './src/core/parsers/meta/parser-contract-emitter.js';
 import { parseDocumentCollection, documentSchemaToIr } from './src/core/adapters/document/document-parser.js';
 import { materializeIrDocument } from './src/core/ir/ir-materializer.js';
 
@@ -323,9 +324,10 @@ async function main() {
       }
 
       const enrichResult = await enrichCrossDomain(results);
+      const contractResult = await emitPlanParserContracts();
 
       console.log(
-        `[${time}] ✅ Plans updated: ${totalNodes} nodes, ${totalStale} stale removed, ${enrichResult.evidenceEdges} evidence edges`,
+        `[${time}] ✅ Plans updated: ${totalNodes} nodes, ${totalStale} stale removed, ${enrichResult.evidenceEdges} evidence edges, contracts ${contractResult.nodesUpserted} nodes/${contractResult.edgesUpserted} edges`,
       );
 
       if (enrichResult.driftDetected.length > 0) {
