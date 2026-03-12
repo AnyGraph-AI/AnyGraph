@@ -18,6 +18,7 @@ function mapIrNodeType(node: Neo4jNode): IrNodeType {
 
 function mapIrEdgeType(edge: Neo4jEdge): IrEdgeType {
   switch (edge.type) {
+    // Direct IR vocabulary matches
     case 'CONTAINS':
     case 'CALLS':
     case 'IMPORTS':
@@ -27,14 +28,20 @@ function mapIrEdgeType(edge: Neo4jEdge): IrEdgeType {
     case 'QUOTES':
     case 'REGISTERED_BY':
       return edge.type;
+    // Structural declarations
     case 'HAS_PARAMETER':
     case 'HAS_MEMBER':
     case 'EXTENDS':
     case 'IMPLEMENTS':
       return 'DECLARES';
+    // Semantic mentions
     case 'MENTIONS_PERSON':
       return 'MENTIONS';
     default:
+      // Preserve the original type as a property so it survives round-trip,
+      // but map to REFERENCES for IR schema compliance.
+      // Known enrichment edges: ORIGINATES_IN, READS_STATE, WRITES_STATE,
+      // FOUND, OWNED_BY, BELONGS_TO_LAYER, MEASURED, POSSIBLE_CALL, TESTED_BY
       return 'REFERENCES';
   }
 }

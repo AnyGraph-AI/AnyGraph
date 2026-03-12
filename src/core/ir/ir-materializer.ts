@@ -97,10 +97,15 @@ export class IrMaterializer {
   }
 
   private mapEdge(edge: IrEdge): { startNodeId: string; endNodeId: string; type: string; properties: Record<string, unknown> } {
+    // Restore original edge type if it was collapsed during IR mapping
+    // (e.g., READS_STATE → REFERENCES with originalEdgeType preserved)
+    const originalType = edge.properties?.originalEdgeType;
+    const edgeType = typeof originalType === 'string' && originalType ? originalType : edge.type;
+
     return {
       startNodeId: edge.from,
       endNodeId: edge.to,
-      type: edge.type,
+      type: edgeType,
       properties: {
         id: edge.id,
         projectId: edge.projectId,
