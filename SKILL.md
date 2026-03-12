@@ -472,11 +472,10 @@ If it fails:
 Run this after `done-check` for parser/IR/materializer edits:
 
 ```bash
-node --loader ts-node/esm src/utils/ir-parity-gate.ts
+npm run ir:parity
 ```
 
 Supports deterministic recovery:
-- `--resume`
-- `--retry-failed`
-- `--force-target=<name>`
-- `--fresh`
+- `npm run ir:parity:resume`
+- `npm run ir:parity -- --force-target=<name>`
+- `npm run ir:parity -- --fresh`

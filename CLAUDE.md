@@ -319,11 +319,10 @@ Do not announce “done” when `done-check` is red.
 When parser/IR/materializer code changes, run parity as a second gate:
 
 ```bash
-node --loader ts-node/esm src/utils/ir-parity-gate.ts
+npm run ir:parity
 ```
 
 Resume controls:
-- `--resume`
-- `--retry-failed`
-- `--force-target=<name>`
-- `--fresh`
+- `npm run ir:parity:resume`
+- `npm run ir:parity -- --force-target=<name>`
+- `npm run ir:parity -- --fresh`

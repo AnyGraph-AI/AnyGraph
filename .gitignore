@@ -149,3 +149,7 @@ graph-output.json
 graph-data.json
 .mcp.json
 godspeed-full-graph.json
+
+# Runtime artifacts (generated during integrity/parity checks)
+artifacts/ir-parity/
+artifacts/integrity-snapshots/

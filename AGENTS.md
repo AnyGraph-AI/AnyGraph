@@ -547,11 +547,10 @@ Rules:
 When touching parser/IR/materializer paths, also run:
 
 ```bash
-node --loader ts-node/esm src/utils/ir-parity-gate.ts
+npm run ir:parity
 ```
 
 Checkpoint/resume options:
-- `--resume` to continue from `artifacts/ir-parity/state.json`
-- `--retry-failed` to retry only failed targets during resume
-- `--force-target=<name>` to run a single target (`codegraph|godspeed|bible-graph`)
-- `--fresh` to ignore prior state and start clean
+- `npm run ir:parity:resume` (resume + retry failed targets)
+- `npm run ir:parity -- --force-target=<name>` to run a single target (`codegraph|godspeed|bible-graph`)
+- `npm run ir:parity -- --fresh` to ignore prior state and start clean
