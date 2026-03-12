@@ -23,6 +23,7 @@ import { generateDeterministicId } from '../utils/graph-factory.js';
 export enum PlanNodeType {
   PLAN_PROJECT = 'PlanProject',
   MILESTONE = 'Milestone',
+  SECTION = 'Section',
   SPRINT = 'Sprint',
   TASK = 'Task',
   DECISION = 'Decision',
@@ -356,14 +357,14 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
         inDecisionTable = false;
       }
 
-      const nodeId = stableId(ctx.projectId, PlanNodeType.MILESTONE, ctx.filePath, sectionKey, 0);
+      const nodeId = stableId(ctx.projectId, PlanNodeType.SECTION, ctx.filePath, sectionKey, 0);
       nodes.push({
         id: nodeId,
-        labels: ['CodeNode', PlanNodeType.MILESTONE],
+        labels: ['CodeNode', PlanNodeType.SECTION],
         properties: {
           projectId: ctx.projectId,
           name: title,
-          coreType: PlanNodeType.MILESTONE,
+          coreType: PlanNodeType.SECTION,
           status: TaskStatus.PLANNED,
           filePath: ctx.filePath,
           line: lineNum,
@@ -1072,7 +1073,7 @@ export async function ingestToNeo4j(
     // This handles: deleted tasks, restructured sections, removed milestones
     const existingResult = await session.run(
       `MATCH (n:CodeNode {projectId: $projectId})
-       WHERE n.coreType IN ['Task', 'Milestone', 'Sprint', 'Decision', 'PlanProject']
+       WHERE n.coreType IN ['Task', 'Milestone', 'Section', 'Sprint', 'Decision', 'PlanProject']
        RETURN n.id AS id`,
       { projectId: parsed.projectId },
     );
