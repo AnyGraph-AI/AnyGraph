@@ -287,3 +287,25 @@ Before touching code:
 ## Project-Agnostic Query Rule
 All plan queries are project-agnostic by default. Scope with `projectFilter` when needed.
 Examples: `codegraph`, `godspeed`, `bible-graph`, `plan-graph`.
+
+## Governance Integrity Runbook (Operator Mandatory)
+Before closing work, run:
+
+```bash
+npm run done-check
+```
+
+Supporting commands:
+
+```bash
+npm run integrity:snapshot
+npm run integrity:verify
+```
+
+Threshold policy:
+- Default policy is strict (fail on violations over configured limits).
+- Temporary threshold increases are allowed only as explicit transition controls while paying down known debt.
+- Any threshold override must be documented in commit message and linked plan task.
+- Ratchet policy: once debt is reduced, lower thresholds back to strict defaults.
+
+Do not announce “done” when `done-check` is red.

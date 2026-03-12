@@ -519,3 +519,21 @@ For dynamic prioritization to work, dependencies must be explicit:
 - encode milestone/task dependencies via `BLOCKS` / `DEPENDS_ON`
 - re-ingest plans after dependency edits
 - verify dependency edges in Neo4j before trusting ranking
+
+## Integrity Gate (Mandatory Before Declaring Done)
+Before declaring any implementation task complete, run:
+
+```bash
+npm run done-check
+```
+
+`done-check` currently executes:
+1. `npm run build`
+2. `npm run integrity:snapshot`
+3. `npm run integrity:verify`
+
+Rules:
+- If gate fails, task is **not done**.
+- Record gate failure in plan/task notes and continue remediation.
+- Do not mark plan checkboxes complete without integrity evidence artifact (command output + commit).
+- Temporary threshold overrides must be explicit and documented in commit message (no silent relaxations).

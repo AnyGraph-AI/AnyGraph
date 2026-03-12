@@ -453,3 +453,15 @@ Use this skill as an operational procedure, not only a query reference.
 - Never trust plan checkboxes without evidence links
 - Never trust evidence links without self-audit on high-drift projects
 - Never trust priority output if dependency edges are missing
+
+### Integrity Closure Gate (Required)
+Before claiming completion, run:
+
+```bash
+npm run done-check
+```
+
+If it fails:
+- Work is still in-progress.
+- Record the failing condition (build/integrity/staleness/threshold) in task notes.
+- Remediate or explicitly apply documented temporary threshold policy.
