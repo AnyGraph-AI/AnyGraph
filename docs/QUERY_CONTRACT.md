@@ -85,11 +85,18 @@ RETURN u.projectId AS projectId, count(u) AS unresolvedLocalCount
 ORDER BY unresolvedLocalCount DESC
 ```
 
-## Q7 — Integrity: Invariant Violations
+## Q7 — Integrity: Invariant Violations (latest audit run, high severity checks)
 
 ```cypher
-MATCH (a:AuditCheck)-[:FOUND]->(v:InvariantViolation)
-RETURN a.projectId AS projectId, count(v) AS invariantViolationCount
+MATCH (a:AuditCheck)
+WHERE a.projectId IS NOT NULL AND a.timestamp IS NOT NULL AND a.runId IS NOT NULL
+WITH a.projectId AS projectId, a.runId AS runId, max(a.timestamp) AS runTs
+ORDER BY runTs DESC
+WITH projectId, collect({runId: runId, runTs: runTs})[0] AS latest
+MATCH (latestCheck:AuditCheck {projectId: projectId, runId: latest.runId})
+WHERE coalesce(latestCheck.severity, 'low') = 'high'
+OPTIONAL MATCH (latestCheck)-[:FOUND]->(v:InvariantViolation)
+RETURN projectId, count(v) AS invariantViolationCount
 ORDER BY invariantViolationCount DESC
 ```
 
@@ -114,5 +121,7 @@ ORDER BY unscopedCount DESC
 
 ## Versioning
 
-- Contract version: `v1`
+- Contract version: `v1.1`
+- Migration note (v1.1): Q7 now reports invariant violations from the latest audit run per project (high-severity checks), matching `graph-integrity-snapshot.ts` and `verify-graph-integrity.ts` semantics.
+- Affected surfaces: graph status reports, integrity dashboards, and any tooling that previously treated Q7 as lifetime aggregate violations.
 - Changes must include migration note and affected tool/report list.
