@@ -477,3 +477,86 @@ export function createPlanPriorityTool(server: McpServer) {
     },
   );
 }
+
+// ============================================================================
+// plan_next_tasks — Dependency-aware next tasks (graph-wide)
+// ============================================================================
+
+export function createPlanNextTasksTool(server: McpServer) {
+  const neo4jService = new Neo4jService();
+
+  server.tool(
+    'plan_next_tasks',
+    'Returns dependency-aware next tasks. Prioritizes tasks with no open DEPENDS_ON blockers. ' +
+    'Works across all plan projects or a single filtered plan project.',
+    {
+      projectFilter: z.string().optional().describe(
+        'Filter to a specific plan project (e.g., "codegraph", "godspeed", "runtime-graph"). Omit for all.',
+      ),
+      limit: z.number().optional().describe('Max tasks to return (default 15)'),
+    },
+    async (args) => {
+      try {
+        const limit = args.limit ?? 15;
+        const filterClause = args.projectFilter
+          ? `AND t.projectId = '${planProjectId(args.projectFilter)}'`
+          : '';
+
+        const rows = await neo4jService.run(
+          `MATCH (t:Task {status: 'planned'})
+           WHERE true ${filterClause}
+           OPTIONAL MATCH (t)-[:DEPENDS_ON]->(dep:Task)
+           WITH t,
+                count(dep) AS totalDeps,
+                count(CASE WHEN dep.status = 'planned' THEN 1 END) AS openDeps,
+                collect(dep.name)[..5] AS depNames
+           OPTIONAL MATCH (t)-[:PART_OF]->(parent)
+           OPTIONAL MATCH (t)-[:BLOCKS]->(blocked)
+           WITH t, totalDeps, openDeps, depNames, parent, count(blocked) AS blocksCount
+           RETURN t.projectId AS project,
+                  parent.name AS parent,
+                  t.name AS task,
+                  t.line AS line,
+                  totalDeps,
+                  openDeps,
+                  depNames,
+                  blocksCount,
+                  CASE WHEN openDeps = 0 THEN true ELSE false END AS ready
+           ORDER BY ready DESC, blocksCount DESC, openDeps ASC, t.projectId ASC, line ASC
+           LIMIT ${limit}`,
+        );
+
+        const lines: string[] = ['# 🧭 Next Tasks (Dependency-Aware)\n'];
+
+        if (rows.length === 0) {
+          lines.push('No planned tasks found.');
+          return createSuccessResponse(lines.join('\n'));
+        }
+
+        for (const row of rows) {
+          const project = str(row.project).replace(/^plan_/, '');
+          const parent = str(row.parent) || '(no parent)';
+          const task = str(row.task);
+          const line = num(row.line);
+          const totalDeps = num(row.totalDeps);
+          const openDeps = num(row.openDeps);
+          const blocksCount = num(row.blocksCount);
+          const ready = Boolean(row.ready);
+          const depNames = (row.depNames as string[] | undefined) ?? [];
+
+          const icon = ready ? '✅' : '⛔';
+          lines.push(`- ${icon} [${project}] ${task} (${parent} @ line ${line})`);
+          lines.push(`  deps: ${openDeps}/${totalDeps} open | blocks: ${blocksCount}`);
+          if (!ready && depNames.length > 0) {
+            lines.push(`  waiting on: ${depNames.join(', ')}`);
+          }
+        }
+
+        lines.push('\nLegend: ✅ ready (no open deps) | ⛔ blocked');
+        return createSuccessResponse(lines.join('\n'));
+      } catch (err: any) {
+        return createErrorResponse(err.message || String(err));
+      }
+    },
+  );
+}

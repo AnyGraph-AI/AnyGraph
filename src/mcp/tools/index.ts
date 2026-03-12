@@ -36,7 +36,7 @@ import { createSwarmPostTaskTool } from './swarm-post-task.tool.js';
 import { createSwarmSenseTool } from './swarm-sense.tool.js';
 import { createTestNeo4jConnectionTool } from './test-neo4j-connection.tool.js';
 import { createTraverseFromNodeTool } from './traverse-from-node.tool.js';
-import { createPlanStatusTool, createPlanDriftTool, createPlanGapsTool, createPlanQueryTool, createPlanPriorityTool } from './plan-status.tool.js';
+import { createPlanStatusTool, createPlanDriftTool, createPlanGapsTool, createPlanQueryTool, createPlanPriorityTool, createPlanNextTasksTool } from './plan-status.tool.js';
 import { createClaimStatusTool, createEvidenceForTool, createContradictionsTool, createHypothesesTool, createClaimGenerateTool } from './claim-tools.tool.js';
 import { createSelfAuditTool } from './self-audit.tool.js';
 import { createParserContractStatusTool } from './parser-contract.tool.js';
@@ -135,6 +135,7 @@ export const registerAllTools = (server: McpServer): void => {
   createPlanGapsTool(server);
   createPlanQueryTool(server);
   createPlanPriorityTool(server);
+  createPlanNextTasksTool(server);
 
   // Register claim layer tools
   createClaimStatusTool(server);

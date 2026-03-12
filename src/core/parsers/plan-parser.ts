@@ -131,9 +131,13 @@ const TABLE_TASK_ROW = /^\|\s*(.+?)\s*\|\s*(#?\d+|—|-)\s*\|\s*(\d+|—|-)\s*\|
 // "Files touched:" section pattern
 const FILES_TOUCHED = /^###?\s*Files\s+touched:?\s*$/i;
 
-// Cross-project dependency patterns
-const DEPENDS_ON_PATTERN = /\*\*DEPENDS_ON\*\*\s+(.+)/i;
-const BLOCKS_PATTERN = /\*\*BLOCKS\*\*\s+(.+)/i;
+// Dependency directive patterns (plan-agnostic)
+// Supports both plain lines and checkbox-prefixed lines:
+//   **DEPENDS_ON** Task X
+//   - [ ] **DEPENDS_ON** Task X
+//   BLOCKS: Task Y
+const DEPENDS_ON_PATTERN = /^\s*(?:[-*]\s*\[[ xX]\]\s*)?(?:\*\*\s*)?DEPENDS_ON(?:\s*\*\*)?\s*:?\s+(.+)$/i;
+const BLOCKS_PATTERN = /^\s*(?:[-*]\s*\[[ xX]\]\s*)?(?:\*\*\s*)?BLOCKS(?:\s*\*\*)?\s*:?\s+(.+)$/i;
 
 // ============================================================================
 // STABLE ID GENERATION
@@ -472,6 +476,34 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       }
     }
 
+    // --- Dependency directives ---
+    // Convert markdown directives to unresolved refs for edge materialization later.
+    // Use section as source so dependencies are semantic scheduling constraints,
+    // not standalone checkbox tasks.
+    const dependsDirective = line.match(DEPENDS_ON_PATTERN);
+    if (dependsDirective && currentSectionId) {
+      stats.crossRefs++;
+      unresolvedRefs.push({
+        taskId: currentSectionId,
+        taskName: `section:${currentSectionKey}`,
+        refType: 'depends_on',
+        refValue: dependsDirective[1].trim(),
+      });
+      continue;
+    }
+
+    const blocksDirective = line.match(BLOCKS_PATTERN);
+    if (blocksDirective && currentSectionId) {
+      stats.crossRefs++;
+      unresolvedRefs.push({
+        taskId: currentSectionId,
+        taskName: `section:${currentSectionKey}`,
+        refType: 'blocks',
+        refValue: blocksDirective[1].trim(),
+      });
+      continue;
+    }
+
     // --- Table-based tasks (GodSpeed-style: | Task | Gap # | LOC | Risk |) ---
     const tableMatch = line.match(TABLE_TASK_ROW);
     if (tableMatch && currentSectionId) {
@@ -599,26 +631,6 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       continue;
     }
 
-    // --- Cross-project dependency lines ---
-    const dependsMatch = line.match(DEPENDS_ON_PATTERN);
-    if (dependsMatch && currentSectionId) {
-      unresolvedRefs.push({
-        taskId: currentSectionId,
-        taskName: `section:${currentSectionKey}`,
-        refType: 'depends_on',
-        refValue: dependsMatch[1].trim(),
-      });
-    }
-
-    const blocksMatch = line.match(BLOCKS_PATTERN);
-    if (blocksMatch && currentSectionId) {
-      unresolvedRefs.push({
-        taskId: currentSectionId,
-        taskName: `section:${currentSectionKey}`,
-        refType: 'blocks',
-        refValue: blocksMatch[1].trim(),
-      });
-    }
   }
 
   return { fileNodes: nodes, fileEdges: edges, unresolvedRefs, fileStats: stats };
@@ -710,7 +722,76 @@ export async function enrichCrossDomain(
       const session = driver.session();
       try {
         for (const ref of allRefs) {
-          if (ref.refType === 'file_path') {
+          if (ref.refType === 'depends_on' || ref.refType === 'blocks') {
+            const sourceProjectId = ref.taskId.split(':')[0];
+            const relType = ref.refType === 'depends_on' ? PlanEdgeType.DEPENDS_ON : PlanEdgeType.BLOCKS;
+
+            // Support comma/semicolon-separated dependency tokens.
+            const targets = ref.refValue
+              .split(/[,;]+|\s+and\s+/i)
+              .map((t) => t.replace(/[`*]/g, '').trim())
+              .filter(Boolean);
+
+            for (const targetToken of targets) {
+              const m = targetToken.match(/^M(\d+)\b/i);
+              const milestoneNum = m ? parseInt(m[1], 10) : null;
+              const milestoneHint = (targetToken.match(/^M\d+[\-_: ]+(.+)$/i)?.[1] ?? '').trim();
+
+              const result = await session.run(
+                `MATCH (target:CodeNode)
+                 WHERE target.coreType IN ['Task', 'Milestone', 'Section', 'Sprint', 'Decision', 'PlanProject']
+                 AND (
+                   target.id = $token
+                   OR toLower(target.name) = toLower($token)
+                   OR toLower(target.name) CONTAINS toLower($token)
+                   OR ($milestoneNum IS NOT NULL AND target.coreType = 'Milestone' AND target.number = toInteger($milestoneNum))
+                 )
+                 WITH target,
+                      CASE WHEN target.id = $token THEN 100 ELSE 0 END +
+                      CASE WHEN target.projectId = $sourceProjectId THEN 30 ELSE 0 END +
+                      CASE WHEN toLower(target.name) = toLower($token) THEN 20 ELSE 0 END +
+                      CASE WHEN $milestoneNum IS NOT NULL AND target.coreType = 'Milestone' AND target.number = toInteger($milestoneNum) THEN 15 ELSE 0 END +
+                      CASE WHEN $milestoneHint <> '' AND toLower(target.name) CONTAINS toLower($milestoneHint) THEN 10 ELSE 0 END +
+                      CASE WHEN target.projectId STARTS WITH 'plan_' THEN 5 ELSE 0 END AS score
+                 WHERE score > 0
+                 RETURN target.id AS id
+                 ORDER BY score DESC
+                 LIMIT 5`,
+                {
+                  sourceProjectId,
+                  token: targetToken,
+                  milestoneNum,
+                  milestoneHint,
+                },
+              );
+
+              if (result.records.length > 0) {
+                for (const record of result.records) {
+                  const targetId = record.get('id');
+                  if (targetId === ref.taskId) continue;
+
+                  await session.run(
+                    `MATCH (src:CodeNode {id: $srcId}), (dst:CodeNode {id: $dstId})
+                     MERGE (src)-[r:${relType}]->(dst)
+                     SET r.projectId = $projectId,
+                         r.refType = $refType,
+                         r.refValue = $refValue,
+                         r.resolvedAt = datetime()`,
+                    {
+                      srcId: ref.taskId,
+                      dstId: targetId,
+                      projectId: sourceProjectId,
+                      refType: ref.refType,
+                      refValue: targetToken,
+                    },
+                  );
+                }
+                resolved++;
+              } else {
+                notFound++;
+              }
+            }
+          } else if (ref.refType === 'file_path') {
             const filename = path.basename(ref.refValue);
             const result = await session.run(
               `MATCH (sf:SourceFile)
