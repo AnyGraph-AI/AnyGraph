@@ -34,6 +34,7 @@ async function main(): Promise<void> {
         runs: bundle.verificationRuns.length,
         scopes: bundle.analysisScopes.length,
         adjudications: bundle.adjudications.length,
+        pathWitnesses: bundle.pathWitnesses?.length ?? 0,
       },
       ingested: result,
     }),

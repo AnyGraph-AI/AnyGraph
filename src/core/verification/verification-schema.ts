@@ -110,14 +110,26 @@ export const AdjudicationRecordSchema = z.object({
   requiresRevalidation: z.boolean().default(false),
 });
 
+export const PathWitnessSchema = z.object({
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  verificationRunId: z.string().min(1),
+  witnessType: z.enum(['relatedLocations', 'codeFlows', 'hybrid']).default('relatedLocations'),
+  criticality: CriticalitySchema.optional(),
+  summary: z.string().optional(),
+  payloadJson: z.string().optional(),
+});
+
 export const VerificationFoundationBundleSchema = z.object({
   projectId: z.string().min(1),
   verificationRuns: z.array(VerificationRunSchema).default([]),
   analysisScopes: z.array(AnalysisScopeSchema).default([]),
   adjudications: z.array(AdjudicationRecordSchema).default([]),
+  pathWitnesses: z.array(PathWitnessSchema).default([]),
 });
 
 export type VerificationRun = z.infer<typeof VerificationRunSchema>;
 export type AnalysisScope = z.infer<typeof AnalysisScopeSchema>;
 export type AdjudicationRecord = z.infer<typeof AdjudicationRecordSchema>;
+export type PathWitness = z.infer<typeof PathWitnessSchema>;
 export type VerificationFoundationBundle = z.infer<typeof VerificationFoundationBundleSchema>;

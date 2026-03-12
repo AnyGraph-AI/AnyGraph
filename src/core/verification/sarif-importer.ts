@@ -102,6 +102,7 @@ export async function importSarifToVerificationBundle(
   const verificationRuns: VerificationFoundationBundle['verificationRuns'] = [];
   const analysisScopes: VerificationFoundationBundle['analysisScopes'] = [];
   const adjudications: VerificationFoundationBundle['adjudications'] = [];
+  const pathWitnesses: VerificationFoundationBundle['pathWitnesses'] = [];
 
   for (const run of runs) {
     if (!matchesTool(run, options.toolFilter ?? 'codeql')) continue;
@@ -128,15 +129,15 @@ export async function importSarifToVerificationBundle(
         if (uri) includedPaths.add(uri);
       }
 
-      verificationRuns.push({
+      const runNode = {
         id: rid,
         projectId: options.projectId,
         tool: toolName,
         toolVersion,
-        status: 'violates',
+        status: 'violates' as const,
         criticality,
         confidence: mapLevelToConfidence(level),
-        evidenceGrade: 'A2',
+        evidenceGrade: 'A2' as const,
         freshnessTs: now,
         reproducible: true,
         resultFingerprint: fingerprint,
@@ -154,7 +155,24 @@ export async function importSarifToVerificationBundle(
         externalContextSnapshotRef: relatedLocationCount > 0 || codeFlowCount > 0
           ? JSON.stringify({ relatedLocations: relatedLocationCount, codeFlows: codeFlowCount })
           : undefined,
-      });
+      };
+
+      verificationRuns.push(runNode);
+
+      if ((criticality === 'high' || criticality === 'safety_critical') && (relatedLocationCount > 0 || codeFlowCount > 0)) {
+        pathWitnesses.push({
+          id: `pw:${hash(rid, fingerprint)}`,
+          projectId: options.projectId,
+          verificationRunId: rid,
+          witnessType: relatedLocationCount > 0 && codeFlowCount > 0 ? 'hybrid' : (relatedLocationCount > 0 ? 'relatedLocations' : 'codeFlows'),
+          criticality,
+          summary: `relatedLocations=${relatedLocationCount}, codeFlows=${codeFlowCount}`,
+          payloadJson: JSON.stringify({
+            locations: result.locations ?? [],
+            relatedLocations: result.relatedLocations ?? [],
+          }),
+        });
+      }
 
       // Suppressions are adjudication evidence, not safety proof
       for (const sup of result.suppressions ?? []) {
@@ -176,44 +194,39 @@ export async function importSarifToVerificationBundle(
     const invocation = run.invocations?.[0];
     const executionSuccessful = invocation?.executionSuccessful;
 
-    // Attach one scope node per filtered SARIF run
-    analysisScopes.push({
-      id: scopeId,
+    const scopeCompleteness: 'partial' | 'complete' = executionSuccessful === false ? 'partial' : 'complete';
+
+    const scopeTemplate = {
       projectId: options.projectId,
-      verificationRunId: verificationRuns[verificationRuns.length - 1]?.id ?? `vr:${options.projectId}:empty:${hash(now)}`,
-      scanRoots: [],
+      scanRoots: [] as string[],
       includedPaths: Array.from(includedPaths),
-      excludedPaths: [],
-      buildMode: 'custom',
-      supportedLanguages: [],
-      analyzedLanguages: [],
+      excludedPaths: [] as string[],
+      buildMode: 'custom' as const,
+      supportedLanguages: [] as string[],
+      analyzedLanguages: [] as string[],
       targetFileCount: includedPaths.size,
       analyzedFileCount: includedPaths.size,
       skippedFileCount: 0,
       analysisErrorCount: executionSuccessful === false ? 1 : 0,
       warningCount: 0,
       suppressedErrors: false,
-      scopeCompleteness: executionSuccessful === false ? 'partial' : 'complete',
+      scopeCompleteness,
       scopeEvidenceRef: options.sarifPath,
-      unscannedTargetNodeIds: [],
-    });
+      unscannedTargetNodeIds: [] as string[],
+    };
 
-    // connect every run from this SARIF run to this scope
+    // Attach one scope per imported finding run
     const start = verificationRuns.length - (results.length || 0);
     const end = verificationRuns.length;
+    let ordinal = 0;
     for (let i = start; i < end; i++) {
-      if (verificationRuns[i]) {
-        analysisScopes.push({
-          ...analysisScopes[analysisScopes.length - 1],
-          id: `${scopeId}:${i}`,
-          verificationRunId: verificationRuns[i].id,
-        });
-      }
-    }
-
-    // remove template scope duplicate if per-run clones were generated
-    if (results.length > 0) {
-      analysisScopes.splice(analysisScopes.length - (results.length + 1), 1);
+      if (!verificationRuns[i]) continue;
+      analysisScopes.push({
+        id: `${scopeId}:${ordinal}`,
+        verificationRunId: verificationRuns[i].id,
+        ...scopeTemplate,
+      });
+      ordinal++;
     }
   }
 
@@ -222,5 +235,6 @@ export async function importSarifToVerificationBundle(
     verificationRuns,
     analysisScopes,
     adjudications,
+    pathWitnesses,
   };
 }
