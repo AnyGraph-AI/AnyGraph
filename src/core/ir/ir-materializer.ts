@@ -123,6 +123,11 @@ export async function materializeIrDocument(
   doc: IrDocument,
   options?: IrMaterializeOptions,
 ): Promise<IrMaterializeResult> {
-  const materializer = new IrMaterializer();
-  return materializer.materialize(doc, options);
+  const neo4jService = new Neo4jService();
+  const materializer = new IrMaterializer(neo4jService);
+  try {
+    return await materializer.materialize(doc, options);
+  } finally {
+    await neo4jService.getDriver().close();
+  }
 }

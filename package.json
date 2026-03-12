@@ -50,6 +50,8 @@
     "test": "vitest run",
     "ir:parity": "node --loader ts-node/esm src/utils/ir-parity-gate.ts",
     "ir:parity:resume": "node --loader ts-node/esm src/utils/ir-parity-gate.ts --resume --retry-failed",
+    "doc:ingest": "node --loader ts-node/esm src/utils/document-adapter-ingest.ts",
+
     "registry:reconcile": "node --loader ts-node/esm reconcile-project-registry.ts",
     "registry:verify": "node --loader ts-node/esm verify-project-registry.ts",
     "edges:normalize": "node --loader ts-node/esm normalize-edge-project-ids.ts",

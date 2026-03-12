@@ -1,14 +1,11 @@
 #!/usr/bin/env npx tsx
 /**
  * Universal CodeGraph File Watcher
- * 
- * Discovers ALL projects from Neo4j and watches them all simultaneously.
- * New projects are picked up on periodic re-scan (every 5 minutes).
- * 
- * Usage:
- *   npx tsx watch-all.ts
- * 
- * Designed to run as a systemd service — watches everything, always.
+ *
+ * Watches:
+ * - code projects (via MCP incremental parser watcher)
+ * - document projects (via document adapter + IR materializer)
+ * - plan files (plan parser + cross-domain enrichment)
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -16,7 +13,9 @@ import { LoggingMessageNotificationSchema } from '@modelcontextprotocol/sdk/type
 import neo4j from 'neo4j-driver';
 import dotenv from 'dotenv';
 import { existsSync, watch as fsWatch, type FSWatcher } from 'fs';
-import { parsePlanDirectory, ingestToNeo4j, enrichCrossDomain, type ParsedPlan } from './src/core/parsers/plan-parser.js';
+import { parsePlanDirectory, ingestToNeo4j, enrichCrossDomain } from './src/core/parsers/plan-parser.js';
+import { parseDocumentCollection, documentSchemaToIr } from './src/core/adapters/document/document-parser.js';
+import { materializeIrDocument } from './src/core/ir/ir-materializer.js';
 
 dotenv.config();
 
@@ -29,40 +28,63 @@ interface ProjectInfo {
   projectId: string;
   name: string;
   path: string;
-  tsconfigPath: string;
+  tsconfigPath?: string;
+  kind: 'code' | 'document';
 }
 
 // Known project paths (fallback when Project nodes don't have path)
-const KNOWN_PROJECTS: Record<string, { path: string; tsconfig: string }> = {
+const KNOWN_PROJECTS: Record<string, { path: string; tsconfig?: string; kind: 'code' | 'document' }> = {
   proj_60d5feed0001: {
     path: '/mnt/c/Users/ddfff/Downloads/Bots/GodSpeed/',
     tsconfig: '/mnt/c/Users/ddfff/Downloads/Bots/GodSpeed/tsconfig.json',
+    kind: 'code',
   },
   proj_c0d3e9a1f200: {
     path: '/home/jonathan/.openclaw/workspace/codegraph/',
     tsconfig: '/home/jonathan/.openclaw/workspace/codegraph/tsconfig.json',
+    kind: 'code',
   },
 };
+
+function inferProjectKind(projectType: string | null, sourceKind: string | null, path: string, tsconfigPath?: string): 'code' | 'document' {
+  const pt = (projectType ?? '').toLowerCase();
+  const sk = (sourceKind ?? '').toLowerCase();
+
+  if (pt === 'code' || sk === 'code') return 'code';
+  if (pt === 'document' || sk === 'document') return 'document';
+
+  if (tsconfigPath && existsSync(tsconfigPath)) return 'code';
+  // default fallback for non-tsconfig projects
+  return 'document';
+}
 
 async function discoverProjects(): Promise<ProjectInfo[]> {
   const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD));
   const session = driver.session();
-  
+
   try {
-    const result = await session.run(`
-      MATCH (p:Project)
-      WHERE p.path IS NOT NULL OR p.projectId IN $knownIds
-      RETURN p.projectId AS pid, p.name AS name, p.path AS path
-    `, { knownIds: Object.keys(KNOWN_PROJECTS) });
-    
+    const result = await session.run(
+      `MATCH (p:Project)
+       WHERE p.path IS NOT NULL OR p.projectId IN $knownIds
+       RETURN p.projectId AS pid,
+              p.name AS name,
+              p.path AS path,
+              p.projectType AS projectType,
+              p.sourceKind AS sourceKind`,
+      { knownIds: Object.keys(KNOWN_PROJECTS) },
+    );
+
     const projects: ProjectInfo[] = [];
-    
+
     for (const record of result.records) {
-      const pid = record.get('pid');
-      const name = record.get('name') || pid;
-      let path = record.get('path');
-      let tsconfigPath: string;
-      
+      const pid = String(record.get('pid'));
+      const name = String(record.get('name') || pid);
+      const projectType = record.get('projectType') ? String(record.get('projectType')) : null;
+      const sourceKind = record.get('sourceKind') ? String(record.get('sourceKind')) : null;
+
+      let path = record.get('path') ? String(record.get('path')) : '';
+      let tsconfigPath: string | undefined;
+
       // Use known paths as fallback
       if (!path && KNOWN_PROJECTS[pid]) {
         path = KNOWN_PROJECTS[pid].path;
@@ -73,22 +95,27 @@ async function discoverProjects(): Promise<ProjectInfo[]> {
       } else {
         continue; // Skip projects without a path
       }
-      
-      // Only watch TypeScript projects with valid paths
+
       if (!existsSync(path)) {
         console.error(`[watch-all] ⚠️  Skipping ${name} (${pid}): path not found: ${path}`);
         continue;
       }
-      
-      // Skip non-code projects (Bible, Quran, etc.)
-      if (pid.includes('bible') || pid.includes('quran') || pid.includes('deutero') || 
-          pid.includes('pseudo') || pid.includes('early')) {
+
+      // Plans handled by dedicated plan watcher below
+      if (pid.startsWith('plan_') || projectType === 'plan' || sourceKind === 'plan') {
         continue;
       }
-      
-      projects.push({ projectId: pid, name, path, tsconfigPath });
+
+      // Skip corpus projects for this watcher process
+      if (pid.includes('bible') || pid.includes('quran') || pid.includes('deutero') || pid.includes('pseudo') || pid.includes('early')) {
+        continue;
+      }
+
+      const kind = KNOWN_PROJECTS[pid]?.kind ?? inferProjectKind(projectType, sourceKind, path, tsconfigPath);
+
+      projects.push({ projectId: pid, name, path, tsconfigPath, kind });
     }
-    
+
     return projects;
   } finally {
     await session.close();
@@ -110,53 +137,74 @@ async function waitForNeo4j(): Promise<void> {
       return;
     } catch {
       if (i % 10 === 0) console.log(`[watch-all] Neo4j not ready yet... (attempt ${i + 1}/${maxRetries})`);
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise((r) => setTimeout(r, 5000));
     }
   }
   throw new Error('Neo4j did not become available within 5 minutes');
 }
 
+async function ingestDocumentProject(project: ProjectInfo): Promise<void> {
+  const started = Date.now();
+  const schema = await parseDocumentCollection({
+    projectId: project.projectId,
+    sourcePath: project.path,
+    collectionName: project.name,
+  });
+  const ir = documentSchemaToIr(schema);
+  const materialized = await materializeIrDocument(ir, {
+    batchSize: 500,
+    clearProjectFirst: true,
+  });
+
+  const elapsedMs = Date.now() - started;
+  const time = new Date().toLocaleTimeString();
+  console.log(
+    `[${time}] 📄 ${project.projectId}: document ingest complete ` +
+      `docs=${schema.documents.length}, paragraphs=${schema.paragraphs.length}, entities=${schema.entities.length}, ` +
+      `nodes=${materialized.nodesCreated}, edges=${materialized.edgesCreated}, ${elapsedMs}ms`,
+  );
+}
+
 async function main() {
   console.log('\n🔍 CodeGraph Universal File Watcher');
-  console.log('   Watches ALL registered projects automatically.\n');
-  
-  // Wait for Neo4j
+  console.log('   Watches code, document, and plan projects automatically.\n');
+
   await waitForNeo4j();
-  
-  // Discover projects
+
   let projects = await discoverProjects();
   console.log(`   Found ${projects.length} watchable project(s):`);
   for (const p of projects) {
-    console.log(`     • ${p.name} (${p.projectId}) → ${p.path}`);
+    console.log(`     • [${p.kind}] ${p.name} (${p.projectId}) → ${p.path}`);
   }
-  
+
   if (projects.length === 0) {
     console.log('   No projects to watch. Will re-scan in 5 minutes...');
   }
-  
-  // Create MCP client
+
+  // MCP client for code watchers
   const transport = new StdioClientTransport({
     command: 'node',
     args: [new URL('./dist/mcp/mcp.server.js', import.meta.url).pathname],
   });
-  
-  const client = new Client(
-    { name: 'codegraph-watch-all', version: '1.0.0' },
-    { capabilities: { logging: {} } },
-  );
-  
+
+  const client = new Client({ name: 'codegraph-watch-all', version: '1.1.0' }, { capabilities: { logging: {} } });
   await client.connect(transport);
   const tools = await client.listTools();
   console.log(`\n   MCP connected. ${tools.tools.length} tools available.`);
-  
-  // Start watching each project
-  const watchedIds = new Set<string>();
-  
-  async function startWatching(project: ProjectInfo) {
-    if (watchedIds.has(project.projectId)) return;
-    
+
+  const watchedCodeIds = new Set<string>();
+  const documentWatchers = new Map<string, FSWatcher>();
+  const documentTimers = new Map<string, NodeJS.Timeout>();
+
+  async function startWatchingCode(project: ProjectInfo) {
+    if (watchedCodeIds.has(project.projectId)) return;
+    if (!project.tsconfigPath || !existsSync(project.tsconfigPath)) {
+      console.error(`   ⚠️  Skipping code watcher for ${project.name}: tsconfig missing (${project.tsconfigPath ?? 'n/a'})`);
+      return;
+    }
+
     try {
-      console.log(`\n   Starting watcher: ${project.name} (${project.projectId})`);
+      console.log(`\n   Starting code watcher: ${project.name} (${project.projectId})`);
       const result = await client.callTool({
         name: 'start_watch_project',
         arguments: {
@@ -166,76 +214,120 @@ async function main() {
           debounceMs: 1000,
         },
       });
-      
+
       for (const content of result.content as any[]) {
         if (content.type === 'text') {
           console.log(`   ${content.text.split('\n').join('\n   ')}`);
         }
       }
-      
-      watchedIds.add(project.projectId);
+
+      watchedCodeIds.add(project.projectId);
     } catch (err) {
-      console.error(`   ❌ Failed to watch ${project.name}: ${err}`);
+      console.error(`   ❌ Failed to watch code project ${project.name}: ${err}`);
     }
   }
-  
-  // Start all current projects
+
+  async function startWatchingDocument(project: ProjectInfo) {
+    if (documentWatchers.has(project.projectId)) return;
+
+    try {
+      console.log(`\n   Starting document watcher: ${project.name} (${project.projectId})`);
+      // initial ingest
+      await ingestDocumentProject(project);
+
+      const watcher = fsWatch(project.path, { recursive: true }, (_eventType, filename) => {
+        if (!filename) return;
+
+        // ignore transient tmp files
+        if (filename.endsWith('.swp') || filename.endsWith('~')) return;
+
+        const existing = documentTimers.get(project.projectId);
+        if (existing) clearTimeout(existing);
+
+        const timer = setTimeout(async () => {
+          try {
+            const time = new Date().toLocaleTimeString();
+            console.log(`[${time}] 📄 ${project.projectId}: change detected (${filename}) — re-ingesting...`);
+            await ingestDocumentProject(project);
+          } catch (err) {
+            console.error(`[document-watcher] ❌ ${project.projectId}: ingest failed: ${err}`);
+          }
+        }, 3000);
+
+        documentTimers.set(project.projectId, timer);
+      });
+
+      documentWatchers.set(project.projectId, watcher);
+    } catch (err) {
+      console.error(`   ❌ Failed to watch document project ${project.name}: ${err}`);
+    }
+  }
+
+  async function startWatching(project: ProjectInfo) {
+    if (project.kind === 'code') return startWatchingCode(project);
+    return startWatchingDocument(project);
+  }
+
+  // start all current projects
   for (const p of projects) {
     await startWatching(p);
   }
-  
-  // Listen for file change notifications
+
+  // logging notifications from code watchers
   client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
     const data = notification.params?.data as any;
-    if (data?.type) {
-      const time = new Date().toLocaleTimeString();
-      const pid = data.projectId || '???';
-      switch (data.type) {
-        case 'file_change_detected':
-          console.log(`[${time}] ⚡ ${pid}: Change detected: ${data.data?.filesChanged?.join(', ')}`);
-          break;
-        case 'incremental_parse_started':
-          console.log(`[${time}] 🔄 ${pid}: Reparsing...`);
-          break;
-        case 'incremental_parse_completed':
-          console.log(`[${time}] ✅ ${pid}: Graph updated: ${data.data?.nodesUpdated} nodes, ${data.data?.edgesUpdated} edges (${data.data?.elapsedMs}ms)`);
-          break;
-        case 'incremental_parse_failed':
-          console.log(`[${time}] ❌ ${pid}: Parse failed: ${data.data?.error}`);
-          break;
-        default:
-          console.log(`[${time}] 📋 ${pid}: ${JSON.stringify(data).slice(0, 200)}`);
-      }
+    if (!data?.type) return;
+
+    const time = new Date().toLocaleTimeString();
+    const pid = data.projectId || '???';
+    switch (data.type) {
+      case 'file_change_detected':
+        console.log(`[${time}] ⚡ ${pid}: Change detected: ${data.data?.filesChanged?.join(', ')}`);
+        break;
+      case 'incremental_parse_started':
+        console.log(`[${time}] 🔄 ${pid}: Reparsing...`);
+        break;
+      case 'incremental_parse_completed':
+        console.log(
+          `[${time}] ✅ ${pid}: Graph updated: ${data.data?.nodesUpdated} nodes, ${data.data?.edgesUpdated} edges (${data.data?.elapsedMs}ms)`,
+        );
+        break;
+      case 'incremental_parse_failed':
+        console.log(`[${time}] ❌ ${pid}: Parse failed: ${data.data?.error}`);
+        break;
+      default:
+        console.log(`[${time}] 📋 ${pid}: ${JSON.stringify(data).slice(0, 200)}`);
     }
   });
-  
+
   // ========================================
   // PLAN GRAPH WATCHER
   // ========================================
   const PLANS_ROOT = '/home/jonathan/.openclaw/workspace/plans';
   let planParseTimer: NodeJS.Timeout | null = null;
-  const PLAN_DEBOUNCE_MS = 3000; // 3 second debounce for plan file changes
+  const PLAN_DEBOUNCE_MS = 3000;
 
   async function reParsePlans() {
     try {
       const time = new Date().toLocaleTimeString();
       console.log(`[${time}] 📋 Plan change detected — reparsing...`);
-      
+
       const results = await parsePlanDirectory(PLANS_ROOT);
       let totalNodes = 0;
       let totalStale = 0;
-      
+
       for (const parsed of results) {
         const ingestResult = await ingestToNeo4j(parsed);
         totalNodes += ingestResult.nodesUpserted;
         totalStale += ingestResult.staleRemoved;
       }
-      
-      // Cross-domain enrichment
+
       const enrichResult = await enrichCrossDomain(results);
-      
-      console.log(`[${time}] ✅ Plans updated: ${totalNodes} nodes, ${totalStale} stale removed, ${enrichResult.evidenceEdges} evidence edges`);
-      
+
+      console.log(
+        `[${time}] ✅ Plans updated: ${totalNodes} nodes, ${totalStale} stale removed, ${enrichResult.evidenceEdges} evidence edges`,
+      );
+
       if (enrichResult.driftDetected.length > 0) {
         console.log(`[${time}] ⚠️  ${enrichResult.driftDetected.length} drift items detected`);
       }
@@ -244,15 +336,12 @@ async function main() {
     }
   }
 
-  // Watch plans directory recursively
   const planWatchers: FSWatcher[] = [];
 
   function watchPlansDir(dir: string) {
     try {
-      const watcher = fsWatch(dir, { recursive: true }, (eventType, filename) => {
+      const watcher = fsWatch(dir, { recursive: true }, (_eventType, filename) => {
         if (!filename?.endsWith('.md')) return;
-        
-        // Debounce: reset timer on each change
         if (planParseTimer) clearTimeout(planParseTimer);
         planParseTimer = setTimeout(reParsePlans, PLAN_DEBOUNCE_MS);
       });
@@ -265,21 +354,23 @@ async function main() {
 
   if (existsSync(PLANS_ROOT)) {
     watchPlansDir(PLANS_ROOT);
-    // Initial parse on startup
     await reParsePlans();
   } else {
     console.log('   ℹ️  Plans directory not found, skipping plan watcher');
   }
 
-  // Periodic re-scan for new projects
+  // periodic re-scan for new projects
   setInterval(async () => {
     try {
       const currentProjects = await discoverProjects();
-      const newProjects = currentProjects.filter(p => !watchedIds.has(p.projectId));
+      const newProjects = currentProjects.filter(
+        (p) => !watchedCodeIds.has(p.projectId) && !documentWatchers.has(p.projectId),
+      );
+
       if (newProjects.length > 0) {
         console.log(`\n[${new Date().toLocaleTimeString()}] 🆕 Found ${newProjects.length} new project(s):`);
         for (const p of newProjects) {
-          console.log(`     • ${p.name} (${p.projectId})`);
+          console.log(`     • [${p.kind}] ${p.name} (${p.projectId})`);
           await startWatching(p);
         }
       }
@@ -287,36 +378,55 @@ async function main() {
       console.error(`[watch-all] Re-scan error: ${err}`);
     }
   }, RESCAN_INTERVAL_MS);
-  
-  console.log(`\n   Watching ${watchedIds.size} project(s). Re-scanning every 5 min. Press Ctrl+C to stop.\n`);
-  
-  // Graceful shutdown
+
+  console.log(
+    `\n   Watching code=${watchedCodeIds.size}, documents=${documentWatchers.size}, plans=${planWatchers.length}. Re-scanning every 5 min. Press Ctrl+C to stop.\n`,
+  );
+
   const shutdown = async () => {
     console.log('\n🛑 Stopping all watchers...');
-    // Stop code watchers
-    for (const pid of watchedIds) {
+
+    for (const pid of watchedCodeIds) {
       try {
         await client.callTool({ name: 'stop_watch_project', arguments: { projectId: pid } });
-      } catch {}
+      } catch {
+        // ignore shutdown errors
+      }
     }
-    // Stop plan watchers
+
+    for (const [pid, watcher] of documentWatchers) {
+      try {
+        watcher.close();
+      } catch {
+        console.error(`Failed closing document watcher ${pid}`);
+      }
+    }
+
+    for (const timer of documentTimers.values()) {
+      clearTimeout(timer);
+    }
+
     for (const w of planWatchers) {
-      try { w.close(); } catch {}
+      try {
+        w.close();
+      } catch {
+        // ignore
+      }
     }
     if (planParseTimer) clearTimeout(planParseTimer);
+
     await client.close();
     console.log('   Done.');
     process.exit(0);
   };
-  
+
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
-  
-  // Keep alive
+
   await new Promise(() => {});
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('Fatal:', err);
   process.exit(1);
 });
