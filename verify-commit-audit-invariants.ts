@@ -136,34 +136,27 @@ function readSnapshotDeltas(): SnapshotDelta[] {
     return [];
   }
 
-  if (files.length === 0) return [];
+  // Need at least 2 snapshot files to compute deltas (cold-start: first snapshot has no baseline).
+  if (files.length < 2) return [];
 
-  const latestFile = join(dir, files[files.length - 1]);
-  const lines = readFileSync(latestFile, 'utf8')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
+  const parseJsonl = (filePath: string): Array<Record<string, unknown>> =>
+    readFileSync(filePath, 'utf8')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean) as Array<Record<string, unknown>>;
 
-  if (lines.length === 0) return [];
+  const currRows = parseJsonl(join(dir, files[files.length - 1]));
+  const prevRows = parseJsonl(join(dir, files[files.length - 2]));
 
-  const rows = lines
-    .map((line) => {
-      try {
-        return JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean) as Array<Record<string, unknown>>;
-
-  const timestamps = unique(rows.map((r) => String(r.timestamp ?? '')).filter(Boolean)).sort();
-  if (timestamps.length < 2) return [];
-
-  const prevTs = timestamps[timestamps.length - 2];
-  const currTs = timestamps[timestamps.length - 1];
-
-  const prevRows = rows.filter((r) => String(r.timestamp) === prevTs);
-  const currRows = rows.filter((r) => String(r.timestamp) === currTs);
+  if (currRows.length === 0 || prevRows.length === 0) return [];
 
   const prevByProject = new Map<string, Record<string, unknown>>();
   for (const row of prevRows) prevByProject.set(String(row.projectId), row);

@@ -192,7 +192,10 @@ async function detectContradictions(
          r2.hasContradiction = true,
          r1.updatedAt = toString(datetime()),
          r2.updatedAt = toString(datetime())
-     RETURN count(DISTINCT r1) + count(DISTINCT r2) AS flagged`,
+     WITH collect(DISTINCT r1.id) + collect(DISTINCT r2.id) AS allIds
+     UNWIND allIds AS uid
+     WITH collect(DISTINCT uid) AS uniqueIds
+     RETURN size(uniqueIds) AS flagged`,
     { projectId },
   );
   return (result[0]?.flagged as any)?.toNumber?.() ?? result[0]?.flagged ?? 0;

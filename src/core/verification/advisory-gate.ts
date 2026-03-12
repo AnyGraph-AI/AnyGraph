@@ -29,11 +29,16 @@ function toNum(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function stableJson(input: Record<string, unknown>): string {
-  const sortedKeys = Object.keys(input).sort();
-  const out: Record<string, unknown> = {};
-  for (const key of sortedKeys) out[key] = input[key];
-  return JSON.stringify(out);
+function stableJson(input: unknown): string {
+  if (input === null || input === undefined || typeof input !== 'object') {
+    return JSON.stringify(input);
+  }
+  if (Array.isArray(input)) {
+    return '[' + input.map((item) => stableJson(item)).join(',') + ']';
+  }
+  const sortedKeys = Object.keys(input as Record<string, unknown>).sort();
+  const pairs = sortedKeys.map((key) => JSON.stringify(key) + ':' + stableJson((input as Record<string, unknown>)[key]));
+  return '{' + pairs.join(',') + '}';
 }
 
 /**
