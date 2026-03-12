@@ -740,6 +740,28 @@ export async function enrichCrossDomain(
     {
       const session = driver.session();
       try {
+        // IMPORTANT: dependency edges from markdown directives must be rebuilt
+        // deterministically on each enrichment run. If we keep old DEPENDS_ON/BLOCKS
+        // edges around, stale refValue/rawRefValue tokens trigger false integrity failures.
+        const sourcePlanProjectIds = Array.from(
+          new Set(
+            allRefs
+              .filter((r) => r.refType === 'depends_on' || r.refType === 'blocks')
+              .map((r) => r.taskId.split(':')[0])
+              .filter(Boolean),
+          ),
+        );
+
+        if (sourcePlanProjectIds.length > 0) {
+          await session.run(
+            `MATCH (src:CodeNode)-[r:DEPENDS_ON|BLOCKS]->(dst:CodeNode)
+             WHERE r.projectId IN $projectIds
+               AND coalesce(r.refType, '') IN ['depends_on', 'blocks']
+             DELETE r`,
+            { projectIds: sourcePlanProjectIds },
+          );
+        }
+
         for (const ref of allRefs) {
           if (ref.refType === 'depends_on' || ref.refType === 'blocks') {
             const sourceProjectId = ref.taskId.split(':')[0];
