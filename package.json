@@ -57,6 +57,7 @@
     "verification:exception:enforce": "node --loader ts-node/esm src/utils/verification-exception-enforce.ts",
     "verification:advisory:gate": "node --loader ts-node/esm src/utils/verification-advisory-gate.ts",
     "verification:done-check:capture": "node --loader ts-node/esm src/utils/verification-done-check-capture.ts",
+    "verification:pilot:ir:validate": "node --loader ts-node/esm src/utils/verification-ir-pilot-validate.ts",
 
     "registry:reconcile": "node --loader ts-node/esm reconcile-project-registry.ts",
     "registry:verify": "node --loader ts-node/esm verify-project-registry.ts",

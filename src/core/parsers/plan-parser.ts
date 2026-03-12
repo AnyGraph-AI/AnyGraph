@@ -774,8 +774,7 @@ export async function enrichCrossDomain(
                       CASE WHEN target.projectId = $sourceProjectId THEN 30 ELSE 0 END +
                       CASE WHEN toLower(target.name) = toLower($token) THEN 20 ELSE 0 END +
                       CASE WHEN $milestoneNum IS NOT NULL AND target.coreType = 'Milestone' AND target.number = toInteger($milestoneNum) THEN 15 ELSE 0 END +
-                      CASE WHEN $milestoneHint <> '' AND toLower(target.name) CONTAINS toLower($milestoneHint) THEN 10 ELSE 0 END +
-                      CASE WHEN target.projectId STARTS WITH 'plan_' THEN 5 ELSE 0 END AS score
+                      CASE WHEN $milestoneHint <> '' AND toLower(target.name) CONTAINS toLower($milestoneHint) THEN 10 ELSE 0 END AS score
                  WHERE score > 0
                  RETURN target.id AS id
                  ORDER BY score DESC
