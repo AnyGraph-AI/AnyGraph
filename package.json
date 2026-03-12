@@ -46,7 +46,10 @@
     "dev": "tsc --watch",
     "graph:print": "npm run build && node dist/utils/test.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
-    "format": "prettier --write \"src/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\"",
+    "integrity:snapshot": "node --loader ts-node/esm graph-integrity-snapshot.ts",
+    "integrity:verify": "node --loader ts-node/esm verify-graph-integrity.ts",
+    "done-check": "npm run build && npm run integrity:snapshot && npm run integrity:verify"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.15.1",
