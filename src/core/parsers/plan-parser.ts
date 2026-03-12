@@ -1106,9 +1106,11 @@ export async function ingestToNeo4j(
       nodesUpserted++;
     }
 
-    // Phase 3: Recreate edges (delete old PART_OF for this project first, then recreate)
+    // Phase 3: Recreate structural plan edges
+    // Delete prior structural edges emitted by the plan parser for this project,
+    // including cross-project targets (e.g., TARGETS -> Project nodes), then rebuild.
     await session.run(
-      `MATCH (a:CodeNode {projectId: $projectId})-[r:PART_OF]->(b:CodeNode {projectId: $projectId})
+      `MATCH (a:CodeNode {projectId: $projectId})-[r:PART_OF|BLOCKS|DEPENDS_ON|MODIFIES|TARGETS|BASED_ON|SUPERSEDES]->()
        DELETE r`,
       { projectId: parsed.projectId },
     );
