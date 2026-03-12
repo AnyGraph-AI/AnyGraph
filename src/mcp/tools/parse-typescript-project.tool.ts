@@ -280,6 +280,12 @@ export const createParseTypescriptProjectTool = (server: McpServer): void => {
                 lazyLoad: true,
               });
 
+        // Enable IR mode for streaming path too
+        const streamingUseIr = process.env.PARSE_USE_IR_MATERIALIZER !== 'false';
+        if (streamingUseIr) {
+          parser.setIrMode(true);
+        }
+
         const discoveredFiles = await parser.discoverSourceFiles();
         const totalFiles = discoveredFiles.length;
         const shouldUseStreaming =
@@ -548,6 +554,14 @@ const parseProject = async (options: ParseProjectOptions): Promise<ParseProjectR
           projectId: resolvedId,
           lazyLoad: true,
         });
+
+  // Enable IR mode: parser annotates handlers with context metadata instead of
+  // creating framework nodes (Entrypoint/REGISTERED_BY). The Grammy enrichment
+  // plugin creates those from annotations during exportToIrDocument().
+  const useIrMaterializer = process.env.PARSE_USE_IR_MATERIALIZER !== 'false';
+  if (useIrMaterializer) {
+    parser.setIrMode(true);
+  }
 
   let incrementalStats: { filesReparsed: number; filesDeleted: number } | undefined;
 

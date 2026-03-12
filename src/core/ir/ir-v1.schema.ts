@@ -18,6 +18,7 @@ export const IrEdgeTypeSchema = z.enum([
   'REFERENCES',
   'MENTIONS',
   'QUOTES',
+  'REGISTERED_BY',
 ]);
 
 export const IrRangeSchema = z

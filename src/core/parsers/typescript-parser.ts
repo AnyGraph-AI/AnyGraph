@@ -44,6 +44,8 @@ import {
 import { resolveProjectId } from '../utils/project-id.js';
 import { convertNeo4jGraphToIrDocument } from '../ir/neo4j-graph-to-ir.js';
 import { IrDocument } from '../ir/ir-v1.schema.js';
+import { applyIrEnrichments } from '../ir/enrichments/ir-enrichment-plugin.js';
+import { GrammyIrEnrichment } from '../ir/enrichments/grammy-enrichment.js';
 
 /**
  * Context for CALLS edge resolution.
@@ -158,6 +160,7 @@ export class TypeScriptParser {
   private lazyLoad: boolean; // Whether to use lazy file loading for large projects
   private discoveredFiles: string[] | null = null; // Cached file discovery results
   private deferEdgeEnhancements: boolean = false; // When true, skip edge enhancements (parent will handle)
+  private irMode: boolean = false; // When true, skip framework node/edge creation (enrichment plugins handle it)
   // Lookup indexes for efficient CALLS edge resolution
   private methodsByClass: Map<string, Map<string, ParsedNode>> = new Map(); // className -> methodName -> node
   private functionsByName: Map<string, ParsedNode> = new Map(); // functionName -> node
@@ -1234,41 +1237,6 @@ export class TypeScriptParser {
 
     const filePath = callExpr.getSourceFile().getFilePath();
 
-    // --- Create Entrypoint node ---
-    const entrypointName = `${registration.kind}:${trigger || '*'}`;
-    const entrypointId = generateDeterministicId(
-      this.projectId,
-      'Entrypoint',
-      filePath,
-      entrypointName,
-      parentNode.id,
-    );
-
-    const entrypointNode: ParsedNode = {
-      id: entrypointId,
-      coreType: CoreNodeType.FUNCTION_DECLARATION, // Reuse for compatibility
-      labels: ['Entrypoint'],
-      properties: {
-        id: entrypointId,
-        projectId: this.projectId,
-        name: entrypointName,
-        coreType: CoreNodeType.FUNCTION_DECLARATION,
-        filePath,
-        startLine: callExpr.getStartLineNumber(),
-        endLine: callExpr.getStartLineNumber(),
-        sourceCode: `${calleeExpr}(${trigger ? `'${trigger}'` : ''}, ...)`,
-        createdAt: new Date().toISOString(),
-        context: {
-          entrypointKind: registration.kind,
-          trigger,
-          framework: 'grammy',
-          callee: calleeExpr,
-        },
-      } as any,
-      skipEmbedding: true,
-    };
-    this.addNode(entrypointNode);
-
     // --- Create Handler Function node ---
     const handlerName = trigger
       ? `${registration.kind}_${trigger.replace(/[^a-zA-Z0-9_]/g, '_')}`
@@ -1304,32 +1272,73 @@ export class TypeScriptParser {
           anonymous: true,
           framework: 'grammy',
           parentFunction: parentNode.properties.name,
+          callee: calleeExpr,
         },
       } as any,
       skipEmbedding: false,
     };
     this.addNode(handlerNode);
 
+    // --- Create framework nodes/edges ---
+    // In IR mode, the Grammy enrichment plugin creates these from handler context.
+    // In legacy mode, the parser creates them directly for backward compatibility.
+    if (!this.irMode) {
+      // --- Create Entrypoint node ---
+      const entrypointName = `${registration.kind}:${trigger || '*'}`;
+      const entrypointId = generateDeterministicId(
+        this.projectId,
+        'Entrypoint',
+        filePath,
+        entrypointName,
+        parentNode.id,
+      );
+
+      const entrypointNode: ParsedNode = {
+        id: entrypointId,
+        coreType: CoreNodeType.FUNCTION_DECLARATION, // Reuse for compatibility
+        labels: ['Entrypoint'],
+        properties: {
+          id: entrypointId,
+          projectId: this.projectId,
+          name: entrypointName,
+          coreType: CoreNodeType.FUNCTION_DECLARATION,
+          filePath,
+          startLine: callExpr.getStartLineNumber(),
+          endLine: callExpr.getStartLineNumber(),
+          sourceCode: `${calleeExpr}(${trigger ? `'${trigger}'` : ''}, ...)`,
+          createdAt: new Date().toISOString(),
+          context: {
+            entrypointKind: registration.kind,
+            trigger,
+            framework: 'grammy',
+            callee: calleeExpr,
+          },
+        } as any,
+        skipEmbedding: true,
+      };
+      this.addNode(entrypointNode);
+
+      // REGISTERED_BY: handler → entrypoint
+      const registeredByEdge = this.createFrameworkEdge(
+        'REGISTERED_BY',
+        'REGISTERED_BY',
+        handlerId,
+        entrypointId,
+        {
+          registrationKind: registration.kind,
+          trigger,
+          framework: 'grammy',
+        },
+        0.9,
+      );
+      this.addEdge(registeredByEdge);
+    }
+
     // --- Create edges ---
 
     // CONTAINS: parent function → handler
     const containsEdge = this.createCoreEdge(CoreEdgeType.CONTAINS, parentNode.id, handlerId);
     this.addEdge(containsEdge);
-
-    // REGISTERED_BY: handler → entrypoint
-    const registeredByEdge = this.createFrameworkEdge(
-      'REGISTERED_BY',
-      'REGISTERED_BY',
-      handlerId,
-      entrypointId,
-      {
-        registrationKind: registration.kind,
-        trigger,
-        framework: 'grammy',
-      },
-      0.9, // High weight — these are primary architectural relationships
-    );
-    this.addEdge(registeredByEdge);
 
     // Extract CALLS from within the handler body
     if (callbackBody) {
@@ -2509,9 +2518,38 @@ export class TypeScriptParser {
     return { nodes, edges };
   }
 
+  /**
+   * Enable IR mode: parser skips framework node/edge creation (Entrypoint, REGISTERED_BY).
+   * Instead, handler nodes are annotated with context metadata for IR enrichment plugins.
+   * Must be set before parsing. Legacy mode (irMode=false) is the default.
+   */
+  public setIrMode(enabled: boolean): void {
+    this.irMode = enabled;
+  }
+
+  /**
+   * Export parsed graph as an IR v1 document.
+   * When irMode is active, applies enrichment plugins (Grammy, etc.) to create
+   * framework-specific nodes/edges from handler annotations.
+   */
   public exportToIrDocument(sourceRoot?: string): IrDocument {
     const { nodes, edges } = this.exportToJson();
-    return convertNeo4jGraphToIrDocument(nodes, edges, this.projectId, sourceRoot ?? this.workspacePath);
+    const doc = convertNeo4jGraphToIrDocument(nodes, edges, this.projectId, sourceRoot ?? this.workspacePath);
+
+    // Apply IR enrichment plugins when in IR mode
+    if (this.irMode) {
+      const plugins = [new GrammyIrEnrichment()];
+      const { results } = applyIrEnrichments(doc, plugins);
+      for (const r of results) {
+        debugLog(`IR enrichment [${r.pluginName}]`, {
+          nodesAdded: r.nodesAdded,
+          edgesAdded: r.edgesAdded,
+          nodesModified: r.nodesModified,
+        });
+      }
+    }
+
+    return doc;
   }
 
   /**

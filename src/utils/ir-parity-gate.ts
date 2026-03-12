@@ -405,13 +405,17 @@ async function removeCheckpoint(checkpointPath: string | undefined): Promise<voi
 
 async function buildIrForTarget(target: TargetProject, projectId: string): Promise<{ irDoc: IrDocument; sourceNodes: number; sourceEdges: number }> {
   const parser = await ParserFactory.createParserWithAutoDetection(target.workspacePath, target.tsconfigPath, projectId, true);
+  parser.setIrMode(true); // Use IR enrichment plugins for framework nodes
   await parser.parseWorkspace();
-  const graph = parser.exportToJson();
+  const irDoc = parser.exportToIrDocument(target.workspacePath);
 
+  // Source counts come from the enriched IR document — enrichment plugins
+  // add legitimate nodes/edges (e.g., Grammy Entrypoints + REGISTERED_BY)
+  // that the materializer then writes to Neo4j.
   return {
-    irDoc: toIrDocument(graph.nodes, graph.edges, projectId),
-    sourceNodes: graph.nodes.length,
-    sourceEdges: graph.edges.length,
+    irDoc,
+    sourceNodes: irDoc.nodes.length,
+    sourceEdges: irDoc.edges.length,
   };
 }
 

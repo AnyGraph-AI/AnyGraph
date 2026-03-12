@@ -36,9 +36,11 @@ export class IrMaterializer {
     let nodesCreated = 0;
     for (const batch of nodeBatches) {
       const payload = batch.map((n) => this.mapNode(n));
+      // MERGE on {id, projectId} to avoid duplicates on re-run without clearProjectFirst.
+      // Sets all properties on both CREATE and MATCH to ensure idempotent upserts.
       const result = await this.neo4jService.run(
         `UNWIND $nodes AS nodeData
-         CALL apoc.create.node(nodeData.labels, nodeData.properties) YIELD node
+         CALL apoc.merge.node(nodeData.labels, {id: nodeData.properties.id, projectId: nodeData.properties.projectId}, nodeData.properties) YIELD node
          RETURN count(node) AS created`,
         { nodes: payload },
       );
@@ -48,11 +50,13 @@ export class IrMaterializer {
     let edgesCreated = 0;
     for (const batch of edgeBatches) {
       const payload = batch.map((e) => this.mapEdge(e));
+      // Use MERGE-based edge creation to avoid duplicate edges on re-run.
+      // Match endpoints by {id, projectId}, merge edge by type + key properties.
       const result = await this.neo4jService.run(
         `UNWIND $edges AS edgeData
          MATCH (start {id: edgeData.startNodeId, projectId: $projectId})
          MATCH (end {id: edgeData.endNodeId, projectId: $projectId})
-         CALL apoc.create.relationship(start, edgeData.type, edgeData.properties, end) YIELD rel
+         CALL apoc.merge.relationship(start, edgeData.type, {projectId: $projectId}, edgeData.properties, end) YIELD rel
          RETURN count(rel) AS created`,
         {
           edges: payload,
