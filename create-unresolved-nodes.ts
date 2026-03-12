@@ -67,7 +67,10 @@ async function main() {
       confidence: 0.0,
       sourceKind: 'unresolved'
     })
-    CREATE (u)-[:ORIGINATES_IN]->(sf)
+    CREATE (u)-[:ORIGINATES_IN {
+      sourceKind: 'postIngest',
+      confidence: 0.8
+    }]->(sf)
     RETURN count(u) AS count
   `);
 
