@@ -298,6 +298,8 @@ npm run done-check
 Supporting commands:
 
 ```bash
+npm run registry:reconcile
+npm run registry:verify
 npm run integrity:snapshot
 npm run integrity:verify
 ```
