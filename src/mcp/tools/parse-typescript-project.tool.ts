@@ -14,7 +14,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { CORE_TYPESCRIPT_SCHEMA } from '../../core/config/schema.js';
-import { convertNeo4jGraphToIrDocument, materializeIrDocument } from '../../core/ir/index.js';
+import { materializeIrDocument } from '../../core/ir/index.js';
+import { IrDocument } from '../../core/ir/ir-v1.schema.js';
 import { EmbeddingsService } from '../../core/embeddings/embeddings.service.js';
 import { ParserFactory, ProjectType } from '../../core/parsers/parser-factory.js';
 import { detectChangedFiles } from '../../core/utils/file-change-detection.js';
@@ -368,7 +369,7 @@ export const createParseTypescriptProjectTool = (server: McpServer): void => {
           projectType,
         });
 
-        const { nodes, edges, savedCrossFileEdges, resolvedProjectId: finalProjectId } = graphData;
+        const { nodes, edges, irDocument, savedCrossFileEdges, resolvedProjectId: finalProjectId } = graphData;
 
         console.error(`Parsed ${nodes.length} nodes / ${edges.length} edges for project ${finalProjectId}`);
         await debugLog('Parsing completed', {
@@ -378,7 +379,20 @@ export const createParseTypescriptProjectTool = (server: McpServer): void => {
         });
 
         const outputPath = join(projectPath, FILE_PATHS.graphOutput);
-        writeFileSync(outputPath, JSON.stringify(graphData, null, LOG_CONFIG.jsonIndentation));
+        writeFileSync(
+          outputPath,
+          JSON.stringify(
+            {
+              nodes,
+              edges,
+              savedCrossFileEdges,
+              resolvedProjectId: finalProjectId,
+              metadata: graphData.metadata,
+            },
+            null,
+            LOG_CONFIG.jsonIndentation,
+          ),
+        );
         console.error(`Graph data written to ${outputPath}`);
 
         try {
@@ -391,8 +405,7 @@ export const createParseTypescriptProjectTool = (server: McpServer): void => {
               clearExisting,
             });
 
-            const irDoc = convertNeo4jGraphToIrDocument(nodes, edges, finalProjectId, projectPath);
-            const irResult = await materializeIrDocument(irDoc, {
+            const irResult = await materializeIrDocument(irDocument, {
               batchSize: DEFAULTS.batchSize,
               clearProjectFirst: clearExisting !== false,
             });
@@ -502,6 +515,7 @@ interface ParseProjectOptions {
 interface ParseProjectResult {
   nodes: any[];
   edges: any[];
+  irDocument: IrDocument;
   savedCrossFileEdges: CrossFileEdge[];
   resolvedProjectId: string;
   metadata: {
@@ -576,12 +590,14 @@ const parseProject = async (options: ParseProjectOptions): Promise<ParseProjectR
   }
 
   const { nodes, edges } = parser.exportToJson();
-  const frameworkSchemas = parser['frameworkSchemas']?.map((s: any) => s.name) ?? ['Auto-detected'];
   const resolvedProjectId = parser.getProjectId();
+  const irDocument = parser.exportToIrDocument(projectPath);
+  const frameworkSchemas = parser['frameworkSchemas']?.map((s: any) => s.name) ?? ['Auto-detected'];
 
   return {
     nodes,
     edges,
+    irDocument,
     savedCrossFileEdges,
     resolvedProjectId,
     metadata: {

@@ -42,6 +42,8 @@ import {
   generateDeterministicId,
 } from '../utils/graph-factory.js';
 import { resolveProjectId } from '../utils/project-id.js';
+import { convertNeo4jGraphToIrDocument } from '../ir/neo4j-graph-to-ir.js';
+import { IrDocument } from '../ir/ir-v1.schema.js';
 
 /**
  * Context for CALLS edge resolution.
@@ -2505,6 +2507,11 @@ export class TypeScriptParser {
     }));
 
     return { nodes, edges };
+  }
+
+  public exportToIrDocument(sourceRoot?: string): IrDocument {
+    const { nodes, edges } = this.exportToJson();
+    return convertNeo4jGraphToIrDocument(nodes, edges, this.projectId, sourceRoot ?? this.workspacePath);
   }
 
   /**

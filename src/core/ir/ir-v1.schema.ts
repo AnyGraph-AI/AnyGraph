@@ -75,6 +75,7 @@ export const IrDocumentSchema = z
   .strict()
   .superRefine((doc, ctx) => {
     const nodeIds = new Set(doc.nodes.map((n) => n.id));
+    const allowExternalEdgeEndpoints = doc.metadata?.allowExternalEdgeEndpoints === true;
     const projectMismatches = doc.nodes.filter((n) => n.projectId !== doc.projectId);
 
     if (projectMismatches.length > 0) {
@@ -92,12 +93,14 @@ export const IrDocumentSchema = z
       });
     }
 
-    for (const edge of doc.edges) {
-      if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Edge ${edge.type} references missing node(s): ${edge.from} -> ${edge.to}`,
-        });
+    if (!allowExternalEdgeEndpoints) {
+      for (const edge of doc.edges) {
+        if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Edge ${edge.type} references missing node(s): ${edge.from} -> ${edge.to}`,
+          });
+        }
       }
     }
   });

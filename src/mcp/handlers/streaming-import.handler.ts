@@ -8,7 +8,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 import { Neo4jNode, Neo4jEdge } from '../../core/config/schema.js';
-import { convertNeo4jGraphToIrDocument, materializeIrDocument } from '../../core/ir/index.js';
+import { convertNeo4jEdgesToIrDocument, convertNeo4jGraphToIrDocument, materializeIrDocument } from '../../core/ir/index.js';
 import { StreamingParser } from '../../core/parsers/typescript-parser.js';
 import { ProgressCallback, ProgressReporter } from '../../core/utils/progress-reporter.js';
 import { DEFAULTS } from '../constants.js';
@@ -137,14 +137,14 @@ export class StreamingImportHandler {
 
     const resolvedEdges = await parser.resolveDeferredEdges();
     if (resolvedEdges.length > 0) {
-      await this.importEdgesToNeo4j(resolvedEdges);
+      await this.importEdgesToNeo4j(resolvedEdges, config.projectId);
       totalEdgesImported += resolvedEdges.length;
       await debugLog(`Resolved ${resolvedEdges.length} cross-chunk edges`);
     }
 
     const enhancedEdges = await parser.applyEdgeEnhancementsManually();
     if (enhancedEdges.length > 0) {
-      await this.importEdgesToNeo4j(enhancedEdges);
+      await this.importEdgesToNeo4j(enhancedEdges, config.projectId);
       totalEdgesImported += enhancedEdges.length;
       await debugLog(`Created ${enhancedEdges.length} edges from edge enhancements`);
     }
@@ -196,8 +196,19 @@ export class StreamingImportHandler {
     }
   }
 
-  private async importEdgesToNeo4j(edges: Neo4jEdge[]): Promise<void> {
+  private async importEdgesToNeo4j(edges: Neo4jEdge[], projectId: string): Promise<void> {
     if (edges.length === 0) return;
+
+    const useIrMaterializer = process.env.PARSE_USE_IR_MATERIALIZER !== 'false';
+
+    if (useIrMaterializer) {
+      const irDoc = convertNeo4jEdgesToIrDocument(edges, projectId);
+      await materializeIrDocument(irDoc, {
+        batchSize: DEFAULTS.batchSize,
+        clearProjectFirst: false,
+      });
+      return;
+    }
 
     const tempPath = generateTempPath('edges');
     const fs = await import('fs/promises');

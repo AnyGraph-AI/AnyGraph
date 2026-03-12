@@ -1,6 +1,6 @@
 import { Neo4jEdge, Neo4jNode } from '../config/schema.js';
 
-import { IrDocument, IrEdgeType, IrNodeType } from './ir-v1.schema.js';
+import { IrDocument, IrEdge, IrEdgeType, IrNodeType } from './ir-v1.schema.js';
 
 function mapIrNodeType(node: Neo4jNode): IrNodeType {
   const labels = new Set(node.labels);
@@ -29,6 +29,20 @@ function mapIrEdgeType(edge: Neo4jEdge): IrEdgeType {
     default:
       return 'REFERENCES';
   }
+}
+
+function toIrEdge(edge: Neo4jEdge, projectId: string): IrEdge {
+  return {
+    id: edge.id,
+    type: mapIrEdgeType(edge),
+    from: edge.startNodeId,
+    to: edge.endNodeId,
+    projectId,
+    parserTier: 0,
+    confidence: typeof edge.properties.confidence === 'number' ? Number(edge.properties.confidence) : 1,
+    provenanceKind: 'parser',
+    properties: edge.properties as unknown as Record<string, unknown>,
+  };
 }
 
 export function convertNeo4jGraphToIrDocument(
@@ -63,21 +77,33 @@ export function convertNeo4jGraphToIrDocument(
           : undefined,
       properties: node.properties as unknown as Record<string, unknown>,
     })),
-    edges: edges.map((edge) => ({
-      id: edge.id,
-      type: mapIrEdgeType(edge),
-      from: edge.startNodeId,
-      to: edge.endNodeId,
-      projectId,
-      parserTier: 0,
-      confidence: typeof edge.properties.confidence === 'number' ? Number(edge.properties.confidence) : 1,
-      provenanceKind: 'parser',
-      properties: edge.properties as unknown as Record<string, unknown>,
-    })),
+    edges: edges.map((edge) => toIrEdge(edge, projectId)),
     metadata: {
       originalNodeCount: nodes.length,
       originalEdgeCount: edges.length,
       converter: 'convertNeo4jGraphToIrDocument',
+    },
+  };
+}
+
+export function convertNeo4jEdgesToIrDocument(
+  edges: Neo4jEdge[],
+  projectId: string,
+  sourceRoot?: string,
+): IrDocument {
+  return {
+    version: 'ir.v1',
+    projectId,
+    sourceKind: 'code',
+    generatedAt: new Date().toISOString(),
+    sourceRoot,
+    nodes: [],
+    edges: edges.map((edge) => toIrEdge(edge, projectId)),
+    metadata: {
+      originalNodeCount: 0,
+      originalEdgeCount: edges.length,
+      converter: 'convertNeo4jEdgesToIrDocument',
+      allowExternalEdgeEndpoints: true,
     },
   };
 }
