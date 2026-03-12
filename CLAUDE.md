@@ -299,6 +299,7 @@ Supporting commands:
 
 ```bash
 npm run edges:normalize
+npm run plan:evidence:recompute
 npm run registry:reconcile
 npm run registry:verify
 npm run edges:verify

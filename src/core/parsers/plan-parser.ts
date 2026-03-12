@@ -942,8 +942,8 @@ export async function enrichCrossDomain(
 
                 await session.run(
                   `MATCH (t {id: $taskId})
-                   SET t.hasCodeEvidence = true,
-                       t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + $cnt`,
+                   SET t.hasSemanticEvidence = true,
+                       t.semanticEvidenceCount = coalesce(t.semanticEvidenceCount, 0) + $cnt`,
                   { taskId, cnt: result.records.length },
                 );
                 break; // One keyword match is enough per task
@@ -956,15 +956,43 @@ export async function enrichCrossDomain(
       }
     }
 
+    // Phase 1d: Recompute task evidence flags (explicit vs semantic)
+    // Only explicit refs (file_path/function) count as completion evidence.
+    {
+      const session = driver.session();
+      try {
+        const planPids = parsedPlans.map((p) => p.projectId);
+        await session.run(
+          `MATCH (t:Task)
+           WHERE t.projectId IN $planPids
+           OPTIONAL MATCH (t)-[r:HAS_CODE_EVIDENCE]->()
+           WITH t,
+                sum(CASE WHEN r.refType IN ['file_path', 'function'] THEN 1 ELSE 0 END) AS explicitCount,
+                sum(CASE WHEN r.refType = 'semantic_keyword' THEN 1 ELSE 0 END) AS semanticCount
+           SET t.hasCodeEvidence = explicitCount > 0,
+               t.codeEvidenceCount = explicitCount,
+               t.hasSemanticEvidence = semanticCount > 0,
+               t.semanticEvidenceCount = semanticCount`,
+          { planPids },
+        );
+      } finally {
+        await session.close();
+      }
+    }
+
     // Phase 2: Drift detection (separate session)
     {
       const session = driver.session();
       try {
         // Tasks marked 'planned' but with code evidence (forgotten checkboxes)
+        const planPids = parsedPlans.map((p) => p.projectId);
+
         const driftResult = await session.run(
           `MATCH (t:Task {status: 'planned'})
            WHERE t.hasCodeEvidence = true
+             AND t.projectId IN $planPids
            RETURN t.id AS id, t.name AS name, t.filePath AS file, t.line AS line, t.projectId AS project`,
+          { planPids },
         );
 
         for (const record of driftResult.records) {
@@ -981,8 +1009,11 @@ export async function enrichCrossDomain(
         // Tasks marked 'done' but referenced code not found
         const revertResult = await session.run(
           `MATCH (t:Task {status: 'done'})
-           WHERE t.crossRefCount > 0 AND (t.hasCodeEvidence IS NULL OR t.hasCodeEvidence = false)
+           WHERE t.crossRefCount > 0
+             AND (t.hasCodeEvidence IS NULL OR t.hasCodeEvidence = false)
+             AND t.projectId IN $planPids
            RETURN t.id AS id, t.name AS name, t.filePath AS file, t.line AS line, t.projectId AS project`,
+          { planPids },
         );
 
         for (const record of revertResult.records) {

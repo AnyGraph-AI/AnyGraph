@@ -530,11 +530,12 @@ npm run done-check
 `done-check` currently executes:
 1. `npm run build`
 2. `npm run edges:normalize`
-3. `npm run registry:reconcile`
-4. `npm run registry:verify`
-5. `npm run edges:verify`
-6. `npm run integrity:snapshot`
-7. `npm run integrity:verify`
+3. `npm run plan:evidence:recompute`
+4. `npm run registry:reconcile`
+5. `npm run registry:verify`
+6. `npm run edges:verify`
+7. `npm run integrity:snapshot`
+8. `npm run integrity:verify`
 
 Rules:
 - If gate fails, task is **not done**.
