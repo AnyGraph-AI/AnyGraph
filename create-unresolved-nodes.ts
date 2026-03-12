@@ -57,7 +57,9 @@ async function main() {
     CREATE (u:UnresolvedReference:CodeNode {
       kind: 'import',
       rawText: imp.name,
-      reason: CASE 
+      reason: CASE
+        WHEN imp.name CONTAINS '/dist/' THEN 'build-artifact-reference'
+        WHEN imp.name STARTS WITH '.' AND imp.name ENDS WITH '.js' THEN 'local-js-specifier'
         WHEN imp.name STARTS WITH '.' THEN 'local-module-not-found'
         ELSE 'external-package'
       END,

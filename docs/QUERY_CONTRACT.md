@@ -76,11 +76,11 @@ RETURN
 ORDER BY total DESC
 ```
 
-## Q6 — Integrity: Unresolved Local References
+## Q6 — Integrity: Unresolved Local References (true local-not-found only)
 
 ```cypher
 MATCH (u:UnresolvedReference)
-WHERE coalesce(u.reason, '') CONTAINS 'local'
+WHERE u.reason = 'local-module-not-found'
 RETURN u.projectId AS projectId, count(u) AS unresolvedLocalCount
 ORDER BY unresolvedLocalCount DESC
 ```

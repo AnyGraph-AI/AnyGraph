@@ -51,7 +51,7 @@ async function main(): Promise<void> {
 
   const unresolvedRows = (await neo4j.run(
     `MATCH (u:UnresolvedReference)
-     WHERE coalesce(u.reason, '') CONTAINS 'local'
+     WHERE u.reason = 'local-module-not-found'
      RETURN u.projectId AS projectId, count(u) AS unresolvedLocalCount
      ORDER BY projectId`,
   )) as Array<Record<string, unknown>>;

@@ -46,8 +46,7 @@ function parseRows(path: string): SnapshotRow[] {
 function main(): void {
   const staleHours = Number(process.env.INTEGRITY_STALE_HOURS ?? 30);
   const maxInvariantViolations = Number(process.env.MAX_INVARIANT_VIOLATIONS ?? 0);
-  // Transitional default: allow a small unresolved-local budget while known blind spots are burned down.
-  const maxUnresolvedLocal = Number(process.env.MAX_UNRESOLVED_LOCAL ?? 10);
+  const maxUnresolvedLocal = Number(process.env.MAX_UNRESOLVED_LOCAL ?? 0);
 
   const latestFile = getLatestSnapshotFile();
   const rows = parseRows(latestFile);
