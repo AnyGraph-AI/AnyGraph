@@ -49,9 +49,10 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "registry:reconcile": "node --loader ts-node/esm reconcile-project-registry.ts",
     "registry:verify": "node --loader ts-node/esm verify-project-registry.ts",
+    "edges:verify": "node --loader ts-node/esm verify-edge-tagging.ts",
     "integrity:snapshot": "node --loader ts-node/esm graph-integrity-snapshot.ts",
     "integrity:verify": "node --loader ts-node/esm verify-graph-integrity.ts",
-    "done-check": "npm run build && npm run registry:reconcile && npm run registry:verify && npm run integrity:snapshot && npm run integrity:verify"
+    "done-check": "npm run build && npm run registry:reconcile && npm run registry:verify && npm run edges:verify && npm run integrity:snapshot && npm run integrity:verify"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.15.1",

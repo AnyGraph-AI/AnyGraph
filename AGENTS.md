@@ -531,8 +531,9 @@ npm run done-check
 1. `npm run build`
 2. `npm run registry:reconcile`
 3. `npm run registry:verify`
-4. `npm run integrity:snapshot`
-5. `npm run integrity:verify`
+4. `npm run edges:verify`
+5. `npm run integrity:snapshot`
+6. `npm run integrity:verify`
 
 Rules:
 - If gate fails, task is **not done**.

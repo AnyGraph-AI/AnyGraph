@@ -461,7 +461,7 @@ Before claiming completion, run:
 npm run done-check
 ```
 
-(Includes registry reconciliation/verification plus integrity snapshot/verification.)
+(Includes registry reconciliation/verification, edge-tag taxonomy verification, plus integrity snapshot/verification.)
 
 If it fails:
 - Work is still in-progress.

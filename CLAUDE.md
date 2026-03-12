@@ -300,6 +300,7 @@ Supporting commands:
 ```bash
 npm run registry:reconcile
 npm run registry:verify
+npm run edges:verify
 npm run integrity:snapshot
 npm run integrity:verify
 ```

@@ -93,6 +93,15 @@ RETURN a.projectId AS projectId, count(v) AS invariantViolationCount
 ORDER BY invariantViolationCount DESC
 ```
 
+## Q8 — Edge Tagging Taxonomy (unscoped edges by type)
+
+```cypher
+MATCH ()-[r]->()
+WHERE r.projectId IS NULL
+RETURN type(r) AS edgeType, count(*) AS unscopedCount
+ORDER BY unscopedCount DESC
+```
+
 ---
 
 ## Enforcement
