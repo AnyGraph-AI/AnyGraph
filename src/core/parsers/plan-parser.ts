@@ -263,6 +263,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
   let taskOrdinalInSection = 0;   // resets per section
   let decisionOrdinal = 0;        // global per file
   let inDecisionTable = false;
+  let currentTaskId: string | null = null;
+  let currentTaskName: string | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -303,6 +305,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       currentSectionId = nodeId;
       currentSectionKey = sectionKey;
       taskOrdinalInSection = 0;
+      currentTaskId = null;
+      currentTaskName = null;
       stats.milestones++;
       inDecisionTable = false;
       continue;
@@ -341,6 +345,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       currentSectionId = nodeId;
       currentSectionKey = sectionKey;
       taskOrdinalInSection = 0;
+      currentTaskId = null;
+      currentTaskName = null;
       stats.sprints++;
       inDecisionTable = false;
       continue;
@@ -387,6 +393,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       currentSectionId = nodeId;
       currentSectionKey = sectionKey;
       taskOrdinalInSection = 0;
+      currentTaskId = null;
+      currentTaskName = null;
       continue;
     }
 
@@ -428,6 +436,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       // Sub-section key includes parent
       currentSectionKey = `${currentSectionKey}/${sanitized}`;
       taskOrdinalInSection = 0;
+      currentTaskId = null;
+      currentTaskName = null;
 
       if (title.toLowerCase().includes('decision')) {
         inDecisionTable = true;
@@ -471,6 +481,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
           properties: { projectId: ctx.projectId },
         });
 
+        currentTaskId = null;
+        currentTaskName = null;
         stats.decisions++;
         continue;
       }
@@ -478,14 +490,15 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
 
     // --- Dependency directives ---
     // Convert markdown directives to unresolved refs for edge materialization later.
-    // Use section as source so dependencies are semantic scheduling constraints,
-    // not standalone checkbox tasks.
+    // If a task was just parsed, bind dependency to that task; otherwise bind to section.
     const dependsDirective = line.match(DEPENDS_ON_PATTERN);
     if (dependsDirective && currentSectionId) {
       stats.crossRefs++;
+      const sourceId = currentTaskId ?? currentSectionId;
+      const sourceName = currentTaskName ?? `section:${currentSectionKey}`;
       unresolvedRefs.push({
-        taskId: currentSectionId,
-        taskName: `section:${currentSectionKey}`,
+        taskId: sourceId,
+        taskName: sourceName,
         refType: 'depends_on',
         refValue: dependsDirective[1].trim(),
       });
@@ -495,9 +508,11 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
     const blocksDirective = line.match(BLOCKS_PATTERN);
     if (blocksDirective && currentSectionId) {
       stats.crossRefs++;
+      const sourceId = currentTaskId ?? currentSectionId;
+      const sourceName = currentTaskName ?? `section:${currentSectionKey}`;
       unresolvedRefs.push({
-        taskId: currentSectionId,
-        taskName: `section:${currentSectionKey}`,
+        taskId: sourceId,
+        taskName: sourceName,
         refType: 'blocks',
         refValue: blocksDirective[1].trim(),
       });
@@ -561,6 +576,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
         }
       }
 
+      currentTaskId = taskId;
+      currentTaskName = taskText;
       stats.tasks++;
       continue;
     }
@@ -627,6 +644,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
         }
       }
 
+      currentTaskId = taskId;
+      currentTaskName = text;
       stats.tasks++;
       continue;
     }
@@ -729,21 +748,22 @@ export async function enrichCrossDomain(
             // Support comma/semicolon-separated dependency tokens.
             const targets = ref.refValue
               .split(/[,;]+|\s+and\s+/i)
-              .map((t) => t.replace(/[`*]/g, '').trim())
+              .map((t) => t.replace(/[\*]/g, '').trim())
               .filter(Boolean);
 
             for (const targetToken of targets) {
-              const m = targetToken.match(/^M(\d+)\b/i);
+              const tokenNormalized = targetToken.replace(/[\*]/g, '').replace(/\s+/g, ' ').trim();
+              const m = tokenNormalized.match(/^M(\d+)\b/i);
               const milestoneNum = m ? parseInt(m[1], 10) : null;
-              const milestoneHint = (targetToken.match(/^M\d+[\-_: ]+(.+)$/i)?.[1] ?? '').trim();
+              const milestoneHint = (tokenNormalized.match(/^M\d+[\-_: ]+(.+)$/i)?.[1] ?? '').trim();
 
               const result = await session.run(
                 `MATCH (target:CodeNode)
                  WHERE target.coreType IN ['Task', 'Milestone', 'Section', 'Sprint', 'Decision', 'PlanProject']
                  AND (
                    target.id = $token
-                   OR toLower(target.name) = toLower($token)
-                   OR toLower(target.name) CONTAINS toLower($token)
+                   OR toLower(target.name) = toLower($tokenNormalized)
+                   OR toLower(target.name) CONTAINS toLower($tokenNormalized)
                    OR ($milestoneNum IS NOT NULL AND target.coreType = 'Milestone' AND target.number = toInteger($milestoneNum))
                  )
                  WITH target,
@@ -759,7 +779,8 @@ export async function enrichCrossDomain(
                  LIMIT 5`,
                 {
                   sourceProjectId,
-                  token: targetToken,
+                  token: tokenNormalized,
+                  tokenNormalized,
                   milestoneNum,
                   milestoneHint,
                 },
@@ -782,7 +803,7 @@ export async function enrichCrossDomain(
                       dstId: targetId,
                       projectId: sourceProjectId,
                       refType: ref.refType,
-                      refValue: targetToken,
+                      refValue: tokenNormalized,
                     },
                   );
                 }
