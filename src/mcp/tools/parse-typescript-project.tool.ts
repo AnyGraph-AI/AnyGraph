@@ -14,6 +14,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { CORE_TYPESCRIPT_SCHEMA } from '../../core/config/schema.js';
+import { convertNeo4jGraphToIrDocument, materializeIrDocument } from '../../core/ir/index.js';
 import { EmbeddingsService } from '../../core/embeddings/embeddings.service.js';
 import { ParserFactory, ProjectType } from '../../core/parsers/parser-factory.js';
 import { detectChangedFiles } from '../../core/utils/file-change-detection.js';
@@ -381,9 +382,33 @@ export const createParseTypescriptProjectTool = (server: McpServer): void => {
         console.error(`Graph data written to ${outputPath}`);
 
         try {
-          // Set projectId for project-scoped operations (clear, indexes)
-          graphGeneratorHandler.setProjectId(finalProjectId);
-          const result = await graphGeneratorHandler.generateGraph(outputPath, DEFAULTS.batchSize, clearExisting);
+          const useIrMaterializer = process.env.PARSE_USE_IR_MATERIALIZER !== 'false';
+          let result: { nodesImported: number; edgesImported: number };
+
+          if (useIrMaterializer) {
+            await debugLog('Using IR materializer for non-streaming import', {
+              projectId: finalProjectId,
+              clearExisting,
+            });
+
+            const irDoc = convertNeo4jGraphToIrDocument(nodes, edges, finalProjectId, projectPath);
+            const irResult = await materializeIrDocument(irDoc, {
+              batchSize: DEFAULTS.batchSize,
+              clearProjectFirst: clearExisting !== false,
+            });
+            result = {
+              nodesImported: irResult.nodesCreated,
+              edgesImported: irResult.edgesCreated,
+            };
+          } else {
+            // Legacy direct import path (kept as fallback while IR migration completes)
+            graphGeneratorHandler.setProjectId(finalProjectId);
+            const legacyResult = await graphGeneratorHandler.generateGraph(outputPath, DEFAULTS.batchSize, clearExisting);
+            result = {
+              nodesImported: legacyResult.nodesImported,
+              edgesImported: legacyResult.edgesImported,
+            };
+          }
 
           // Recreate cross-file edges after incremental parse
           if (!clearExisting && savedCrossFileEdges.length > 0) {
