@@ -4,3 +4,4 @@ export * from './sarif-importer.js';
 export * from './scope-resolver.js';
 export * from './exception-enforcement.js';
 export * from './advisory-gate.js';
+export * from './runtime-evidence-ingest.js';

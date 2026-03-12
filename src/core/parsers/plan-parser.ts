@@ -571,7 +571,7 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       });
 
       for (const ref of crossRefs) {
-        if (ref.type === 'file_path' || ref.type === 'function') {
+        if (ref.type === 'file_path' || ref.type === 'function' || ref.type === 'project_id' || ref.type === 'project_name') {
           unresolvedRefs.push({ taskId, taskName: taskText, refType: ref.type, refValue: ref.value });
         }
       }
@@ -634,7 +634,7 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
 
       // Track unresolved refs for cross-domain enrichment
       for (const ref of crossRefs) {
-        if (ref.type === 'file_path' || ref.type === 'function') {
+        if (ref.type === 'file_path' || ref.type === 'function' || ref.type === 'project_id' || ref.type === 'project_name') {
           unresolvedRefs.push({
             taskId,
             taskName: text,
@@ -824,8 +824,18 @@ export async function enrichCrossDomain(
           } else if (ref.refType === 'file_path') {
             const filename = path.basename(ref.refValue);
             const result = await session.run(
-              `MATCH (sf:SourceFile)
-               WHERE sf.name ENDS WITH $filename OR sf.filePath ENDS WITH $refValue
+              `MATCH (sf)
+               WHERE (
+                 sf.filePath ENDS WITH $refValue
+                 OR sf.filePath ENDS WITH $filename
+                 OR sf.name ENDS WITH $filename
+               )
+               AND (
+                 sf:SourceFile
+                 OR sf.coreType = 'SourceFile'
+                 OR sf.semanticType = 'source-file'
+                 OR sf.semanticType = 'module'
+               )
                RETURN sf.id AS id, sf.name AS name, sf.filePath AS filePath, sf.projectId AS projectId
                LIMIT 5`,
               { filename, refValue: ref.refValue },
@@ -863,7 +873,14 @@ export async function enrichCrossDomain(
             const funcName = ref.refValue.split('.').pop() || ref.refValue;
             const result = await session.run(
               `MATCH (fn)
-               WHERE (fn:Function OR fn:Method OR fn:Variable) AND fn.name = $funcName
+               WHERE fn.name = $funcName
+                 AND (
+                   fn:Function
+                   OR fn:Method
+                   OR fn:Variable
+                   OR fn.coreType IN ['FunctionDeclaration', 'MethodDeclaration', 'VariableDeclaration']
+                   OR fn.semanticType IN ['function', 'method', 'variable']
+                 )
                RETURN fn.id AS id, fn.name AS name, fn.projectId AS projectId
                LIMIT 5`,
               { funcName },
@@ -893,6 +910,63 @@ export async function enrichCrossDomain(
                  SET t.hasCodeEvidence = true,
                      t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + $count`,
                 { taskId: ref.taskId, count: result.records.length },
+              );
+            } else {
+              notFound++;
+            }
+          } else if (ref.refType === 'project_id') {
+            const result = await session.run(
+              `MATCH (p:Project {projectId: $projectIdRef})
+               RETURN p.projectId AS projectId
+               LIMIT 1`,
+              { projectIdRef: ref.refValue },
+            );
+
+            if (result.records.length > 0) {
+              resolved++;
+              await session.run(
+                `MATCH (t:CodeNode {id: $taskId}), (p:Project {projectId: $projectIdRef})
+                 MERGE (t)-[r:TARGETS]->(p)
+                 SET r.projectId = $sourceProjectId,
+                     r.refType = 'project_id',
+                     r.refValue = $refValue,
+                     r.resolvedAt = datetime()`,
+                {
+                  taskId: ref.taskId,
+                  projectIdRef: ref.refValue,
+                  sourceProjectId: ref.taskId.split(':')[0],
+                  refValue: ref.refValue,
+                },
+              );
+            } else {
+              notFound++;
+            }
+          } else if (ref.refType === 'project_name') {
+            const result = await session.run(
+              `MATCH (p:Project)
+               WHERE toLower(p.name) = toLower($projectName)
+                  OR toLower(coalesce(p.displayName, '')) = toLower($projectName)
+               RETURN p.projectId AS projectId
+               LIMIT 1`,
+              { projectName: ref.refValue },
+            );
+
+            if (result.records.length > 0) {
+              resolved++;
+              const targetProjectId = result.records[0].get('projectId');
+              await session.run(
+                `MATCH (t:CodeNode {id: $taskId}), (p:Project {projectId: $targetProjectId})
+                 MERGE (t)-[r:TARGETS]->(p)
+                 SET r.projectId = $sourceProjectId,
+                     r.refType = 'project_name',
+                     r.refValue = $refValue,
+                     r.resolvedAt = datetime()`,
+                {
+                  taskId: ref.taskId,
+                  targetProjectId,
+                  sourceProjectId: ref.taskId.split(':')[0],
+                  refValue: ref.refValue,
+                },
               );
             } else {
               notFound++;
