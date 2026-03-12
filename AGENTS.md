@@ -561,6 +561,8 @@ Checkpoint/resume options:
 
 The verification subsystem ingests tool findings, enforces governance, and captures execution proof in the graph.
 
+**Recommendation freshness rule (VG-6):** before running `plan_priority` or `plan_next_tasks`, re-ingest plans if there were markdown edits in `plans/` (`npx tsx src/core/parsers/plan-parser.ts /home/jonathan/.openclaw/workspace/plans --ingest --enrich`). MCP tools now hard-fail with `PLAN_FRESHNESS_GUARD_FAILED` when plan ingest is stale unless `allowStale=true`.
+
 **Commands (in pipeline order):**
 ```bash
 # 1. Import SARIF findings into VerificationRun + AdjudicationRecord + AnalysisScope nodes

@@ -483,6 +483,8 @@ Supports deterministic recovery:
 ### Verification Pipeline
 Post-ingestion verification chain (SARIF → scope → governance → runtime proof):
 
+Recommendation freshness rule: if any plan markdown was edited, re-ingest plans before running recommendation tools (`plan_priority`, `plan_next_tasks`). Freshness guard blocks stale recommendations unless `allowStale=true`.
+
 ```bash
 npm run verification:sarif:import -- <projectId> <sarifPath>
 npm run verification:scope:resolve -- <projectId>

@@ -330,6 +330,8 @@ Resume controls:
 - `npm run ir:parity -- --fresh`
 
 ### Verification Pipeline Commands
+Recommendation freshness rule: run plan re-ingest before recommendation tools (`plan_priority`, `plan_next_tasks`) if plan markdown changed. Freshness guard now blocks stale reads unless `allowStale=true`.
+
 ```bash
 # Import SARIF findings
 npm run verification:sarif:import -- <projectId> <sarifPath>

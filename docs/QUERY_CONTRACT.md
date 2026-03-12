@@ -126,19 +126,35 @@ RETURN
 ORDER BY projectId
 ```
 
+## Q10 — Verification Done-vs-Proven Consistency (VG-6 acceptance)
+
+```cypher
+MATCH (t:Task {projectId: 'plan_codegraph'})
+WHERE t.filePath ENDS WITH 'VERIFICATION_GRAPH_ROADMAP.md'
+  AND t.name STARTS WITH 'Validate invariant:'
+OPTIONAL MATCH (:InvariantProof {projectId: 'plan_codegraph'})-[p:PROVES]->(t)
+WITH t, count(p) AS proofCount
+RETURN
+  count(t) AS totalInvariantTasks,
+  sum(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS doneTasks,
+  sum(CASE WHEN t.status = 'done' AND (t.proofRunId IS NULL OR proofCount = 0) THEN 1 ELSE 0 END) AS doneWithoutProof,
+  sum(CASE WHEN proofCount > 0 AND t.status <> 'done' THEN 1 ELSE 0 END) AS proofWithoutDone
+```
+
 ---
 
 ## Enforcement
 
 - New metrics must be added to this file first.
-- Tooling should reference query IDs (`Q1..Q9`) rather than copying raw Cypher.
+- Tooling should reference query IDs (`Q1..Q10`) rather than copying raw Cypher.
 - CI gate should fail if dashboard/report scripts introduce uncontracted project-metric queries.
 
 ---
 
 ## Versioning
 
-- Contract version: `v1.2`
+- Contract version: `v1.3`
+- Migration note (v1.3): Added Q10 done-vs-proven verification consistency contract for VG-6 acceptance (explicit invariant proof linkage checks).
 - Migration note (v1.2): Added Q9 dependency-integrity contract (raw directive fidelity + tokenization sanity) to support graph-native commit auditing and `plan:deps:verify` gating.
 - Migration note (v1.1): Q7 now reports invariant violations from the latest audit run per project (high-severity checks), matching `graph-integrity-snapshot.ts` and `verify-graph-integrity.ts` semantics.
 - Affected surfaces: graph status reports, integrity dashboards, and any tooling that previously treated Q7 as lifetime aggregate violations.
