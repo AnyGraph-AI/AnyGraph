@@ -22,26 +22,40 @@ function mapIrEdgeType(edge: Neo4jEdge): IrEdgeType {
     case 'CALLS':
     case 'IMPORTS':
     case 'RESOLVES_TO':
+    case 'REFERENCES':
+    case 'MENTIONS':
+    case 'QUOTES':
+    case 'REGISTERED_BY':
       return edge.type;
     case 'HAS_PARAMETER':
     case 'HAS_MEMBER':
+    case 'EXTENDS':
+    case 'IMPLEMENTS':
       return 'DECLARES';
+    case 'MENTIONS_PERSON':
+      return 'MENTIONS';
     default:
       return 'REFERENCES';
   }
 }
 
 function toIrEdge(edge: Neo4jEdge, projectId: string): IrEdge {
+  const mappedType = mapIrEdgeType(edge);
+  const props = { ...(edge.properties as unknown as Record<string, unknown>) };
+  // Preserve original edge type when mapping collapses it
+  if (mappedType !== edge.type) {
+    props.originalEdgeType = edge.type;
+  }
   return {
     id: edge.id,
-    type: mapIrEdgeType(edge),
+    type: mappedType,
     from: edge.startNodeId,
     to: edge.endNodeId,
     projectId,
     parserTier: 0,
     confidence: typeof edge.properties.confidence === 'number' ? Number(edge.properties.confidence) : 1,
     provenanceKind: 'parser',
-    properties: edge.properties as unknown as Record<string, unknown>,
+    properties: props,
   };
 }
 

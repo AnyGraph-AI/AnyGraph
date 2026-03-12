@@ -77,6 +77,37 @@ export class ClaimEngine {
   }
 
   // ============================================================================
+  // Dynamic Project Discovery
+  // ============================================================================
+
+  /**
+   * Discover all code project IDs from the graph.
+   * No more hardcoded proj_xxx — new code projects are picked up automatically.
+   */
+  async discoverCodeProjectIds(): Promise<string[]> {
+    const session = this.driver.session();
+    try {
+      const result = await session.run(
+        `MATCH (p:Project)
+         WHERE p.projectId IS NOT NULL
+           AND (p.projectType = 'code' OR p.sourceKind = 'code'
+                OR EXISTS { MATCH (:SourceFile {projectId: p.projectId}) })
+           AND NOT p.projectId STARTS WITH 'plan_'
+           AND NOT p.projectId STARTS WITH 'proj_bible'
+           AND NOT p.projectId STARTS WITH 'proj_quran'
+           AND NOT p.projectId STARTS WITH 'proj_deutero'
+           AND NOT p.projectId STARTS WITH 'proj_pseudo'
+           AND NOT p.projectId STARTS WITH 'proj_early'
+         RETURN p.projectId AS pid
+         ORDER BY pid`,
+      );
+      return result.records.map((r) => String(r.get('pid')));
+    } finally {
+      await session.close();
+    }
+  }
+
+  // ============================================================================
   // Schema Setup
   // ============================================================================
 
@@ -449,58 +480,61 @@ export class ClaimEngine {
    * Connects: Code (blast radius) → Plan (evidence integrity)
    */
   async synthesizeCrossCuttingClaims(): Promise<{ claims: number; evidence: number }> {
-    const session = this.driver.session();
     const now = new Date().toISOString();
     let claimCount = 0;
     let evidenceCount = 0;
+    const codeProjectIds = await this.discoverCodeProjectIds();
 
-    try {
-      // Find source files that are BOTH high-risk code AND plan evidence targets
-      const crossCut = await session.run(
-        `MATCH (sf {projectId: $cg})<-[:HAS_CODE_EVIDENCE]-(t:Task)
-         WHERE sf.riskLevel IS NOT NULL AND sf.riskLevel >= 3
-         WITH sf, count(DISTINCT t) AS tasksDependingOnIt, collect(DISTINCT t.name)[..3] AS taskNames,
-              sf.riskLevel AS risk
-         OPTIONAL MATCH (caller)-[:CALLS]->(sf)
-         WITH sf, tasksDependingOnIt, taskNames, risk, count(DISTINCT caller) AS callers
-         WHERE tasksDependingOnIt >= 1
-         MERGE (c:Claim {id: 'claim_crosscut_' + sf.id})
-         ON CREATE SET
-           c.statement = 'Editing "' + sf.name + '" (risk ' + toString(round(risk * 10) / 10.0) + ', ' + toString(callers) + ' callers) would invalidate evidence for ' + toString(tasksDependingOnIt) + ' plan tasks: ' + reduce(s = '', n IN taskNames | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
-           c.confidence = 0.9,
-           c.domain = 'cross',
-           c.claimType = 'cross_cutting_impact',
-           c.status = 'supported',
-           c.projectId = $cg,
-           c.sourceNodeId = sf.id,
-           c.taskCount = tasksDependingOnIt,
-           c.created = $now
-         ON MATCH SET
-           c.statement = 'Editing "' + sf.name + '" (risk ' + toString(round(risk * 10) / 10.0) + ', ' + toString(callers) + ' callers) would invalidate evidence for ' + toString(tasksDependingOnIt) + ' plan tasks: ' + reduce(s = '', n IN taskNames | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
-           c.taskCount = tasksDependingOnIt,
-           c.updated = $now
-         WITH c, sf, tasksDependingOnIt, callers, risk
-         MERGE (e:Evidence {id: 'ev_crosscut_' + sf.id})
-         ON CREATE SET
-           e.source = 'Code risk + plan evidence intersection',
-           e.sourceType = 'cross_layer_analysis',
-           e.grade = 'A1',
-           e.description = sf.name + ': riskLevel=' + toString(risk) + ', callers=' + toString(callers) + ', plan tasks depending=' + toString(tasksDependingOnIt),
-           e.weight = 0.9,
-           e.created = $now
-         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9}]->(e)
-         RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
-        { cg: 'proj_c0d3e9a1f200', now },
-      );
-      if (crossCut.records.length > 0) {
-        claimCount += crossCut.records[0].get('claims').toNumber();
-        evidenceCount += crossCut.records[0].get('evidences').toNumber();
+    for (const cg of codeProjectIds) {
+      const session = this.driver.session();
+      try {
+        // Find source files that are BOTH high-risk code AND plan evidence targets
+        const crossCut = await session.run(
+          `MATCH (sf {projectId: $cg})<-[:HAS_CODE_EVIDENCE]-(t:Task)
+           WHERE sf.riskLevel IS NOT NULL AND sf.riskLevel >= 3
+           WITH sf, count(DISTINCT t) AS tasksDependingOnIt, collect(DISTINCT t.name)[..3] AS taskNames,
+                sf.riskLevel AS risk
+           OPTIONAL MATCH (caller)-[:CALLS]->(sf)
+           WITH sf, tasksDependingOnIt, taskNames, risk, count(DISTINCT caller) AS callers
+           WHERE tasksDependingOnIt >= 1
+           MERGE (c:Claim {id: 'claim_crosscut_' + sf.id})
+           ON CREATE SET
+             c.statement = 'Editing "' + sf.name + '" (risk ' + toString(round(risk * 10) / 10.0) + ', ' + toString(callers) + ' callers) would invalidate evidence for ' + toString(tasksDependingOnIt) + ' plan tasks: ' + reduce(s = '', n IN taskNames | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
+             c.confidence = 0.9,
+             c.domain = 'cross',
+             c.claimType = 'cross_cutting_impact',
+             c.status = 'supported',
+             c.projectId = $cg,
+             c.sourceNodeId = sf.id,
+             c.taskCount = tasksDependingOnIt,
+             c.created = $now
+           ON MATCH SET
+             c.statement = 'Editing "' + sf.name + '" (risk ' + toString(round(risk * 10) / 10.0) + ', ' + toString(callers) + ' callers) would invalidate evidence for ' + toString(tasksDependingOnIt) + ' plan tasks: ' + reduce(s = '', n IN taskNames | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
+             c.taskCount = tasksDependingOnIt,
+             c.updated = $now
+           WITH c, sf, tasksDependingOnIt, callers, risk
+           MERGE (e:Evidence {id: 'ev_crosscut_' + sf.id})
+           ON CREATE SET
+             e.source = 'Code risk + plan evidence intersection',
+             e.sourceType = 'cross_layer_analysis',
+             e.grade = 'A1',
+             e.description = sf.name + ': riskLevel=' + toString(risk) + ', callers=' + toString(callers) + ', plan tasks depending=' + toString(tasksDependingOnIt),
+             e.weight = 0.9,
+             e.created = $now
+           MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9}]->(e)
+           RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
+          { cg, now },
+        );
+        if (crossCut.records.length > 0) {
+          claimCount += crossCut.records[0].get('claims').toNumber();
+          evidenceCount += crossCut.records[0].get('evidences').toNumber();
+        }
+      } finally {
+        await session.close();
       }
-
-      return { claims: claimCount, evidence: evidenceCount };
-    } finally {
-      await session.close();
     }
+
+    return { claims: claimCount, evidence: evidenceCount };
   }
 
   /**
@@ -627,60 +661,63 @@ export class ClaimEngine {
    * "X% of high-risk functions have no test coverage"
    */
   async synthesizeCoverageGapClaims(): Promise<{ claims: number; evidence: number }> {
-    const session = this.driver.session();
     const now = new Date().toISOString();
     let claimCount = 0;
     let evidenceCount = 0;
+    const codeProjectIds = await this.discoverCodeProjectIds();
 
-    try {
-      // Per-project: count high-risk functions with and without tests
-      const coverage = await session.run(
-        `MATCH (f {projectId: $cg})
-         WHERE f.riskLevel IS NOT NULL AND f.riskLevel >= 2
-         WITH f, EXISTS { MATCH (f)-[:TESTED_BY]->(:TestCase) } AS hasTesting
-         WITH count(f) AS total,
-              sum(CASE WHEN hasTesting THEN 1 ELSE 0 END) AS tested,
-              sum(CASE WHEN NOT hasTesting THEN 1 ELSE 0 END) AS untested,
-              collect(CASE WHEN NOT hasTesting THEN f.name ELSE null END)[..5] AS worstOffenders
-         WHERE total > 0
-         MERGE (c:Claim {id: 'claim_coverage_proj_c0d3e9a1f200'})
-         ON CREATE SET
-           c.statement = toString(untested) + ' of ' + toString(total) + ' high-risk functions (' + toString(round(toFloat(untested)/total * 100)) + '%) have no test coverage. Worst: ' + reduce(s = '', n IN worstOffenders | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
-           c.confidence = 0.95,
-           c.domain = 'code',
-           c.claimType = 'coverage_gap',
-           c.status = 'supported',
-           c.projectId = $cg,
-           c.untested = untested,
-           c.total = total,
-           c.created = $now
-         ON MATCH SET
-           c.statement = toString(untested) + ' of ' + toString(total) + ' high-risk functions (' + toString(round(toFloat(untested)/total * 100)) + '%) have no test coverage. Worst: ' + reduce(s = '', n IN worstOffenders | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
-           c.untested = untested,
-           c.total = total,
-           c.updated = $now
-         WITH c, untested, total
-         MERGE (e:Evidence {id: 'ev_coverage_proj_c0d3e9a1f200'})
-         ON CREATE SET
-           e.source = 'TestCase node count vs high-risk function count',
-           e.sourceType = 'structural_analysis',
-           e.grade = 'A1',
-           e.description = toString(untested) + '/' + toString(total) + ' high-risk functions untested',
-           e.weight = 0.95,
-           e.created = $now
-         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.95}]->(e)
-         RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
-        { cg: 'proj_c0d3e9a1f200', now },
-      );
-      if (coverage.records.length > 0) {
-        claimCount += coverage.records[0].get('claims').toNumber();
-        evidenceCount += coverage.records[0].get('evidences').toNumber();
+    for (const cg of codeProjectIds) {
+      const session = this.driver.session();
+      try {
+        // Per-project: count high-risk functions with and without tests
+        const coverage = await session.run(
+          `MATCH (f {projectId: $cg})
+           WHERE f.riskLevel IS NOT NULL AND f.riskLevel >= 2
+           WITH f, EXISTS { MATCH (f)-[:TESTED_BY]->(:TestCase) } AS hasTesting
+           WITH count(f) AS total,
+                sum(CASE WHEN hasTesting THEN 1 ELSE 0 END) AS tested,
+                sum(CASE WHEN NOT hasTesting THEN 1 ELSE 0 END) AS untested,
+                collect(CASE WHEN NOT hasTesting THEN f.name ELSE null END)[..5] AS worstOffenders
+           WHERE total > 0
+           MERGE (c:Claim {id: 'claim_coverage_' + $cg})
+           ON CREATE SET
+             c.statement = toString(untested) + ' of ' + toString(total) + ' high-risk functions (' + toString(round(toFloat(untested)/total * 100)) + '%) have no test coverage. Worst: ' + reduce(s = '', n IN worstOffenders | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
+             c.confidence = 0.95,
+             c.domain = 'code',
+             c.claimType = 'coverage_gap',
+             c.status = 'supported',
+             c.projectId = $cg,
+             c.untested = untested,
+             c.total = total,
+             c.created = $now
+           ON MATCH SET
+             c.statement = toString(untested) + ' of ' + toString(total) + ' high-risk functions (' + toString(round(toFloat(untested)/total * 100)) + '%) have no test coverage. Worst: ' + reduce(s = '', n IN worstOffenders | s + CASE WHEN s = '' THEN '' ELSE ', ' END + n),
+             c.untested = untested,
+             c.total = total,
+             c.updated = $now
+           WITH c, untested, total
+           MERGE (e:Evidence {id: 'ev_coverage_' + $cg})
+           ON CREATE SET
+             e.source = 'TestCase node count vs high-risk function count',
+             e.sourceType = 'structural_analysis',
+             e.grade = 'A1',
+             e.description = toString(untested) + '/' + toString(total) + ' high-risk functions untested',
+             e.weight = 0.95,
+             e.created = $now
+           MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.95}]->(e)
+           RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
+          { cg, now },
+        );
+        if (coverage.records.length > 0) {
+          claimCount += coverage.records[0].get('claims').toNumber();
+          evidenceCount += coverage.records[0].get('evidences').toNumber();
+        }
+      } finally {
+        await session.close();
       }
-
-      return { claims: claimCount, evidence: evidenceCount };
-    } finally {
-      await session.close();
     }
+
+    return { claims: claimCount, evidence: evidenceCount };
   }
 
   /**
@@ -811,13 +848,15 @@ export class ClaimEngine {
     // Phase 1: Single-domain claims (existing generators)
     const plan = await this.generatePlanClaims();
 
-    const code1 = await this.generateCodeClaims('proj_60d5feed0001');  // GodSpeed
-    const code2 = await this.generateCodeClaims('proj_c0d3e9a1f200');  // CodeGraph
-    const code = {
-      claims: code1.claims + code2.claims,
-      evidence: code1.evidence + code2.evidence,
-      hypotheses: code1.hypotheses + code2.hypotheses,
-    };
+    // Dynamically discover all code projects instead of hardcoding IDs
+    const codeProjectIds = await this.discoverCodeProjectIds();
+    const code = { claims: 0, evidence: 0, hypotheses: 0 };
+    for (const pid of codeProjectIds) {
+      const result = await this.generateCodeClaims(pid);
+      code.claims += result.claims;
+      code.evidence += result.evidence;
+      code.hypotheses += result.hypotheses;
+    }
 
     const corpus = await this.generateCorpusClaims();
 
