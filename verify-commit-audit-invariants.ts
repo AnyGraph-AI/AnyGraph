@@ -19,7 +19,11 @@ type InvariantKey =
   | 'null_status_visibility_guard'
   | 'readiness_semantics_contract'
   | 's6_baseline_output_contract'
-  | 's5_trend_source_contract';
+  | 's5_trend_source_contract'
+  | 'done_check_gate_command'
+  | 'done_check_fail_closed'
+  | 'governance_evidence_artifact_requirement'
+  | 'stale_check_detector';
 
 interface InvariantResult {
   key: InvariantKey;
@@ -149,6 +153,30 @@ const ROADMAP_LINKS: Record<InvariantKey, Array<{ task: string; line: number }>>
     {
       task: 'Add commit-audit invariant for S5 trend-source contract (trend/status tooling must source from `IntegritySnapshot`, not ad-hoc file parsing).',
       line: 73,
+    },
+  ],
+  done_check_gate_command: [
+    {
+      task: 'Add `done-check` gate command that runs governance + parity + integrity checks',
+      line: 83,
+    },
+  ],
+  done_check_fail_closed: [
+    {
+      task: 'Fail-closed behavior: check runner failure = gate failure',
+      line: 84,
+    },
+  ],
+  governance_evidence_artifact_requirement: [
+    {
+      task: 'Require evidence artifacts to close governance tasks',
+      line: 85,
+    },
+  ],
+  stale_check_detector: [
+    {
+      task: "Add stale-check detector (if integrity/parity checks haven't run in SLA window)",
+      line: 86,
     },
   ],
 };
@@ -677,6 +705,103 @@ async function checkS5TrendSourceContract(): Promise<InvariantResult> {
   };
 }
 
+async function checkDoneCheckGateCommand(): Promise<InvariantResult> {
+  const packagePath = join(process.cwd(), 'package.json');
+  const pkg = JSON.parse(readFileSync(packagePath, 'utf8')) as { scripts?: Record<string, string> };
+  const doneCheck = pkg.scripts?.['done-check'] ?? '';
+
+  const hasDoneCheck = doneCheck.length > 0;
+  const hasGovernance = doneCheck.includes('registry:identity:verify') && doneCheck.includes('query:contract:verify');
+  const hasParity = doneCheck.includes('parser:contracts:verify') && doneCheck.includes('plan:deps:verify');
+  const hasIntegrity = doneCheck.includes('integrity:snapshot') && doneCheck.includes('integrity:verify');
+
+  const ok = hasDoneCheck && hasGovernance && hasParity && hasIntegrity;
+
+  return {
+    key: 'done_check_gate_command',
+    ok,
+    summary: ok
+      ? 'done-check gate command contract passed.'
+      : 'done-check gate command contract failed (missing governance/parity/integrity chain).',
+    details: {
+      hasDoneCheck,
+      hasGovernance,
+      hasParity,
+      hasIntegrity,
+    },
+  };
+}
+
+async function checkDoneCheckFailClosed(): Promise<InvariantResult> {
+  const packagePath = join(process.cwd(), 'package.json');
+  const pkg = JSON.parse(readFileSync(packagePath, 'utf8')) as { scripts?: Record<string, string> };
+  const doneCheck = pkg.scripts?.['done-check'] ?? '';
+
+  const usesAndChain = doneCheck.includes('&&');
+  const hasUnsafeBypass = /\|\|\s*true/.test(doneCheck) || /;\s*npm run/.test(doneCheck);
+  const ok = usesAndChain && !hasUnsafeBypass;
+
+  return {
+    key: 'done_check_fail_closed',
+    ok,
+    summary: ok
+      ? 'done-check fail-closed behavior contract passed.'
+      : 'done-check fail-closed behavior contract failed (non-fail-closed chaining detected).',
+    details: {
+      usesAndChain,
+      hasUnsafeBypass,
+    },
+  };
+}
+
+async function checkGovernanceEvidenceArtifactRequirement(neo4j: Neo4jService): Promise<InvariantResult> {
+  const rows = (await neo4j.run(
+    `MATCH (v:VerificationRun {projectId: 'proj_c0d3e9a1f200'})
+     WHERE v.artifactHash IS NOT NULL AND v.decisionHash IS NOT NULL
+     RETURN count(v) AS runCount, max(v.ranAt) AS latestRanAt`,
+  )) as Array<Record<string, unknown>>;
+
+  const runCount = toNum(rows[0]?.runCount);
+  const latestRanAt = String(rows[0]?.latestRanAt ?? '');
+
+  const ok = runCount > 0 && latestRanAt.length > 0;
+
+  return {
+    key: 'governance_evidence_artifact_requirement',
+    ok,
+    summary: ok
+      ? 'Governance evidence artifact requirement passed.'
+      : 'Governance evidence artifact requirement failed (no artifact-linked verification runs found).',
+    details: {
+      runCount,
+      latestRanAt,
+    },
+  };
+}
+
+async function checkStaleCheckDetector(): Promise<InvariantResult> {
+  const packagePath = join(process.cwd(), 'package.json');
+  const pkg = JSON.parse(readFileSync(packagePath, 'utf8')) as { scripts?: Record<string, string> };
+  const staleScript = pkg.scripts?.['governance:stale:verify'] ?? '';
+  const doneCheck = pkg.scripts?.['done-check'] ?? '';
+
+  const hasStaleScript = staleScript.includes('verify-governance-stale-check.ts');
+  const wiredInDoneCheck = doneCheck.includes('governance:stale:verify');
+  const ok = hasStaleScript && wiredInDoneCheck;
+
+  return {
+    key: 'stale_check_detector',
+    ok,
+    summary: ok
+      ? 'Stale-check detector contract passed.'
+      : 'Stale-check detector contract failed (missing script or done-check wiring).',
+    details: {
+      hasStaleScript,
+      wiredInDoneCheck,
+    },
+  };
+}
+
 async function checkRecommendationDoneTaskGuard(neo4j: Neo4jService): Promise<InvariantResult> {
   const maxFreshnessMinutes = Number(process.env.PLAN_RECOMMENDATION_FRESHNESS_MAX_MINUTES ?? 30);
 
@@ -828,6 +953,10 @@ async function main(): Promise<void> {
     invariants.push(await checkReadinessSemanticsContract());
     invariants.push(await checkS6BaselineOutputContract());
     invariants.push(await checkS5TrendSourceContract());
+    invariants.push(await checkDoneCheckGateCommand());
+    invariants.push(await checkDoneCheckFailClosed());
+    invariants.push(await checkGovernanceEvidenceArtifactRequirement(neo4j));
+    invariants.push(await checkStaleCheckDetector());
 
     const failingInvariantKeys = invariants.filter((i) => !i.ok).map((i) => i.key);
     const confidence = computeConfidence(invariants);
