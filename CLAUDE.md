@@ -280,7 +280,9 @@ Before touching code:
 
 ### Priority queue looks wrong
 - Check `BLOCKS`/`DEPENDS_ON` graph edges exist for milestones/tasks.
-- If missing, add structured dependency annotations in plan markdown and re-ingest.
+- For ordered tracks (`DL-*`, `GM-*`), ensure every non-starter task has task-level `DEPENDS_ON`.
+- If a task must be dependency-free, annotate `NO_DEPENDS_OK(reason|expires:YYYY-MM-DD)`.
+- Re-ingest plans and run `plan:deps:verify` before trusting priority/ranking output.
 
 ---
 
@@ -308,6 +310,10 @@ npm run plan:deps:verify
 npm run integrity:snapshot
 npm run integrity:verify
 ```
+
+Scoped dependency enforcement:
+- `plan:deps:verify` reports scoped dependency hygiene metrics.
+- Use `STRICT_SCOPED_DEPENDS_ON=true` to fail-closed when scoped tasks are missing required task-level dependencies.
 
 Threshold policy:
 - Default policy is strict (fail on violations over configured limits).

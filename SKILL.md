@@ -489,6 +489,8 @@ Use this skill as an operational procedure, not only a query reference.
 - Never trust plan checkboxes without evidence links
 - Never trust evidence links without self-audit on high-drift projects
 - Never trust priority output if dependency edges are missing
+- For ordered milestone tracks (`DL-*`, `GM-*`), require task-level `DEPENDS_ON` for every non-starter task
+- If a task is intentionally dependency-free, require explicit `NO_DEPENDS_OK(reason|expires:YYYY-MM-DD)` tag
 
 ### Integrity Closure Gate (Required)
 Before claiming completion, run:
@@ -518,6 +520,10 @@ Supports deterministic recovery:
 
 ### Verification Pipeline
 Post-ingestion verification chain (SARIF → scope → governance → runtime proof):
+
+Dependency-order guard:
+- `plan:deps:verify` now reports scoped dependency hygiene metrics (`scopedTasksChecked`, `scopedMissingDepends`, `scopedExceptionCount`).
+- Set `STRICT_SCOPED_DEPENDS_ON=true` to fail-closed on missing task-level dependencies in scoped milestone families.
 
 Recommendation freshness rule: if any plan markdown was edited, re-ingest plans before running recommendation tools (`plan_priority`, `plan_next_tasks`). Freshness guard blocks stale recommendations unless `allowStale=true`.
 

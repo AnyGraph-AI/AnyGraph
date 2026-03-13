@@ -520,8 +520,11 @@ A task is only "done" when all are true:
 ## Dependency Hygiene
 For dynamic prioritization to work, dependencies must be explicit:
 - encode milestone/task dependencies via `BLOCKS` / `DEPENDS_ON`
+- for ordered milestone families (`DL-*`, `GM-*`), every non-starter task must have task-level `DEPENDS_ON`
+- if a task must be dependency-free by design, mark it explicitly with `NO_DEPENDS_OK(reason|expires:YYYY-MM-DD)`
 - re-ingest plans after dependency edits
 - verify dependency edges in Neo4j before trusting ranking
+- run `plan:deps:verify` (and gate on it) before declaring ordering-safe execution
 
 ## Integrity Gate (Mandatory Before Declaring Done)
 Before declaring any implementation task complete, run:
