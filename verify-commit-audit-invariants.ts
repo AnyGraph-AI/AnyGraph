@@ -13,7 +13,11 @@ type InvariantKey =
   | 'parser_contract_integrity'
   | 'coverage_drift_guardrails'
   | 'recommendation_done_task_guard'
-  | 'invariant_proof_completeness';
+  | 'invariant_proof_completeness'
+  | 'milestone_query_anchor_integrity'
+  | 'dependency_distinct_guard'
+  | 'null_status_visibility_guard'
+  | 'readiness_semantics_contract';
 
 interface InvariantResult {
   key: InvariantKey;
@@ -107,6 +111,30 @@ const ROADMAP_LINKS: Record<InvariantKey, Array<{ task: string; line: number }>>
     {
       task: 'Add commit-audit invariant: fail when invariant tasks are `done` but missing proof records',
       line: 876,
+    },
+  ],
+  milestone_query_anchor_integrity: [
+    {
+      task: 'Add commit-audit invariant: fail if milestone status queries rely on line-range bucketing instead of `Task-[:PART_OF]->Milestone`',
+      line: 906,
+    },
+  ],
+  dependency_distinct_guard: [
+    {
+      task: 'Add commit-audit invariant: fail if canonical dependency blocker counts omit `DISTINCT`',
+      line: 907,
+    },
+  ],
+  null_status_visibility_guard: [
+    {
+      task: 'Add commit-audit invariant: fail if canonical status output omits `nullStatusCount`',
+      line: 908,
+    },
+  ],
+  readiness_semantics_contract: [
+    {
+      task: 'Add query contract rule: readiness semantics are defined only by `DEPENDS_ON` edges',
+      line: 909,
     },
   ],
 };
@@ -496,6 +524,98 @@ async function checkCoverageDriftGuardrails(
   };
 }
 
+async function checkMilestoneQueryAnchorIntegrity(): Promise<InvariantResult> {
+  const contractPath = join(process.cwd(), 'docs', 'QUERY_CONTRACT.md');
+  const contract = readFileSync(contractPath, 'utf8');
+
+  const q11Start = contract.indexOf('## Q11');
+  const q11End = contract.indexOf('\n## ', q11Start + 1);
+  const q11 = q11Start >= 0
+    ? contract.slice(q11Start, q11End >= 0 ? q11End : undefined)
+    : '';
+
+  const hasPlanAnchor = q11.includes('MATCH (p:PlanProject');
+  const hasMilestonePartOfPlan = q11.includes("MATCH (m:Milestone {projectId: 'plan_codegraph'})-[:PART_OF]->(p)");
+  const hasTaskPartOfMilestone = q11.includes("OPTIONAL MATCH (t:Task {projectId: 'plan_codegraph'})-[:PART_OF]->(m)");
+  const usesLineBucket = /\bCASE\s+WHEN\s+t\.line\b|\bt\.line\s*>?=|\bt\.line\s*<\b/i.test(q11);
+  const usesFilePathFilter = /\bfilePath\b/i.test(q11);
+
+  const ok = hasPlanAnchor && hasMilestonePartOfPlan && hasTaskPartOfMilestone && !usesLineBucket && !usesFilePathFilter;
+
+  return {
+    key: 'milestone_query_anchor_integrity',
+    ok,
+    summary: ok
+      ? 'Milestone query anchor integrity passed.'
+      : 'Milestone query anchor integrity failed (missing PlanProject anchor and/or line/filePath coupling detected).',
+    details: {
+      hasPlanAnchor,
+      hasMilestonePartOfPlan,
+      hasTaskPartOfMilestone,
+      usesLineBucket,
+      usesFilePathFilter,
+    },
+  };
+}
+
+async function checkDependencyDistinctGuard(): Promise<InvariantResult> {
+  const contractPath = join(process.cwd(), 'docs', 'QUERY_CONTRACT.md');
+  const contract = readFileSync(contractPath, 'utf8');
+
+  const hasDistinctDependencyBlockers =
+    contract.includes("count(DISTINCT CASE WHEN coalesce(d.status, 'planned') <> 'done' THEN d END)");
+
+  const ok = hasDistinctDependencyBlockers;
+
+  return {
+    key: 'dependency_distinct_guard',
+    ok,
+    summary: ok
+      ? 'Dependency DISTINCT guard passed.'
+      : 'Dependency DISTINCT guard failed (canonical blocker query missing DISTINCT).',
+    details: {
+      hasDistinctDependencyBlockers,
+    },
+  };
+}
+
+async function checkNullStatusVisibilityGuard(): Promise<InvariantResult> {
+  const contractPath = join(process.cwd(), 'docs', 'QUERY_CONTRACT.md');
+  const contract = readFileSync(contractPath, 'utf8');
+
+  const hasNullStatusCount = contract.includes('nullStatusCount');
+
+  return {
+    key: 'null_status_visibility_guard',
+    ok: hasNullStatusCount,
+    summary: hasNullStatusCount
+      ? 'Null-status visibility guard passed.'
+      : 'Null-status visibility guard failed (canonical status query missing nullStatusCount).',
+    details: {
+      hasNullStatusCount,
+    },
+  };
+}
+
+async function checkReadinessSemanticsContract(): Promise<InvariantResult> {
+  const contractPath = join(process.cwd(), 'docs', 'QUERY_CONTRACT.md');
+  const contract = readFileSync(contractPath, 'utf8');
+
+  const hasDependsOnRule =
+    contract.includes('readiness semantics are defined only by `DEPENDS_ON` edges');
+
+  return {
+    key: 'readiness_semantics_contract',
+    ok: hasDependsOnRule,
+    summary: hasDependsOnRule
+      ? 'Readiness semantics contract passed.'
+      : 'Readiness semantics contract failed (DEPENDS_ON-only rule missing from query contract).',
+    details: {
+      hasDependsOnRule,
+    },
+  };
+}
+
 async function checkRecommendationDoneTaskGuard(neo4j: Neo4jService): Promise<InvariantResult> {
   const maxFreshnessMinutes = Number(process.env.PLAN_RECOMMENDATION_FRESHNESS_MAX_MINUTES ?? 30);
 
@@ -639,6 +759,10 @@ async function main(): Promise<void> {
     invariants.push(await checkCoverageDriftGuardrails(neo4j, changedFiles));
     invariants.push(await checkRecommendationDoneTaskGuard(neo4j));
     invariants.push(await checkInvariantProofCompleteness(neo4j));
+    invariants.push(await checkMilestoneQueryAnchorIntegrity());
+    invariants.push(await checkDependencyDistinctGuard());
+    invariants.push(await checkNullStatusVisibilityGuard());
+    invariants.push(await checkReadinessSemanticsContract());
 
     const failingInvariantKeys = invariants.filter((i) => !i.ok).map((i) => i.key);
     const confidence = computeConfidence(invariants);

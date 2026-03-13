@@ -193,14 +193,16 @@ RETURN size(tasks) AS totalTasks, withEvidence, doneWithoutEvidence, evidenceEdg
 ## Enforcement
 
 - New metrics must be added to this file first.
-- Tooling should reference query IDs (`Q1..Q10`) rather than copying raw Cypher.
+- Tooling should reference query IDs (`Q1..Q11`) rather than copying raw Cypher.
+- Readiness semantics are defined only by `DEPENDS_ON` edges (not `BLOCKS` or inferred heuristics) in canonical next-task outputs.
 - CI gate should fail if dashboard/report scripts introduce uncontracted project-metric queries.
 
 ---
 
 ## Versioning
 
-- Contract version: `v1.5`
+- Contract version: `v1.6`
+- Migration note (v1.6): Added explicit readiness semantics rule (`DEPENDS_ON`-only) in Enforcement and aligned commit-audit guards for milestone anchor integrity, dependency DISTINCT usage, and null-status visibility.
 - Migration note (v1.5): Hardened Q10/Q11 to remove roadmap filePath dependence (PlanProject anchor + milestone code routing), added milestone numeric ordering, and formalized runtime evidence multiplicity outputs (`evidenceEdgeCount`, `evidenceArtifactCount`) with task-level evidence rollup semantics.
 - Migration note (v1.4): Added Q11 graph-native verification status dashboard contract (milestone PART_OF bucketing, DISTINCT dependency blockers, explicit/effective blocked split, null-status debt metric, runtime evidence rollup).
 - Migration note (v1.3): Added Q10 done-vs-proven verification consistency contract for VG-6 acceptance (explicit invariant proof linkage checks).
