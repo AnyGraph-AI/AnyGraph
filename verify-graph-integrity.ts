@@ -12,6 +12,14 @@ interface SnapshotRow {
   duplicateSourceSuspicionCount: number;
 }
 
+interface DriftAlarm {
+  projectId: string;
+  nodeDelta: number;
+  edgeDelta: number;
+  nodeDeltaPct: number;
+  edgeDeltaPct: number;
+}
+
 const SNAPSHOT_DIR = join(process.cwd(), 'artifacts', 'integrity-snapshots');
 
 function fail(message: string): never {
@@ -43,21 +51,92 @@ function parseRows(path: string): SnapshotRow[] {
     .filter(Boolean);
 }
 
+function latestAndPrevious(rows: SnapshotRow[]): { latestRows: SnapshotRow[]; previousRows: SnapshotRow[]; latestTs: number } {
+  const tsValues = Array.from(
+    new Set(
+      rows
+        .map((r) => Date.parse(r.timestamp))
+        .filter((v) => Number.isFinite(v)),
+    ),
+  ).sort((a, b) => b - a);
+
+  const latestTs = tsValues[0] ?? 0;
+  const previousTs = tsValues[1] ?? 0;
+
+  return {
+    latestTs,
+    latestRows: rows.filter((r) => Date.parse(r.timestamp) === latestTs),
+    previousRows: previousTs ? rows.filter((r) => Date.parse(r.timestamp) === previousTs) : [],
+  };
+}
+
+function computeDriftAlarms(
+  latestRows: SnapshotRow[],
+  previousRows: SnapshotRow[],
+  cfg: {
+    nodeAbs: number;
+    edgeAbs: number;
+    nodePct: number;
+    edgePct: number;
+  },
+): DriftAlarm[] {
+  const prevByProject = new Map(previousRows.map((r) => [r.projectId, r]));
+
+  const alarms: DriftAlarm[] = [];
+  for (const row of latestRows) {
+    const prev = prevByProject.get(row.projectId);
+    if (!prev) continue;
+
+    const nodeDelta = Number(row.nodeCount) - Number(prev.nodeCount);
+    const edgeDelta = Number(row.edgeCount) - Number(prev.edgeCount);
+
+    const nodeBase = Math.max(1, Number(prev.nodeCount));
+    const edgeBase = Math.max(1, Number(prev.edgeCount));
+
+    const nodeDeltaPct = nodeDelta / nodeBase;
+    const edgeDeltaPct = edgeDelta / edgeBase;
+
+    const suspicious =
+      Math.abs(nodeDelta) > cfg.nodeAbs ||
+      Math.abs(edgeDelta) > cfg.edgeAbs ||
+      Math.abs(nodeDeltaPct) > cfg.nodePct ||
+      Math.abs(edgeDeltaPct) > cfg.edgePct;
+
+    if (suspicious) {
+      alarms.push({
+        projectId: row.projectId,
+        nodeDelta,
+        edgeDelta,
+        nodeDeltaPct: Number(nodeDeltaPct.toFixed(4)),
+        edgeDeltaPct: Number(edgeDeltaPct.toFixed(4)),
+      });
+    }
+  }
+
+  return alarms;
+}
+
 function main(): void {
   const staleHours = Number(process.env.INTEGRITY_STALE_HOURS ?? 30);
   const maxInvariantViolations = Number(process.env.MAX_INVARIANT_VIOLATIONS ?? 0);
   const maxUnresolvedLocal = Number(process.env.MAX_UNRESOLVED_LOCAL ?? 0);
 
+  // Drift alarm thresholds (S3)
+  const driftNodeDeltaAbsMax = Number(process.env.DRIFT_NODE_DELTA_ABS_MAX ?? 5000);
+  const driftEdgeDeltaAbsMax = Number(process.env.DRIFT_EDGE_DELTA_ABS_MAX ?? 50000);
+  const driftNodeDeltaPctMax = Number(process.env.DRIFT_NODE_DELTA_PCT_MAX ?? 0.5);
+  const driftEdgeDeltaPctMax = Number(process.env.DRIFT_EDGE_DELTA_PCT_MAX ?? 0.5);
+  const failOnDriftAlarm = String(process.env.FAIL_ON_DRIFT_ALARM ?? 'false').toLowerCase() === 'true';
+
   const latestFile = getLatestSnapshotFile();
   const rows = parseRows(latestFile);
 
-  const newestTs = rows.reduce((acc, row) => Math.max(acc, Date.parse(row.timestamp)), 0);
-  if (!newestTs) {
+  const { latestTs, latestRows, previousRows } = latestAndPrevious(rows);
+  if (!latestTs) {
     fail('Could not determine snapshot timestamp.');
   }
 
-  const latestRows = rows.filter((r) => Date.parse(r.timestamp) === newestTs);
-  const ageHours = (Date.now() - newestTs) / (1000 * 60 * 60);
+  const ageHours = (Date.now() - latestTs) / (1000 * 60 * 60);
   if (ageHours > staleHours) {
     fail(`Snapshot is stale (${ageHours.toFixed(2)}h > ${staleHours}h)`);
   }
@@ -80,6 +159,21 @@ function main(): void {
     );
   }
 
+  const driftAlarms = computeDriftAlarms(latestRows, previousRows, {
+    nodeAbs: driftNodeDeltaAbsMax,
+    edgeAbs: driftEdgeDeltaAbsMax,
+    nodePct: driftNodeDeltaPctMax,
+    edgePct: driftEdgeDeltaPctMax,
+  });
+
+  if (failOnDriftAlarm && driftAlarms.length > 0) {
+    fail(
+      `Suspicious graph drift detected (${driftAlarms.length} projects): ${driftAlarms
+        .map((a) => `${a.projectId}(nodeDelta=${a.nodeDelta},edgeDelta=${a.edgeDelta})`)
+        .join(', ')}`,
+    );
+  }
+
   console.log(
     JSON.stringify({
       ok: true,
@@ -90,7 +184,14 @@ function main(): void {
         staleHours,
         maxInvariantViolations,
         maxUnresolvedLocal,
+        driftNodeDeltaAbsMax,
+        driftEdgeDeltaAbsMax,
+        driftNodeDeltaPctMax,
+        driftEdgeDeltaPctMax,
+        failOnDriftAlarm,
       },
+      driftAlarmCount: driftAlarms.length,
+      driftAlarms,
     }),
   );
 }

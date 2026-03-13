@@ -18,6 +18,33 @@ interface SnapshotRow {
 
 const SNAPSHOT_DIR = join(process.cwd(), 'artifacts', 'integrity-snapshots');
 
+// Query Contract bindings (docs/QUERY_CONTRACT.md)
+const CONTRACT_QUERY_Q2 = `MATCH (n)
+ WHERE n.projectId IS NOT NULL
+ RETURN n.projectId AS projectId, count(n) AS nodeCount
+ ORDER BY projectId`;
+
+const CONTRACT_QUERY_Q2_EDGES = `MATCH ()-[r]->()
+ WHERE r.projectId IS NOT NULL
+ RETURN r.projectId AS projectId, count(r) AS edgeCount
+ ORDER BY projectId`;
+
+const CONTRACT_QUERY_Q6 = `MATCH (u:UnresolvedReference)
+ WHERE u.reason = 'local-module-not-found'
+ RETURN u.projectId AS projectId, count(u) AS unresolvedLocalCount
+ ORDER BY projectId`;
+
+const CONTRACT_QUERY_Q7 = `MATCH (a:AuditCheck)
+ WHERE a.projectId IS NOT NULL AND a.timestamp IS NOT NULL AND a.runId IS NOT NULL
+ WITH a.projectId AS projectId, a.runId AS runId, max(a.timestamp) AS runTs
+ ORDER BY runTs DESC
+ WITH projectId, collect({runId: runId, runTs: runTs})[0] AS latest
+ MATCH (latestCheck:AuditCheck {projectId: projectId, runId: latest.runId})
+ WHERE coalesce(latestCheck.severity, 'low') = 'high'
+ OPTIONAL MATCH (latestCheck)-[:FOUND]->(v:InvariantViolation)
+ RETURN projectId, count(v) AS invariantViolationCount
+ ORDER BY projectId`;
+
 function toCountMap(rows: Array<Record<string, unknown>>, keyField: string, valueField: string): CountMap {
   const out: CountMap = new Map();
   for (const row of rows) {
@@ -35,39 +62,13 @@ async function main(): Promise<void> {
     const timestamp = new Date().toISOString();
     const graphEpoch = process.env.GRAPH_EPOCH ?? timestamp;
 
-    const nodeRows = (await neo4j.run(
-    `MATCH (n)
-     WHERE n.projectId IS NOT NULL
-     RETURN n.projectId AS projectId, count(n) AS nodeCount
-     ORDER BY projectId`,
-  )) as Array<Record<string, unknown>>;
+    const nodeRows = (await neo4j.run(CONTRACT_QUERY_Q2)) as Array<Record<string, unknown>>;
 
-  const edgeRows = (await neo4j.run(
-    `MATCH ()-[r]->()
-     WHERE r.projectId IS NOT NULL
-     RETURN r.projectId AS projectId, count(r) AS edgeCount
-     ORDER BY projectId`,
-  )) as Array<Record<string, unknown>>;
+    const edgeRows = (await neo4j.run(CONTRACT_QUERY_Q2_EDGES)) as Array<Record<string, unknown>>;
 
-  const unresolvedRows = (await neo4j.run(
-    `MATCH (u:UnresolvedReference)
-     WHERE u.reason = 'local-module-not-found'
-     RETURN u.projectId AS projectId, count(u) AS unresolvedLocalCount
-     ORDER BY projectId`,
-  )) as Array<Record<string, unknown>>;
+    const unresolvedRows = (await neo4j.run(CONTRACT_QUERY_Q6)) as Array<Record<string, unknown>>;
 
-  const violationRows = (await neo4j.run(
-    `MATCH (a:AuditCheck)
-     WHERE a.projectId IS NOT NULL AND a.timestamp IS NOT NULL AND a.runId IS NOT NULL
-     WITH a.projectId AS projectId, a.runId AS runId, max(a.timestamp) AS runTs
-     ORDER BY runTs DESC
-     WITH projectId, collect({runId: runId, runTs: runTs})[0] AS latest
-     MATCH (latestCheck:AuditCheck {projectId: projectId, runId: latest.runId})
-     WHERE coalesce(latestCheck.severity, 'low') = 'high'
-     OPTIONAL MATCH (latestCheck)-[:FOUND]->(v:InvariantViolation)
-     RETURN projectId, count(v) AS invariantViolationCount
-     ORDER BY projectId`,
-  )) as Array<Record<string, unknown>>;
+    const violationRows = (await neo4j.run(CONTRACT_QUERY_Q7)) as Array<Record<string, unknown>>;
 
   const duplicateRows = (await neo4j.run(
     `MATCH (sf:SourceFile)
