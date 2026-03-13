@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -31,6 +32,17 @@ function toStr(value: unknown): string {
 function round(value: number, digits = 4): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+function stableJson(input: Record<string, unknown>): string {
+  const keys = Object.keys(input).sort();
+  const out: Record<string, unknown> = {};
+  for (const key of keys) out[key] = input[key];
+  return JSON.stringify(out);
+}
+
+function sha256(input: string): string {
+  return createHash('sha256').update(input).digest('hex');
 }
 
 async function main(): Promise<void> {
@@ -110,6 +122,22 @@ async function main(): Promise<void> {
     const interceptionRate = gateFailures > 0 ? failuresResolvedBeforeCommit / gateFailures : 1;
     const meanRecoveryRuns = recoveryCount > 0 ? recoveryRunDistanceTotal / recoveryCount : 0;
 
+    const metricSeed = {
+      projectId,
+      planProjectId,
+      snapshotWindow,
+      schemaVersion,
+      verificationRuns,
+      gateFailures,
+      failuresResolvedBeforeCommit,
+      regressionsAfterMerge,
+      interceptionRate: round(interceptionRate, 6),
+      invariantViolations,
+      falseCompletionEvents,
+      meanRecoveryRuns: round(meanRecoveryRuns, 4),
+    };
+    const metricHash = `sha256:${sha256(stableJson(metricSeed))}`;
+
     const snapshotId = `gms:${projectId}:${Date.now()}`;
 
     await neo4j.run(
@@ -129,6 +157,7 @@ async function main(): Promise<void> {
            m.invariantViolations = $invariantViolations,
            m.falseCompletionEvents = $falseCompletionEvents,
            m.meanRecoveryRuns = $meanRecoveryRuns,
+           m.metricHash = $metricHash,
            m.updatedAt = toString(datetime())`,
       {
         snapshotId,
@@ -146,6 +175,7 @@ async function main(): Promise<void> {
         invariantViolations,
         falseCompletionEvents,
         meanRecoveryRuns,
+        metricHash,
       },
     );
 
@@ -156,7 +186,13 @@ async function main(): Promise<void> {
        MERGE (m)-[e:DERIVED_FROM_RUN]->(r)
        SET e.projectId = $projectId,
            e.snapshotWindow = $snapshotWindow,
-           e.updatedAt = toString(datetime())`,
+           e.updatedAt = toString(datetime())
+       WITH m, r
+       MATCH (r)-[:CAPTURED_COMMIT]->(c:CommitSnapshot {projectId: $projectId})
+       MERGE (m)-[ec:DERIVED_FROM_COMMIT]->(c)
+       SET ec.projectId = $projectId,
+           ec.snapshotWindow = $snapshotWindow,
+           ec.updatedAt = toString(datetime())`,
       { snapshotId, projectId, snapshotWindow },
     );
 
@@ -194,6 +230,7 @@ async function main(): Promise<void> {
       invariantViolations,
       falseCompletionEvents,
       meanRecoveryRuns: round(meanRecoveryRuns, 4),
+      metricHash,
     };
 
     const dir = join(process.cwd(), 'artifacts', 'governance-metrics');

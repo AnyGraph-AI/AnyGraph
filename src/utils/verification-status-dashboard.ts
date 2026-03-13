@@ -6,12 +6,15 @@ import {
   CONTRACT_QUERY_Q11_MILESTONE_BUCKETS,
   CONTRACT_QUERY_Q11_NEXT_TASKS,
   CONTRACT_QUERY_Q11_RUNTIME_EVIDENCE,
+  CONTRACT_QUERY_Q18_GOVERNANCE_METRIC_LATEST,
+  CONTRACT_QUERY_Q18_GOVERNANCE_METRIC_TREND,
 } from './query-contract.js';
 
 dotenv.config();
 
 const PLAN_PROJECT_ID = 'plan_codegraph';
 const RUNTIME_PLAN_PROJECT_ID = 'plan_runtime_graph';
+const GOVERNANCE_PROJECT_ID = 'proj_c0d3e9a1f200';
 
 function toNum(value: unknown): number {
   const maybe = value as { toNumber?: () => number } | null | undefined;
@@ -28,6 +31,7 @@ function str(value: unknown): string {
 async function main(): Promise<void> {
   const planProjectId = process.argv[2] ?? PLAN_PROJECT_ID;
   const runtimeProjectId = process.argv[3] ?? RUNTIME_PLAN_PROJECT_ID;
+  const governanceProjectId = process.argv[4] ?? GOVERNANCE_PROJECT_ID;
 
   const neo4j = new Neo4jService();
   try {
@@ -39,10 +43,19 @@ async function main(): Promise<void> {
 
     const runtimeRows = await neo4j.run(CONTRACT_QUERY_Q11_RUNTIME_EVIDENCE, { runtimeProjectId });
 
+    const governanceLatestRows = await neo4j.run(CONTRACT_QUERY_Q18_GOVERNANCE_METRIC_LATEST, {
+      projectId: governanceProjectId,
+    });
+
+    const governanceTrendRows = await neo4j.run(CONTRACT_QUERY_Q18_GOVERNANCE_METRIC_TREND, {
+      projectId: governanceProjectId,
+    });
+
     const summary = {
       ok: true,
       planProjectId,
       runtimeProjectId,
+      governanceProjectId,
       milestoneBuckets: milestoneRows.map((row) => ({
         bucket: str(row.bucket),
         total: toNum(row.total),
@@ -76,6 +89,29 @@ async function main(): Promise<void> {
         evidenceEdgeCount: 0,
         evidenceArtifactCount: 0,
       },
+      governanceMetricsLatest:
+        governanceLatestRows.length > 0
+          ? {
+              id: str((governanceLatestRows[0] as any).id),
+              timestamp: str((governanceLatestRows[0] as any).timestamp),
+              verificationRuns: toNum((governanceLatestRows[0] as any).verificationRuns),
+              gateFailures: toNum((governanceLatestRows[0] as any).gateFailures),
+              failuresResolvedBeforeCommit: toNum((governanceLatestRows[0] as any).failuresResolvedBeforeCommit),
+              regressionsAfterMerge: toNum((governanceLatestRows[0] as any).regressionsAfterMerge),
+              interceptionRate: toNum((governanceLatestRows[0] as any).interceptionRate),
+              invariantViolations: toNum((governanceLatestRows[0] as any).invariantViolations),
+              falseCompletionEvents: toNum((governanceLatestRows[0] as any).falseCompletionEvents),
+              meanRecoveryRuns: toNum((governanceLatestRows[0] as any).meanRecoveryRuns),
+            }
+          : null,
+      governanceMetricsTrend: governanceTrendRows.map((row) => ({
+        timestamp: str((row as any).timestamp),
+        interceptionRate: toNum((row as any).interceptionRate),
+        gateFailures: toNum((row as any).gateFailures),
+        failuresResolvedBeforeCommit: toNum((row as any).failuresResolvedBeforeCommit),
+        regressionsAfterMerge: toNum((row as any).regressionsAfterMerge),
+        invariantViolations: toNum((row as any).invariantViolations),
+      })),
     };
 
     console.log(JSON.stringify(summary, null, 2));

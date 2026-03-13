@@ -52,6 +52,18 @@ async function main(): Promise<void> {
     const rows = await neo4j.run(CONTRACT_QUERY_Q18_GOVERNANCE_METRIC_LATEST, { projectId });
     const row = rows[0] as Record<string, unknown> | undefined;
 
+    const operationalRows = await neo4j.run(
+      `MATCH (re:RegressionEvent {projectId: $projectId})
+       RETURN count(re) AS total,
+              sum(CASE WHEN re.status = 'prevented_before_commit' THEN 1 ELSE 0 END) AS prevented`,
+      { projectId },
+    );
+
+    const totalRegressionEvents = toNum((operationalRows[0] as any)?.total);
+    const preventedRegressionEvents = toNum((operationalRows[0] as any)?.prevented);
+    const operationalInterceptionRate =
+      totalRegressionEvents > 0 ? preventedRegressionEvents / totalRegressionEvents : 1;
+
     console.log(
       JSON.stringify(
         {
@@ -68,12 +80,17 @@ async function main(): Promise<void> {
                 gateFailures: toNum(row.gateFailures),
                 failuresResolvedBeforeCommit: toNum(row.failuresResolvedBeforeCommit),
                 regressionsAfterMerge: toNum(row.regressionsAfterMerge),
-                interceptionRate: toNum(row.interceptionRate),
+                strictInterceptionRate: toNum(row.interceptionRate),
                 invariantViolations: toNum(row.invariantViolations),
                 falseCompletionEvents: toNum(row.falseCompletionEvents),
                 meanRecoveryRuns: toNum(row.meanRecoveryRuns),
               }
             : null,
+          operationalView: {
+            totalRegressionEvents,
+            preventedRegressionEvents,
+            operationalInterceptionRate,
+          },
         },
         null,
         2,
