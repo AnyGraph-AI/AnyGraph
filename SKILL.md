@@ -535,3 +535,33 @@ Use `verification:done-check:capture` to record a graph-proven execution trace (
 MCP status tools:
 - `commit_audit_status` — latest commit-audit result view
 - `recommendation_proof_status` — recommendation truth-health (`freshness`, `done_vs_proven`, `mismatch_rate`)
+
+## Full-Capacity Playbooks
+
+### 1) Claim-Chain Workflow (code → plan → document/corpus)
+1. `claim_generate` (or run `src/core/claims/claim-engine.ts`) to refresh domain claims.
+2. `claims:cross:synthesize` to materialize cross-domain `DEPENDS_ON` + contradictions.
+3. `claim_chain_path` to visualize traceable chain paths.
+4. If chain count is unexpectedly zero, check `PlanProject-[:TARGETS]->Project` mapping and run `plan:refresh`.
+
+### 2) Cold-Start Workflow (session boot)
+1. `session_context_summary` (first) for in-progress/blocked/recent-run state.
+2. `plan_status` + `plan_priority` to pick next slice.
+3. If stale/freshness issues appear, run `plan:refresh` before asking for next-task recommendations.
+
+### 3) Embedding Matcher Tuning Policy
+- Baseline matcher: `plan:embedding:match -- --threshold=0.75 --limit=3` (exploration mode).
+- Quality gate: `embedding:fp:verify` and read `artifacts/embedding-matcher/fp-rate-latest.json`.
+- Production target: **FP rate < 5%**; for current corpus this is validated with stricter run (`threshold=0.84`, `topK=1`).
+- Use `--apply` only after a passing benchmark for the selected threshold profile.
+
+### 4) Live Re-Check Operations
+- Code or plan changes → `plan:refresh` → `edges:normalize` → `plan:evidence:recompute`.
+- Then run claim refresh as needed (`claim_generate` + `claims:cross:synthesize`).
+- Validate with `verification:done-check:capture` so graph/run/artifact hashes are linked.
+
+### 5) Failure Recovery Matrix
+- `PLAN_FRESHNESS_GUARD_FAILED` → run `plan:refresh`, then retry recommendation/status tools.
+- `invariant_proof_completeness` fail in commit-audit → run `verification:proof:record`, rerun audit.
+- Neo4j auth/env issues in gate scripts → verify `.env` + `Neo4jService` env load path, rerun capture.
+- Drift alarms spike after structural changes → compare with baseline selector (`verify-graph-integrity.ts`) and apply allowlist policy only if documented in plan.
