@@ -41,6 +41,7 @@ import { createClaimStatusTool, createEvidenceForTool, createContradictionsTool,
 import { createSelfAuditTool } from './self-audit.tool.js';
 import { createParserContractStatusTool } from './parser-contract.tool.js';
 import { createCommitAuditStatusTool } from './commit-audit-status.tool.js';
+import { createRecommendationProofStatusTool } from './recommendation-proof-status.tool.js';
 
 // Track tool calls for debugging
 let globalToolCallCount = 0;
@@ -153,4 +154,7 @@ export const registerAllTools = (server: McpServer): void => {
 
   // Register commit audit status tool
   createCommitAuditStatusTool(server);
+
+  // Register recommendation-proof status tool
+  createRecommendationProofStatusTool(server);
 };

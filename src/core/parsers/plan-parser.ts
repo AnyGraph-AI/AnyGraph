@@ -998,6 +998,40 @@ export async function enrichCrossDomain(
       }
     }
 
+    // Phase 1a.1: tighten evidence precision for VG-5 invariant tasks.
+    // These tasks should link to IR pilot implementation/validation surfaces,
+    // not broad incidental files from loose name matches.
+    {
+      const session = driver.session();
+      try {
+        await session.run(
+          `MATCH (t:Task {projectId: 'plan_codegraph'})-[r:HAS_CODE_EVIDENCE]->(e)
+           WHERE t.filePath ENDS WITH 'VERIFICATION_GRAPH_ROADMAP.md'
+             AND t.name STARTS WITH 'Validate invariant:'
+             AND NOT (
+               toLower(coalesce(e.filePath, '')) ENDS WITH '/src/core/ir/ir-materializer.ts'
+               OR toLower(coalesce(e.filePath, '')) ENDS WITH '/src/utils/verification-ir-pilot-validate.ts'
+               OR toLower(coalesce(e.filePath, '')) ENDS WITH '/src/utils/verification-vg5-thresholds.ts'
+               OR toLower(coalesce(e.filePath, '')) ENDS WITH '/src/utils/verification-invariant-proof-records.ts'
+             )
+           DELETE r`,
+        );
+
+        await session.run(
+          `MATCH (t:Task {projectId: 'plan_codegraph'})
+           WHERE t.filePath ENDS WITH 'VERIFICATION_GRAPH_ROADMAP.md'
+             AND t.name STARTS WITH 'Validate invariant:'
+           OPTIONAL MATCH (t)-[r:HAS_CODE_EVIDENCE]->()
+           WITH t, count(r) AS c
+           SET t.codeEvidenceCount = c,
+               t.hasCodeEvidence = c > 0,
+               t.updatedAt = toString(datetime())`,
+        );
+      } finally {
+        await session.close();
+      }
+    }
+
       // Phase 1b: Check documentation coverage
     // For each project that has a SKILL.md, AGENTS.md, CLAUDE.md, or README.md,
     // verify the doc mentions key code graph elements

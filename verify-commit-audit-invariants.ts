@@ -11,7 +11,9 @@ type InvariantKey =
   | 'edge_taxonomy_integrity'
   | 'dependency_integrity'
   | 'parser_contract_integrity'
-  | 'coverage_drift_guardrails';
+  | 'coverage_drift_guardrails'
+  | 'recommendation_done_task_guard'
+  | 'invariant_proof_completeness';
 
 interface InvariantResult {
   key: InvariantKey;
@@ -93,6 +95,18 @@ const ROADMAP_LINKS: Record<InvariantKey, Array<{ task: string; line: number }>>
     {
       task: 'Invariants v1: schema integrity, edge taxonomy integrity, dependency integrity, parser-contract integrity, coverage drift guardrails',
       line: 834,
+    },
+  ],
+  recommendation_done_task_guard: [
+    {
+      task: "Add commit-audit invariant: fail if recommendation engine proposes tasks with `status='done'` without freshness violation evidence",
+      line: 874,
+    },
+  ],
+  invariant_proof_completeness: [
+    {
+      task: 'Add commit-audit invariant: fail when invariant tasks are `done` but missing proof records',
+      line: 876,
     },
   ],
 };
@@ -482,6 +496,101 @@ async function checkCoverageDriftGuardrails(
   };
 }
 
+async function checkRecommendationDoneTaskGuard(neo4j: Neo4jService): Promise<InvariantResult> {
+  const maxFreshnessMinutes = Number(process.env.PLAN_RECOMMENDATION_FRESHNESS_MAX_MINUTES ?? 30);
+
+  const freshnessRows = await neo4j.run(
+    `MATCH (p:Project)
+     WHERE p.projectId STARTS WITH 'plan_'
+     RETURN p.projectId AS projectId, p.lastParsed AS lastParsed`,
+  );
+
+  const staleProjects: Array<{ projectId: string; ageMinutes: number | null; lastParsed: string }> = [];
+  const now = Date.now();
+
+  for (const row of freshnessRows) {
+    const projectId = String(row.projectId ?? '');
+    const lastParsed = String(row.lastParsed ?? '');
+    const parsedTs = Date.parse(lastParsed);
+    if (!Number.isFinite(parsedTs)) {
+      staleProjects.push({ projectId, ageMinutes: null, lastParsed });
+      continue;
+    }
+    const ageMinutes = (now - parsedTs) / 60000;
+    if (ageMinutes > maxFreshnessMinutes) {
+      staleProjects.push({ projectId, ageMinutes: Math.round(ageMinutes), lastParsed });
+    }
+  }
+
+  const recRows = await neo4j.run(
+    `MATCH (t:Task)
+     WHERE t.projectId STARTS WITH 'plan_'
+     OPTIONAL MATCH (t)-[:DEPENDS_ON]->(dep:Task)
+     WITH t, count(CASE WHEN dep.status IN ['planned', 'in_progress', 'blocked'] THEN 1 END) AS openDeps
+     WHERE openDeps = 0
+     RETURN
+       count(t) AS recommendedCount,
+       sum(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS doneRecommendedCount`,
+  );
+
+  const recommendedCount = toNum(recRows[0]?.recommendedCount);
+  const doneRecommendedCount = toNum(recRows[0]?.doneRecommendedCount);
+
+  const hasFreshnessViolation = staleProjects.length > 0;
+  const ok = doneRecommendedCount === 0 || hasFreshnessViolation;
+
+  return {
+    key: 'recommendation_done_task_guard',
+    ok,
+    summary: ok
+      ? 'Recommendation done-task guard passed.'
+      : `Recommendation guard failed: done tasks surfaced without freshness violation evidence (doneRecommended=${doneRecommendedCount})`,
+    details: {
+      recommendedCount,
+      doneRecommendedCount,
+      hasFreshnessViolation,
+      maxFreshnessMinutes,
+      staleProjects,
+    },
+  };
+}
+
+async function checkInvariantProofCompleteness(neo4j: Neo4jService): Promise<InvariantResult> {
+  const rows = await neo4j.run(
+    `MATCH (t:Task {projectId: 'plan_codegraph'})
+     WHERE t.filePath ENDS WITH 'VERIFICATION_GRAPH_ROADMAP.md'
+       AND t.name STARTS WITH 'Validate invariant:'
+     OPTIONAL MATCH (:InvariantProof {projectId: 'plan_codegraph'})-[p:PROVES]->(t)
+     WITH t, count(p) AS proofCount
+     RETURN
+       count(t) AS totalInvariantTasks,
+       sum(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS doneTasks,
+       sum(CASE WHEN t.status = 'done' AND (t.proofRunId IS NULL OR proofCount = 0) THEN 1 ELSE 0 END) AS doneWithoutProof,
+       sum(CASE WHEN proofCount > 0 AND t.status <> 'done' THEN 1 ELSE 0 END) AS proofWithoutDone`,
+  );
+
+  const totalInvariantTasks = toNum(rows[0]?.totalInvariantTasks);
+  const doneTasks = toNum(rows[0]?.doneTasks);
+  const doneWithoutProof = toNum(rows[0]?.doneWithoutProof);
+  const proofWithoutDone = toNum(rows[0]?.proofWithoutDone);
+
+  const ok = doneWithoutProof === 0 && proofWithoutDone === 0;
+
+  return {
+    key: 'invariant_proof_completeness',
+    ok,
+    summary: ok
+      ? 'Invariant proof completeness passed.'
+      : `Invariant proof completeness failed (doneWithoutProof=${doneWithoutProof}, proofWithoutDone=${proofWithoutDone})`,
+    details: {
+      totalInvariantTasks,
+      doneTasks,
+      doneWithoutProof,
+      proofWithoutDone,
+    },
+  };
+}
+
 function computeConfidence(invariants: InvariantResult[]): number {
   const total = invariants.length;
   if (total === 0) return 0;
@@ -528,6 +637,8 @@ async function main(): Promise<void> {
     invariants.push(await checkDependencyIntegrity(neo4j));
     invariants.push(await checkParserContractIntegrity(neo4j));
     invariants.push(await checkCoverageDriftGuardrails(neo4j, changedFiles));
+    invariants.push(await checkRecommendationDoneTaskGuard(neo4j));
+    invariants.push(await checkInvariantProofCompleteness(neo4j));
 
     const failingInvariantKeys = invariants.filter((i) => !i.ok).map((i) => i.key);
     const confidence = computeConfidence(invariants);
