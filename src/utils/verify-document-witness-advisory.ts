@@ -18,6 +18,7 @@ function toNum(value: unknown): number {
 }
 
 async function main(): Promise<void> {
+  const enforce = String(process.env.DOCUMENT_WITNESS_ENFORCE ?? 'false').toLowerCase() === 'true';
   const neo4j = new Neo4jService();
 
   try {
@@ -57,17 +58,35 @@ async function main(): Promise<void> {
       claimsSupportedByWitness: toNum(raw.claimsSupportedByWitness),
     };
 
+    const exceptionRows = (await neo4j.run(
+      `MATCH (p:Project)
+       WHERE p.documentNamespaceStatus = 'shadow_only'
+       RETURN count(p) AS shadowProjects,
+              sum(CASE WHEN p.documentNamespaceTicket IS NULL OR p.documentNamespaceTicket = '' THEN 1 ELSE 0 END) AS missingTicket,
+              sum(CASE WHEN p.documentNamespaceExpiresAt IS NULL OR p.documentNamespaceExpiresAt = '' THEN 1 ELSE 0 END) AS missingExpiry`,
+    )) as Array<Record<string, unknown>>;
+
+    const shadowProjects = toNum(exceptionRows[0]?.shadowProjects ?? 0);
+    const missingTicket = toNum(exceptionRows[0]?.missingTicket ?? 0);
+    const missingExpiry = toNum(exceptionRows[0]?.missingExpiry ?? 0);
+
     const advisoryOk =
-      row.doneMaterializationTasks === 0 || (row.documentProjectCount > 0 && row.witnessCount > 0);
+      (row.doneMaterializationTasks === 0 || (row.documentProjectCount > 0 && row.witnessCount > 0)) &&
+      missingTicket === 0 &&
+      missingExpiry === 0;
 
     const payload = {
       ok: true,
       advisoryOk,
+      enforce,
       advisoryLevel: advisoryOk ? 'ok' : 'warn',
       ...row,
+      shadowProjects,
+      missingTicket,
+      missingExpiry,
       note: advisoryOk
         ? 'Document witness advisory check passed (or no done materialization tasks yet).'
-        : 'Document materialization tasks are marked done but canonical witness prerequisites are not satisfied.',
+        : 'Document witness advisory detected missing canonical prerequisites and/or invalid shadow exceptions.',
       generatedAt: new Date().toISOString(),
     };
 
@@ -79,6 +98,10 @@ async function main(): Promise<void> {
     writeFileSync(join(dir, 'latest.json'), JSON.stringify(payload, null, 2));
 
     console.log(JSON.stringify({ ...payload, outPath }));
+
+    if (enforce && !advisoryOk) {
+      process.exit(1);
+    }
   } finally {
     await neo4j.close();
   }

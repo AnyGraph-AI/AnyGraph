@@ -51,6 +51,27 @@ async function main(): Promise<void> {
       projectId: governanceProjectId,
     });
 
+    const wordingRows = await neo4j.run(
+      `MATCH (t:Task {projectId: $planProjectId})
+       WHERE t.status = 'done'
+         AND toLower(coalesce(t.name,'')) CONTAINS 'document'
+         AND (toLower(coalesce(t.name,'')) CONTAINS 'materializ' OR toLower(coalesce(t.name,'')) CONTAINS 'witness')
+       WITH count(t) AS doneMaterializationTasks
+       OPTIONAL MATCH (p:Project {projectType:'document'})
+       WITH doneMaterializationTasks, count(p) AS documentProjectCount
+       OPTIONAL MATCH (w:DocumentWitness)
+       WITH doneMaterializationTasks, documentProjectCount, count(w) AS witnessCount
+       OPTIONAL MATCH (c:Claim {projectId: $planProjectId})
+       WHERE toLower(coalesce(c.statement, '')) CONTAINS 'document layer complete'
+       RETURN doneMaterializationTasks, documentProjectCount, witnessCount, count(c) AS forbiddenCount`,
+      { planProjectId },
+    );
+
+    const wording = (wordingRows[0] as any) ?? {};
+    const wordingInvariantRed =
+      toNum(wording.doneMaterializationTasks) > 0 &&
+      (toNum(wording.documentProjectCount) <= 0 || toNum(wording.witnessCount) <= 0);
+
     const summary = {
       ok: true,
       planProjectId,
@@ -112,6 +133,19 @@ async function main(): Promise<void> {
         regressionsAfterMerge: toNum((row as any).regressionsAfterMerge),
         invariantViolations: toNum((row as any).invariantViolations),
       })),
+      wordingContract: {
+        allowedClaim:
+          'document adapter plumbing + IR ingestion proven (canonical materialization pending)',
+        forbiddenPhrase: 'document layer complete',
+        invariantRed: wordingInvariantRed,
+        forbiddenCount: toNum(wording.forbiddenCount),
+        status:
+          wordingInvariantRed && toNum(wording.forbiddenCount) > 0
+            ? 'violation'
+            : wordingInvariantRed
+              ? 'restricted'
+              : 'open',
+      },
     };
 
     console.log(JSON.stringify(summary, null, 2));
