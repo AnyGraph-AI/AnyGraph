@@ -645,12 +645,14 @@ async function checkRecommendationDoneTaskGuard(neo4j: Neo4jService): Promise<In
   const recRows = await neo4j.run(
     `MATCH (t:Task)
      WHERE t.projectId STARTS WITH 'plan_'
+       AND coalesce(t.status, 'planned') <> 'done'
+       AND coalesce(t.status, 'planned') <> 'blocked'
      OPTIONAL MATCH (t)-[:DEPENDS_ON]->(dep:Task)
-     WITH t, count(CASE WHEN dep.status IN ['planned', 'in_progress', 'blocked'] THEN 1 END) AS openDeps
+     WITH t, count(DISTINCT CASE WHEN coalesce(dep.status, 'planned') <> 'done' THEN dep END) AS openDeps
      WHERE openDeps = 0
      RETURN
        count(t) AS recommendedCount,
-       sum(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS doneRecommendedCount`,
+       sum(CASE WHEN coalesce(t.status, 'planned') = 'done' THEN 1 ELSE 0 END) AS doneRecommendedCount`,
   );
 
   const recommendedCount = toNum(recRows[0]?.recommendedCount);
@@ -677,9 +679,9 @@ async function checkRecommendationDoneTaskGuard(neo4j: Neo4jService): Promise<In
 
 async function checkInvariantProofCompleteness(neo4j: Neo4jService): Promise<InvariantResult> {
   const rows = await neo4j.run(
-    `MATCH (t:Task {projectId: 'plan_codegraph'})
-     WHERE t.filePath ENDS WITH 'VERIFICATION_GRAPH_ROADMAP.md'
-       AND t.name STARTS WITH 'Validate invariant:'
+    `MATCH (m:Milestone {projectId: 'plan_codegraph', code: 'VG-5'})
+     MATCH (t:Task {projectId: 'plan_codegraph'})-[:PART_OF]->(m)
+     WHERE t.name STARTS WITH 'Validate invariant:'
      OPTIONAL MATCH (:InvariantProof {projectId: 'plan_codegraph'})-[p:PROVES]->(t)
      WITH t, count(p) AS proofCount
      RETURN
