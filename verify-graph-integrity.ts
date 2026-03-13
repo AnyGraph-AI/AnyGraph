@@ -244,9 +244,18 @@ function main(): void {
     edgePct: driftEdgeDeltaPctMax,
   });
 
-  if (failOnDriftAlarm && driftAlarms.length > 0) {
+  const driftAllowlist = (process.env.DRIFT_PROJECT_ALLOWLIST ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const allowlisted = new Set(driftAllowlist);
+  const effectiveDriftAlarms = driftAlarms.filter((alarm) => !allowlisted.has(alarm.projectId));
+  const suppressedDriftAlarms = driftAlarms.filter((alarm) => allowlisted.has(alarm.projectId));
+
+  if (failOnDriftAlarm && effectiveDriftAlarms.length > 0) {
     fail(
-      `Suspicious graph drift detected (${driftAlarms.length} projects): ${driftAlarms
+      `Suspicious graph drift detected (${effectiveDriftAlarms.length} projects): ${effectiveDriftAlarms
         .map((a) => `${a.projectId}(nodeDelta=${a.nodeDelta},edgeDelta=${a.edgeDelta})`)
         .join(', ')}`,
     );
@@ -272,8 +281,13 @@ function main(): void {
         driftEdgeDeltaPctMax,
         failOnDriftAlarm,
       },
+      driftAllowlist,
       driftAlarmCount: driftAlarms.length,
+      effectiveDriftAlarmCount: effectiveDriftAlarms.length,
+      suppressedDriftAlarmCount: suppressedDriftAlarms.length,
+      suppressedDriftProjects: suppressedDriftAlarms.map((a) => a.projectId),
       driftAlarms,
+      effectiveDriftAlarms,
     }),
   );
 }

@@ -17,7 +17,9 @@ type InvariantKey =
   | 'milestone_query_anchor_integrity'
   | 'dependency_distinct_guard'
   | 'null_status_visibility_guard'
-  | 'readiness_semantics_contract';
+  | 'readiness_semantics_contract'
+  | 's6_baseline_output_contract'
+  | 's5_trend_source_contract';
 
 interface InvariantResult {
   key: InvariantKey;
@@ -135,6 +137,18 @@ const ROADMAP_LINKS: Record<InvariantKey, Array<{ task: string; line: number }>>
     {
       task: 'Add query contract rule: readiness semantics are defined only by `DEPENDS_ON` edges',
       line: 909,
+    },
+  ],
+  s6_baseline_output_contract: [
+    {
+      task: 'Add commit-audit invariant for S6 output contract (`baselineRef` + `baselineTimestamp` required in canonical integrity verify output).',
+      line: 72,
+    },
+  ],
+  s5_trend_source_contract: [
+    {
+      task: 'Add commit-audit invariant for S5 trend-source contract (trend/status tooling must source from `IntegritySnapshot`, not ad-hoc file parsing).',
+      line: 73,
     },
   ],
 };
@@ -616,6 +630,53 @@ async function checkReadinessSemanticsContract(): Promise<InvariantResult> {
   };
 }
 
+async function checkS6BaselineOutputContract(): Promise<InvariantResult> {
+  const verifyPath = join(process.cwd(), 'verify-graph-integrity.ts');
+  const verifySource = readFileSync(verifyPath, 'utf8');
+
+  const hasBaselineRefOutput = /\bbaselineRef\b/.test(verifySource);
+  const hasBaselineTimestampOutput = /\bbaselineTimestamp\b/.test(verifySource);
+  const hasBaselineSelector = /\bbaselineSelector\b/.test(verifySource);
+
+  const ok = hasBaselineRefOutput && hasBaselineTimestampOutput && hasBaselineSelector;
+
+  return {
+    key: 's6_baseline_output_contract',
+    ok,
+    summary: ok
+      ? 'S6 baseline output contract passed.'
+      : 'S6 baseline output contract failed (missing baselineRef/baselineTimestamp/baselineSelector in verifier output path).',
+    details: {
+      hasBaselineRefOutput,
+      hasBaselineTimestampOutput,
+      hasBaselineSelector,
+    },
+  };
+}
+
+async function checkS5TrendSourceContract(): Promise<InvariantResult> {
+  const trendPath = join(process.cwd(), 'src', 'utils', 'integrity-snapshot-trends.ts');
+  const trendSource = readFileSync(trendPath, 'utf8');
+
+  const usesIntegritySnapshot = trendSource.includes('MATCH (s:IntegritySnapshot)');
+  const readsSnapshotFiles = /readdirSync|readFileSync\(.*integrity-snapshots/.test(trendSource);
+
+  const ok = usesIntegritySnapshot && !readsSnapshotFiles;
+
+  return {
+    key: 's5_trend_source_contract',
+    ok,
+    summary: ok
+      ? 'S5 trend-source contract passed.'
+      : 'S5 trend-source contract failed (trend utility must read IntegritySnapshot graph data, not snapshot files).',
+    details: {
+      usesIntegritySnapshot,
+      readsSnapshotFiles,
+      trendPath,
+    },
+  };
+}
+
 async function checkRecommendationDoneTaskGuard(neo4j: Neo4jService): Promise<InvariantResult> {
   const maxFreshnessMinutes = Number(process.env.PLAN_RECOMMENDATION_FRESHNESS_MAX_MINUTES ?? 30);
 
@@ -765,6 +826,8 @@ async function main(): Promise<void> {
     invariants.push(await checkDependencyDistinctGuard());
     invariants.push(await checkNullStatusVisibilityGuard());
     invariants.push(await checkReadinessSemanticsContract());
+    invariants.push(await checkS6BaselineOutputContract());
+    invariants.push(await checkS5TrendSourceContract());
 
     const failingInvariantKeys = invariants.filter((i) => !i.ok).map((i) => i.key);
     const confidence = computeConfidence(invariants);

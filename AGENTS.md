@@ -479,6 +479,8 @@ RETURN t.auditVerdict, count(t), collect(t.name)[..3]
 
 When asked "what next?", run this loop in order:
 
+**Graph-order discipline rule:** if a proposed next step is not present as a Task node in the plan graph, add it to the appropriate plan markdown first, re-ingest plans, then execute. Do not perform off-graph follow-on work except emergency break/fix.
+
 1. **State snapshot**
    - `plan_status`
    - `plan_priority`
