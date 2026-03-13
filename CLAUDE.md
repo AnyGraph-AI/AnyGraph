@@ -361,3 +361,4 @@ npm run commit:audit:verify -- <baseRef> <headRef>
 MCP status tools relevant to this pipeline:
 - `commit_audit_status` — latest commit audit summary
 - `recommendation_proof_status` — recommendation truth-health (`freshness`, `done_vs_proven`, `mismatch_rate`)
+- `governance_metrics_status` — latest/trend governance observability (`verificationRuns`, `gateFailures`, `interceptionRate`, `regressionsAfterMerge`)

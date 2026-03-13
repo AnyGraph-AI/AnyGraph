@@ -42,6 +42,7 @@ import { createSelfAuditTool } from './self-audit.tool.js';
 import { createParserContractStatusTool } from './parser-contract.tool.js';
 import { createCommitAuditStatusTool } from './commit-audit-status.tool.js';
 import { createRecommendationProofStatusTool } from './recommendation-proof-status.tool.js';
+import { createGovernanceMetricsStatusTool } from './governance-metrics.tool.js';
 import { createSessionContextSummaryTool } from './session-context-summary.tool.js';
 
 // Track tool calls for debugging
@@ -162,4 +163,7 @@ export const registerAllTools = (server: McpServer): void => {
 
   // Register recommendation-proof status tool
   createRecommendationProofStatusTool(server);
+
+  // Register governance metrics status tool
+  createGovernanceMetricsStatusTool(server);
 };

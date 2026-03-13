@@ -609,3 +609,4 @@ npm run commit:audit:verify -- <baseRef> <headRef>
 **MCP tools:**
 - `commit_audit_status` — shows latest commit audit results from `artifacts/commit-audit/latest.json`
 - `recommendation_proof_status` — recommendation truth-health panel (`freshness`, `done_vs_proven`, `mismatch_rate`) for a plan project
+- `governance_metrics_status` — latest/trend governance observability snapshot (`verificationRuns`, `gateFailures`, `failuresResolvedBeforeCommit`, `regressionsAfterMerge`, `interceptionRate`)

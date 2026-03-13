@@ -119,6 +119,7 @@ Current MCP surface (grouped):
 - `parser_contract_status`
 - `commit_audit_status`
 - `recommendation_proof_status`
+- `governance_metrics_status`
 - `self_audit`
 
 ### Session continuity + cold start
@@ -541,6 +542,7 @@ Use `verification:done-check:capture` to record a graph-proven execution trace (
 MCP status tools:
 - `commit_audit_status` — latest commit-audit result view
 - `recommendation_proof_status` — recommendation truth-health (`freshness`, `done_vs_proven`, `mismatch_rate`)
+- `governance_metrics_status` — governance observability snapshot/trend (`interceptionRate`, gate failures, pre-commit recoveries)
 
 ## Full-Capacity Playbooks
 
