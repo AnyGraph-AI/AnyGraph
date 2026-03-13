@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **AnythingGraph** (repo: codegraph) is an MCP server that builds **universal reasoning graphs**. Give it any structured knowledge — code, documents, plans, corpora — and it parses, cross-references, generates claims, detects drift, and self-audits. Code parsing was the proof of concept. The architecture is the product.
 
-**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 44 MCP tools.
+**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 45 MCP tools.
 
 ### Six Operational Layers
 | Layer | Status | What It Does |
@@ -54,7 +54,7 @@ Any Source → Language Parser → IR v1 → Enrichment Plugins → Neo4j → MC
 
 - `src/mcp/` - MCP server entry point and tools
   - `mcp.server.ts` - Server initialization
-  - `tools/` - 44 MCP tools across code, plan, claim, swarm, and self-audit domains
+  - `tools/` - 45 MCP tools across code, plan, claim, swarm, and self-audit domains
   - `handlers/` - Business logic for graph generation and traversal
 - `src/core/` - Core business logic
   - `parsers/typescript-parser.ts` - TypeScript AST parser (~1000 lines)
@@ -351,3 +351,7 @@ npm run verification:done-check:capture -- [projectId] [policyBundleId]
 # Commit audit (invariants over a commit range)
 npm run commit:audit:verify -- <baseRef> <headRef>
 ```
+
+MCP status tools relevant to this pipeline:
+- `commit_audit_status` — latest commit audit summary
+- `recommendation_proof_status` — recommendation truth-health (`freshness`, `done_vs_proven`, `mismatch_rate`)

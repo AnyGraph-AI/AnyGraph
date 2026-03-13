@@ -4,7 +4,7 @@
 
 AnythingGraph (repo: codegraph) is a **universal reasoning graph**. It ingests code, plans, corpora, and documents into Neo4j, cross-references across domains, generates claims with evidence, detects drift, and self-audits. Code parsing was the proof of concept — the architecture handles any structured knowledge.
 
-**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 44 MCP tools, 6 operational layers.
+**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 45 MCP tools, 6 operational layers.
 
 **Six layers**: Code (3 projects) → Corpus (5 projects) → Plans (4 projects) → Claims (346) → Reasoning (233 hypotheses) → Self-Audit.
 
@@ -600,4 +600,6 @@ npm run commit:audit:verify -- <baseRef> <headRef>
 - `ADJUDICATES` (adjudication → verification run)
 - `HAS_SCOPE` (verification run → analysis scope)
 
-**MCP tool:** `commit_audit_status` — shows latest commit audit results from `artifacts/commit-audit/latest.json`
+**MCP tools:**
+- `commit_audit_status` — shows latest commit audit results from `artifacts/commit-audit/latest.json`
+- `recommendation_proof_status` — recommendation truth-health panel (`freshness`, `done_vs_proven`, `mismatch_rate`) for a plan project

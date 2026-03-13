@@ -495,3 +495,7 @@ npm run commit:audit:verify -- <baseRef> <headRef>
 ```
 
 Use `verification:done-check:capture` to record a graph-proven execution trace (git state, gate result, artifact hash). Use `commit:audit:verify` to run invariant checks (schema, edge taxonomy, dependency, parser contract, coverage drift) over any commit range.
+
+MCP status tools:
+- `commit_audit_status` — latest commit-audit result view
+- `recommendation_proof_status` — recommendation truth-health (`freshness`, `done_vs_proven`, `mismatch_rate`)
