@@ -1044,13 +1044,14 @@ export async function enrichCrossDomain(
            WITH pp.name AS planName, pp.projectId AS planProjectId
            MATCH (cp:Project)
            WHERE toLower(cp.name) = toLower(planName) AND cp.type IS NULL
-           RETURN planProjectId, cp.projectId AS codeProjectId, cp.name AS name`,
+           RETURN planProjectId, cp.projectId AS codeProjectId, cp.name AS name, cp.path AS codePath`,
         );
 
         for (const record of projectResult.records) {
           const codeProjectId = record.get('codeProjectId');
           const planProjectId = record.get('planProjectId');
           const name = record.get('name');
+          const codePath = record.get('codePath') as string | null;
 
           // Count code graph elements
           const codeStats = await session.run(
@@ -1066,18 +1067,77 @@ export async function enrichCrossDomain(
             for (const r of codeStats.records) {
               statsMap[r.get('type')] = r.get('count')?.toNumber?.() || r.get('count');
             }
+            const projectDocNames = ['AGENTS.md', 'CLAUDE.md', 'SKILL.md', 'README.md'];
+            const roleMemoryDocNames = ['AGENTS.md', 'SOUL.md', 'USER.md', 'MEMORY.md'];
+
+            const projectDocChecks = codePath
+              ? await Promise.all(
+                  projectDocNames.map(async (doc) => ({
+                    doc,
+                    exists: await fs
+                      .access(path.join(codePath, doc))
+                      .then(() => true)
+                      .catch(() => false),
+                  })),
+                )
+              : [];
+
+            const workspacePath = codePath ? path.resolve(codePath, '..') : null;
+            const roleMemoryChecks = workspacePath
+              ? await Promise.all(
+                  roleMemoryDocNames.map(async (doc) => ({
+                    doc,
+                    exists: await fs
+                      .access(path.join(workspacePath, doc))
+                      .then(() => true)
+                      .catch(() => false),
+                  })),
+                )
+              : [];
+
+            const presentProjectDocs = projectDocChecks.filter((d) => d.exists).map((d) => d.doc);
+            const missingProjectDocs = projectDocChecks.filter((d) => !d.exists).map((d) => d.doc);
+            const presentRoleMemoryDocs = roleMemoryChecks.filter((d) => d.exists).map((d) => d.doc);
+            const missingRoleMemoryDocs = roleMemoryChecks.filter((d) => !d.exists).map((d) => d.doc);
+
+            const projectDocCoveragePct = projectDocChecks.length > 0
+              ? Math.round((presentProjectDocs.length / projectDocChecks.length) * 100)
+              : 0;
+            const roleMemoryCoveragePct = roleMemoryChecks.length > 0
+              ? Math.round((presentRoleMemoryDocs.length / roleMemoryChecks.length) * 100)
+              : 0;
+
             await session.run(
               `MATCH (pp:PlanProject {projectId: $planPid})
                SET pp.linkedCodeProject = $codePid,
                    pp.codeSourceFiles = $sf,
                    pp.codeFunctions = $fn,
-                   pp.codeClasses = $cls`,
+                   pp.codeClasses = $cls,
+                   pp.projectDocRequired = $projectDocRequired,
+                   pp.projectDocPresent = $projectDocPresent,
+                   pp.projectDocMissing = $projectDocMissing,
+                   pp.projectDocCoveragePct = $projectDocCoveragePct,
+                   pp.roleMemoryDocRequired = $roleMemoryDocRequired,
+                   pp.roleMemoryDocPresent = $roleMemoryDocPresent,
+                   pp.roleMemoryDocMissing = $roleMemoryDocMissing,
+                   pp.roleMemoryDocCoveragePct = $roleMemoryDocCoveragePct,
+                   pp.roleMemoryDocsComplete = size($roleMemoryDocMissing) = 0,
+                   pp.projectDocsComplete = size($projectDocMissing) = 0,
+                   pp.docCoverageCheckedAt = toString(datetime())`,
               {
                 planPid: planProjectId,
                 codePid: codeProjectId,
                 sf: statsMap['SourceFile'] || 0,
                 fn: statsMap['FunctionDeclaration'] || 0,
                 cls: statsMap['ClassDeclaration'] || 0,
+                projectDocRequired: projectDocNames,
+                projectDocPresent: presentProjectDocs,
+                projectDocMissing: missingProjectDocs,
+                projectDocCoveragePct,
+                roleMemoryDocRequired: roleMemoryDocNames,
+                roleMemoryDocPresent: presentRoleMemoryDocs,
+                roleMemoryDocMissing: missingRoleMemoryDocs,
+                roleMemoryDocCoveragePct: roleMemoryCoveragePct,
               },
             );
           }
