@@ -220,12 +220,78 @@ RETURN
 ORDER BY s.timestamp DESC, projectId
 ```
 
+## Q14 — Canonical Project Counts (nodes + edges)
+
+```cypher
+MATCH (n)
+WHERE n.projectId IS NOT NULL
+WITH n.projectId AS projectId, count(n) AS nodeCount
+OPTIONAL MATCH ()-[r]->()
+WHERE r.projectId = projectId
+RETURN projectId, nodeCount, count(r) AS edgeCount
+ORDER BY projectId
+```
+
+## Q15 — Canonical Project Status Surface
+
+```cypher
+MATCH (p:Project)
+WHERE p.projectId IS NOT NULL
+RETURN
+  p.projectId AS projectId,
+  p.displayName AS displayName,
+  p.projectType AS projectType,
+  p.sourceKind AS sourceKind,
+  p.status AS status,
+  p.updatedAt AS updatedAt,
+  p.nodeCount AS nodeCount,
+  p.edgeCount AS edgeCount
+ORDER BY p.projectId
+```
+
+## Q16 — Canonical Project Drift Surface
+
+```cypher
+MATCH (s:IntegritySnapshot)
+WITH s.projectId AS projectId,
+     s.timestamp AS timestamp,
+     s.nodeCount AS nodeCount,
+     s.edgeCount AS edgeCount,
+     s.unresolvedLocalCount AS unresolvedLocalCount,
+     s.invariantViolationCount AS invariantViolationCount
+ORDER BY projectId, timestamp DESC
+WITH projectId, collect({
+  timestamp: timestamp,
+  nodeCount: nodeCount,
+  edgeCount: edgeCount,
+  unresolvedLocalCount: unresolvedLocalCount,
+  invariantViolationCount: invariantViolationCount
+}) AS snaps
+RETURN
+  projectId,
+  snaps[0] AS latest,
+  snaps[1] AS previous
+ORDER BY projectId
+```
+
+## Q17 — Canonical Claim Status Surface
+
+```cypher
+MATCH (c:Claim)
+RETURN
+  coalesce(c.projectId, 'global') AS projectId,
+  c.claimType AS claimType,
+  c.status AS status,
+  count(c) AS claimCount
+ORDER BY projectId, claimType, status
+```
+
 ---
 
 ## Enforcement
 
 - New metrics must be added to this file first.
-- Tooling should reference query IDs (`Q1..Q13`) rather than copying raw Cypher.
+- Tooling should reference query IDs (`Q1..Q17`) rather than copying raw Cypher.
 - Readiness semantics are defined only by `DEPENDS_ON` edges (not `BLOCKS` or inferred heuristics) in canonical next-task outputs.
 - Baseline-aware drift checks must emit `baselineRef` and `baselineTimestamp` (S6 contract output).
 - Trend reporting must be graph-native (`IntegritySnapshot`) and not re-derived from ad-hoc file bucketing in status tooling.
@@ -235,7 +301,9 @@ ORDER BY s.timestamp DESC, projectId
 
 ## Versioning
 
-- Contract version: `v1.7`
+- Contract version: `v1.8`
+- Migration note (v1.8): Added Q14-Q17 canonical project/claim surfaces (counts, status, drift, claims) to establish one contract for project counts/status/drift/claims; enables Governance G3 contract-first metric tooling.
+- Affected surfaces: registry reports, project status dashboards, drift/status scripts, claim status reports.
 - Migration note (v1.7): Added Q12/Q13 for graph-native integrity snapshot history and release baseline selection; standardized S6 output fields (`baselineRef`, `baselineTimestamp`) and trend sourcing from `IntegritySnapshot`.
 - Affected surfaces: `graph-integrity-snapshot.ts`, `verify-graph-integrity.ts`, integrity trend utilities/reports.
 - Migration note (v1.6): Added explicit readiness semantics rule (`DEPENDS_ON`-only) in Enforcement and aligned commit-audit guards for milestone anchor integrity, dependency DISTINCT usage, and null-status visibility.

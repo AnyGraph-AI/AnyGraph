@@ -70,6 +70,7 @@
     "registry:identity:verify": "node --loader ts-node/esm verify-project-identity-contract.ts",
     "registry:duplicates:report": "node --loader ts-node/esm report-project-registry-duplicates.ts",
     "code:embedding-inputs:enrich": "node --loader ts-node/esm enrich-code-embedding-inputs.ts",
+    "plan:embedding:match": "node --loader ts-node/esm plan-code-embedding-matcher.ts",
     "edges:normalize": "node --loader ts-node/esm normalize-edge-project-ids.ts",
     "edges:verify": "node --loader ts-node/esm verify-edge-tagging.ts",
     "plan:evidence:recompute": "node --loader ts-node/esm recompute-plan-evidence-flags.ts",
