@@ -14,6 +14,16 @@ interface DependencyEdgeRow {
   tokenIndex?: number;
 }
 
+interface ScopedTaskRow {
+  milestoneCode: string;
+  milestoneName: string;
+  taskId: string;
+  taskName: string;
+  taskStatus: string;
+  lineNumber?: number;
+  depCount: number;
+}
+
 function fail(message: string): never {
   console.error(`PLAN_DEPENDENCY_INTEGRITY_FAILED: ${message}`);
   process.exit(1);
@@ -28,6 +38,22 @@ function toNum(value: unknown, fallback = 0): number {
   if (maybe?.toNumber) return maybe.toNumber();
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseNoDependsException(taskName: string): { ok: boolean; reason?: string; expires?: string } {
+  const match = taskName.match(/NO_DEPENDS_OK\s*\(([^|)]+)\|\s*expires\s*:\s*(\d{4}-\d{2}-\d{2})\)/i);
+  if (!match) return { ok: false };
+  return {
+    ok: true,
+    reason: match[1]?.trim(),
+    expires: match[2]?.trim(),
+  };
+}
+
+function isFutureDate(isoDate: string): boolean {
+  const at = Date.parse(`${isoDate}T23:59:59Z`);
+  if (!Number.isFinite(at)) return false;
+  return at > Date.now();
 }
 
 async function main(): Promise<void> {
@@ -124,6 +150,73 @@ async function main(): Promise<void> {
       }
     }
 
+    const scopedRows = (await neo4j.run(
+      `MATCH (m:Milestone {projectId:'plan_codegraph'})<-[:PART_OF]-(t:Task {projectId:'plan_codegraph'})
+       WHERE m.code STARTS WITH 'DL-' OR m.code STARTS WITH 'GM-'
+       OPTIONAL MATCH (t)-[:DEPENDS_ON]->(d:Task {projectId:'plan_codegraph'})
+       RETURN m.code AS milestoneCode,
+              m.name AS milestoneName,
+              t.id AS taskId,
+              t.name AS taskName,
+              t.status AS taskStatus,
+              coalesce(t.lineNumber, 0) AS lineNumber,
+              count(d) AS depCount
+       ORDER BY milestoneCode, lineNumber, taskName`,
+    )) as ScopedTaskRow[];
+
+    const scopedByMilestone = new Map<string, ScopedTaskRow[]>();
+    for (const row of scopedRows) {
+      const key = row.milestoneCode;
+      const list = scopedByMilestone.get(key) ?? [];
+      list.push({ ...row, depCount: toNum(row.depCount) });
+      scopedByMilestone.set(key, list);
+    }
+
+    let scopedTasksChecked = 0;
+    let scopedMissingDepends = 0;
+    let scopedExceptionCount = 0;
+    const strictScopedDepends = String(process.env.STRICT_SCOPED_DEPENDS_ON ?? 'false').toLowerCase() === 'true';
+
+    for (const [milestoneCode, tasks] of scopedByMilestone.entries()) {
+      const sorted = [...tasks].sort((a, b) => toNum(a.lineNumber) - toNum(b.lineNumber));
+      let starterAllowanceUsed = false;
+
+      for (const task of sorted) {
+        if ((task.taskStatus ?? '').trim().toLowerCase() === 'done') {
+          continue;
+        }
+
+        scopedTasksChecked += 1;
+        const exception = parseNoDependsException(task.taskName ?? '');
+
+        if (exception.ok) {
+          scopedExceptionCount += 1;
+          if (!exception.reason || exception.reason.length < 3 || !exception.expires || !isFutureDate(exception.expires)) {
+            violations.push({
+              code: 'invalid_no_depends_exception',
+              details: `${milestoneCode} ${task.taskId} task="${task.taskName}"`,
+            });
+          }
+          continue;
+        }
+
+        if (toNum(task.depCount) <= 0) {
+          if (!starterAllowanceUsed) {
+            starterAllowanceUsed = true;
+            continue;
+          }
+
+          scopedMissingDepends += 1;
+          if (strictScopedDepends) {
+            violations.push({
+              code: 'scoped_task_missing_depends_on',
+              details: `${milestoneCode} ${task.taskId} task="${task.taskName}"`,
+            });
+          }
+        }
+      }
+    }
+
     const maxViolations = Number(process.env.MAX_PLAN_DEPENDENCY_VIOLATIONS ?? 0);
     if (violations.length > maxViolations) {
       const sample = violations.slice(0, 10).map((v) => `${v.code}: ${v.details}`).join(' | ');
@@ -137,6 +230,10 @@ async function main(): Promise<void> {
       JSON.stringify({
         ok: true,
         checkedEdges: rows.length,
+        scopedTasksChecked,
+        scopedMissingDepends,
+        scopedExceptionCount,
+        strictScopedDepends,
         violations: violations.length,
         maxViolations,
         countsByCode,
