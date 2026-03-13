@@ -190,18 +190,54 @@ RETURN size(tasks) AS totalTasks, withEvidence, doneWithoutEvidence, evidenceEdg
 
 ---
 
+## Q12 — Integrity Snapshot History Trends (graph-native)
+
+```cypher
+MATCH (s:IntegritySnapshot)
+RETURN
+  s.projectId AS projectId,
+  s.timestamp AS timestamp,
+  s.graphEpoch AS graphEpoch,
+  s.nodeCount AS nodeCount,
+  s.edgeCount AS edgeCount,
+  s.unresolvedLocalCount AS unresolvedLocalCount,
+  s.invariantViolationCount AS invariantViolationCount,
+  s.duplicateSourceSuspicionCount AS duplicateSourceSuspicionCount
+ORDER BY projectId, timestamp
+```
+
+## Q13 — Integrity Baseline Selection (release anchor)
+
+```cypher
+MATCH (s:IntegritySnapshot)
+WHERE s.graphEpoch = $baselineRef
+RETURN
+  s.projectId AS projectId,
+  s.timestamp AS timestamp,
+  s.graphEpoch AS graphEpoch,
+  s.nodeCount AS nodeCount,
+  s.edgeCount AS edgeCount
+ORDER BY s.timestamp DESC, projectId
+```
+
+---
+
 ## Enforcement
 
 - New metrics must be added to this file first.
-- Tooling should reference query IDs (`Q1..Q11`) rather than copying raw Cypher.
+- Tooling should reference query IDs (`Q1..Q13`) rather than copying raw Cypher.
 - Readiness semantics are defined only by `DEPENDS_ON` edges (not `BLOCKS` or inferred heuristics) in canonical next-task outputs.
+- Baseline-aware drift checks must emit `baselineRef` and `baselineTimestamp` (S6 contract output).
+- Trend reporting must be graph-native (`IntegritySnapshot`) and not re-derived from ad-hoc file bucketing in status tooling.
 - CI gate should fail if dashboard/report scripts introduce uncontracted project-metric queries.
 
 ---
 
 ## Versioning
 
-- Contract version: `v1.6`
+- Contract version: `v1.7`
+- Migration note (v1.7): Added Q12/Q13 for graph-native integrity snapshot history and release baseline selection; standardized S6 output fields (`baselineRef`, `baselineTimestamp`) and trend sourcing from `IntegritySnapshot`.
+- Affected surfaces: `graph-integrity-snapshot.ts`, `verify-graph-integrity.ts`, integrity trend utilities/reports.
 - Migration note (v1.6): Added explicit readiness semantics rule (`DEPENDS_ON`-only) in Enforcement and aligned commit-audit guards for milestone anchor integrity, dependency DISTINCT usage, and null-status visibility.
 - Migration note (v1.5): Hardened Q10/Q11 to remove roadmap filePath dependence (PlanProject anchor + milestone code routing), added milestone numeric ordering, and formalized runtime evidence multiplicity outputs (`evidenceEdgeCount`, `evidenceArtifactCount`) with task-level evidence rollup semantics.
 - Migration note (v1.4): Added Q11 graph-native verification status dashboard contract (milestone PART_OF bucketing, DISTINCT dependency blockers, explicit/effective blocked split, null-status debt metric, runtime evidence rollup).

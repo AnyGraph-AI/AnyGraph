@@ -1,7 +1,11 @@
 import neo4j, { Driver } from 'neo4j-driver';
+import dotenv from 'dotenv';
 
 import { MAX_TRAVERSAL_DEPTH } from '../../constants.js';
 import { getTimeoutConfig } from '../../core/config/timeouts.js';
+
+dotenv.config();
+
 export class Neo4jService {
   private driver: Driver;
 

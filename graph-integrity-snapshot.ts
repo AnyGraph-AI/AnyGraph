@@ -1,6 +1,7 @@
 import { mkdirSync, appendFileSync } from 'fs';
 import { dirname, join } from 'path';
 
+import { ingestLatestSnapshotRowsToGraph } from './src/utils/integrity-snapshot-graph-ingest.js';
 import { Neo4jService } from './src/storage/neo4j/neo4j.service.js';
 
 type CountMap = Map<string, number>;
@@ -70,50 +71,61 @@ async function main(): Promise<void> {
 
     const violationRows = (await neo4j.run(CONTRACT_QUERY_Q7)) as Array<Record<string, unknown>>;
 
-  const duplicateRows = (await neo4j.run(
-    `MATCH (sf:SourceFile)
-     WHERE sf.projectId IS NOT NULL AND sf.filePath IS NOT NULL
-     WITH toLower(sf.filePath) AS sourceKey, collect(DISTINCT sf.projectId) AS projectIds
-     WHERE size(projectIds) > 1
-     UNWIND projectIds AS projectId
-     RETURN projectId, count(*) AS duplicateSourceSuspicionCount
-     ORDER BY projectId`,
-  )) as Array<Record<string, unknown>>;
+    const duplicateRows = (await neo4j.run(
+      `MATCH (sf:SourceFile)
+       WHERE sf.projectId IS NOT NULL AND sf.filePath IS NOT NULL
+       WITH toLower(sf.filePath) AS sourceKey, collect(DISTINCT sf.projectId) AS projectIds
+       WHERE size(projectIds) > 1
+       UNWIND projectIds AS projectId
+       RETURN projectId, count(*) AS duplicateSourceSuspicionCount
+       ORDER BY projectId`,
+    )) as Array<Record<string, unknown>>;
 
-  const nodeCounts = toCountMap(nodeRows, 'projectId', 'nodeCount');
-  const edgeCounts = toCountMap(edgeRows, 'projectId', 'edgeCount');
-  const unresolvedCounts = toCountMap(unresolvedRows, 'projectId', 'unresolvedLocalCount');
-  const violationCounts = toCountMap(violationRows, 'projectId', 'invariantViolationCount');
-  const duplicateCounts = toCountMap(duplicateRows, 'projectId', 'duplicateSourceSuspicionCount');
+    const nodeCounts = toCountMap(nodeRows, 'projectId', 'nodeCount');
+    const edgeCounts = toCountMap(edgeRows, 'projectId', 'edgeCount');
+    const unresolvedCounts = toCountMap(unresolvedRows, 'projectId', 'unresolvedLocalCount');
+    const violationCounts = toCountMap(violationRows, 'projectId', 'invariantViolationCount');
+    const duplicateCounts = toCountMap(duplicateRows, 'projectId', 'duplicateSourceSuspicionCount');
 
-  const projectIds = new Set<string>([
-    ...nodeCounts.keys(),
-    ...edgeCounts.keys(),
-    ...unresolvedCounts.keys(),
-    ...violationCounts.keys(),
-    ...duplicateCounts.keys(),
-  ]);
+    const projectIds = new Set<string>([
+      ...nodeCounts.keys(),
+      ...edgeCounts.keys(),
+      ...unresolvedCounts.keys(),
+      ...violationCounts.keys(),
+      ...duplicateCounts.keys(),
+    ]);
 
-  const rows: SnapshotRow[] = Array.from(projectIds)
-    .sort()
-    .map((projectId) => ({
-      timestamp,
-      graphEpoch,
-      projectId,
-      nodeCount: nodeCounts.get(projectId) ?? 0,
-      edgeCount: edgeCounts.get(projectId) ?? 0,
-      unresolvedLocalCount: unresolvedCounts.get(projectId) ?? 0,
-      invariantViolationCount: violationCounts.get(projectId) ?? 0,
-      duplicateSourceSuspicionCount: duplicateCounts.get(projectId) ?? 0,
-    }));
+    const rows: SnapshotRow[] = Array.from(projectIds)
+      .sort()
+      .map((projectId) => ({
+        timestamp,
+        graphEpoch,
+        projectId,
+        nodeCount: nodeCounts.get(projectId) ?? 0,
+        edgeCount: edgeCounts.get(projectId) ?? 0,
+        unresolvedLocalCount: unresolvedCounts.get(projectId) ?? 0,
+        invariantViolationCount: violationCounts.get(projectId) ?? 0,
+        duplicateSourceSuspicionCount: duplicateCounts.get(projectId) ?? 0,
+      }));
 
-  const datePart = timestamp.slice(0, 10);
-  const outPath = join(SNAPSHOT_DIR, `${datePart}.jsonl`);
-  mkdirSync(dirname(outPath), { recursive: true });
+    const datePart = timestamp.slice(0, 10);
+    const outPath = join(SNAPSHOT_DIR, `${datePart}.jsonl`);
+    mkdirSync(dirname(outPath), { recursive: true });
 
-  for (const row of rows) {
-    appendFileSync(outPath, `${JSON.stringify(row)}\n`, 'utf8');
-  }
+    for (const row of rows) {
+      appendFileSync(outPath, `${JSON.stringify(row)}\n`, 'utf8');
+    }
+
+    const ingestRequired = String(process.env.INTEGRITY_SNAPSHOT_GRAPH_INGEST_REQUIRED ?? 'false').toLowerCase() === 'true';
+    const ingestResult = await ingestLatestSnapshotRowsToGraph({ snapshotDir: SNAPSHOT_DIR, neo4j });
+
+    if (!ingestResult.ok && ingestRequired) {
+      throw new Error(`Integrity snapshot graph ingest failed (required=true): ${ingestResult.error ?? 'unknown error'}`);
+    }
+
+    if (!ingestResult.ok && !ingestRequired) {
+      console.warn(`INTEGRITY_SNAPSHOT_GRAPH_INGEST_WARN: ${ingestResult.error ?? 'unknown error'}`);
+    }
 
     console.log(
       JSON.stringify({
@@ -121,6 +133,13 @@ async function main(): Promise<void> {
         rows: rows.length,
         outPath,
         timestamp,
+        graphIngestRan: ingestResult.ran,
+        graphIngestOk: ingestResult.ok,
+        graphIngestRows: ingestResult.rowsIngested,
+        graphSnapshotNodes: ingestResult.snapshotNodeCount,
+        graphMetricNodes: ingestResult.metricNodeCount,
+        graphMeasuredEdges: ingestResult.measuredEdgeCount,
+        graphIngestError: ingestResult.error,
       }),
     );
   } finally {

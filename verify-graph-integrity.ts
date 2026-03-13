@@ -22,12 +22,14 @@ interface DriftAlarm {
 
 const SNAPSHOT_DIR = join(process.cwd(), 'artifacts', 'integrity-snapshots');
 
+type BaselineSelector = 'previous' | 'latest' | `release:${string}`;
+
 function fail(message: string): never {
   console.error(`INTEGRITY_CHECK_FAILED: ${message}`);
   process.exit(1);
 }
 
-function getLatestSnapshotFile(): string {
+function getSnapshotFiles(): string[] {
   const files = readdirSync(SNAPSHOT_DIR)
     .filter((f) => f.endsWith('.jsonl'))
     .sort();
@@ -36,43 +38,115 @@ function getLatestSnapshotFile(): string {
     fail(`No snapshot files found in ${SNAPSHOT_DIR}`);
   }
 
-  return join(SNAPSHOT_DIR, files[files.length - 1]);
+  return files.map((file) => join(SNAPSHOT_DIR, file));
 }
 
-function parseRows(path: string): SnapshotRow[] {
-  const text = readFileSync(path, 'utf8').trim();
-  if (!text) {
-    fail(`Latest snapshot file is empty: ${path}`);
+function parseRows(paths: string[]): SnapshotRow[] {
+  const rows: SnapshotRow[] = [];
+
+  for (const path of paths) {
+    const text = readFileSync(path, 'utf8').trim();
+    if (!text) continue;
+
+    const fileRows = text
+      .split('\n')
+      .map((line) => JSON.parse(line) as SnapshotRow)
+      .filter(Boolean);
+
+    rows.push(...fileRows);
   }
 
-  return text
-    .split('\n')
-    .map((line) => JSON.parse(line) as SnapshotRow)
-    .filter(Boolean);
+  if (rows.length === 0) {
+    fail(`Snapshot files are empty in ${SNAPSHOT_DIR}`);
+  }
+
+  return rows;
 }
 
-function latestAndPrevious(rows: SnapshotRow[]): { latestRows: SnapshotRow[]; previousRows: SnapshotRow[]; latestTs: number } {
-  const tsValues = Array.from(
-    new Set(
-      rows
-        .map((r) => Date.parse(r.timestamp))
-        .filter((v) => Number.isFinite(v)),
-    ),
-  ).sort((a, b) => b - a);
+function normalizeSelector(raw: string): BaselineSelector {
+  const value = raw.trim();
+  if (value === 'previous' || value === 'latest') return value;
+  if (value.startsWith('release:') && value.slice('release:'.length).trim().length > 0) {
+    return value as BaselineSelector;
+  }
+  fail(`Invalid baseline selector "${raw}". Use one of: previous | latest | release:<tag|sha>`);
+}
 
-  const latestTs = tsValues[0] ?? 0;
-  const previousTs = tsValues[1] ?? 0;
+function latestTimestamp(rows: SnapshotRow[]): number {
+  const ts = rows
+    .map((r) => Date.parse(r.timestamp))
+    .filter((v) => Number.isFinite(v))
+    .sort((a, b) => b - a)[0];
+
+  if (!ts) {
+    fail('Could not determine snapshot timestamp.');
+  }
+
+  return ts;
+}
+
+function resolveBaseline(rows: SnapshotRow[], selector: BaselineSelector, latestTs: number): {
+  baselineRows: SnapshotRow[];
+  baselineRef: string;
+  baselineTimestamp?: string;
+} {
+  if (selector === 'latest') {
+    return {
+      baselineRows: rows.filter((r) => Date.parse(r.timestamp) === latestTs),
+      baselineRef: 'latest',
+      baselineTimestamp: new Date(latestTs).toISOString(),
+    };
+  }
+
+  if (selector === 'previous') {
+    const tsValues = Array.from(
+      new Set(
+        rows
+          .map((r) => Date.parse(r.timestamp))
+          .filter((v) => Number.isFinite(v)),
+      ),
+    ).sort((a, b) => b - a);
+
+    const previousTs = tsValues[1];
+    if (!previousTs) {
+      return {
+        baselineRows: [],
+        baselineRef: 'previous:none',
+      };
+    }
+
+    return {
+      baselineRows: rows.filter((r) => Date.parse(r.timestamp) === previousTs),
+      baselineRef: 'previous',
+      baselineTimestamp: new Date(previousTs).toISOString(),
+    };
+  }
+
+  const releaseRef = selector.slice('release:'.length).trim();
+  const releaseRows = rows.filter((r) => String(r.graphEpoch ?? '').trim() === releaseRef);
+  if (releaseRows.length === 0) {
+    fail(`No snapshot rows found for baseline release ref "${releaseRef}" (matched against graphEpoch).`);
+  }
+
+  const baselineTs = releaseRows
+    .map((r) => Date.parse(r.timestamp))
+    .filter((v) => Number.isFinite(v))
+    .sort((a, b) => b - a)[0];
+
+  if (!baselineTs) {
+    fail(`Snapshot rows for release ref "${releaseRef}" have invalid timestamps.`);
+  }
 
   return {
-    latestTs,
-    latestRows: rows.filter((r) => Date.parse(r.timestamp) === latestTs),
-    previousRows: previousTs ? rows.filter((r) => Date.parse(r.timestamp) === previousTs) : [],
+    baselineRows: releaseRows.filter((r) => Date.parse(r.timestamp) === baselineTs),
+    baselineRef: `release:${releaseRef}`,
+    baselineTimestamp: new Date(baselineTs).toISOString(),
   };
 }
 
 function computeDriftAlarms(
   latestRows: SnapshotRow[],
-  previousRows: SnapshotRow[],
+  baselineRows: SnapshotRow[],
   cfg: {
     nodeAbs: number;
     edgeAbs: number;
@@ -80,18 +154,18 @@ function computeDriftAlarms(
     edgePct: number;
   },
 ): DriftAlarm[] {
-  const prevByProject = new Map(previousRows.map((r) => [r.projectId, r]));
+  const baselineByProject = new Map(baselineRows.map((r) => [r.projectId, r]));
 
   const alarms: DriftAlarm[] = [];
   for (const row of latestRows) {
-    const prev = prevByProject.get(row.projectId);
-    if (!prev) continue;
+    const baseline = baselineByProject.get(row.projectId);
+    if (!baseline) continue;
 
-    const nodeDelta = Number(row.nodeCount) - Number(prev.nodeCount);
-    const edgeDelta = Number(row.edgeCount) - Number(prev.edgeCount);
+    const nodeDelta = Number(row.nodeCount) - Number(baseline.nodeCount);
+    const edgeDelta = Number(row.edgeCount) - Number(baseline.edgeCount);
 
-    const nodeBase = Math.max(1, Number(prev.nodeCount));
-    const edgeBase = Math.max(1, Number(prev.edgeCount));
+    const nodeBase = Math.max(1, Number(baseline.nodeCount));
+    const edgeBase = Math.max(1, Number(baseline.edgeCount));
 
     const nodeDeltaPct = nodeDelta / nodeBase;
     const edgeDeltaPct = edgeDelta / edgeBase;
@@ -128,13 +202,15 @@ function main(): void {
   const driftEdgeDeltaPctMax = Number(process.env.DRIFT_EDGE_DELTA_PCT_MAX ?? 0.5);
   const failOnDriftAlarm = String(process.env.FAIL_ON_DRIFT_ALARM ?? 'false').toLowerCase() === 'true';
 
-  const latestFile = getLatestSnapshotFile();
-  const rows = parseRows(latestFile);
+  // Baseline selector (S6)
+  const baselineSelector = normalizeSelector(process.argv[2] ?? process.env.INTEGRITY_BASELINE_SELECTOR ?? 'previous');
 
-  const { latestTs, latestRows, previousRows } = latestAndPrevious(rows);
-  if (!latestTs) {
-    fail('Could not determine snapshot timestamp.');
-  }
+  const files = getSnapshotFiles();
+  const latestFile = files[files.length - 1];
+  const rows = parseRows(files);
+
+  const latestTs = latestTimestamp(rows);
+  const latestRows = rows.filter((r) => Date.parse(r.timestamp) === latestTs);
 
   const ageHours = (Date.now() - latestTs) / (1000 * 60 * 60);
   if (ageHours > staleHours) {
@@ -159,7 +235,9 @@ function main(): void {
     );
   }
 
-  const driftAlarms = computeDriftAlarms(latestRows, previousRows, {
+  const { baselineRows, baselineRef, baselineTimestamp } = resolveBaseline(rows, baselineSelector, latestTs);
+
+  const driftAlarms = computeDriftAlarms(latestRows, baselineRows, {
     nodeAbs: driftNodeDeltaAbsMax,
     edgeAbs: driftEdgeDeltaAbsMax,
     nodePct: driftNodeDeltaPctMax,
@@ -180,6 +258,10 @@ function main(): void {
       latestFile,
       projects: latestRows.length,
       snapshotAgeHours: Number(ageHours.toFixed(3)),
+      baselineSelector,
+      baselineRef,
+      baselineTimestamp,
+      baselineProjectCount: baselineRows.length,
       thresholds: {
         staleHours,
         maxInvariantViolations,
