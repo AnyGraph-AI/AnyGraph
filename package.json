@@ -66,6 +66,7 @@
 
     "registry:reconcile": "node --loader ts-node/esm reconcile-project-registry.ts",
     "registry:verify": "node --loader ts-node/esm verify-project-registry.ts",
+    "registry:identity:verify": "node --loader ts-node/esm verify-project-identity-contract.ts",
     "edges:normalize": "node --loader ts-node/esm normalize-edge-project-ids.ts",
     "edges:verify": "node --loader ts-node/esm verify-edge-tagging.ts",
     "plan:evidence:recompute": "node --loader ts-node/esm recompute-plan-evidence-flags.ts",
@@ -75,7 +76,7 @@
     "plan:deps:verify": "node --loader ts-node/esm verify-plan-dependency-integrity.ts",
     "plan:refresh": "node --loader ts-node/esm src/utils/plan-refresh-for-gates.ts",
     "commit:audit:verify": "node --loader ts-node/esm verify-commit-audit-invariants.ts",
-    "done-check": "npm run build && npm run plan:refresh && npm run edges:normalize && npm run plan:evidence:recompute && npm run registry:reconcile && npm run registry:verify && npm run edges:verify && npm run parser:contracts:verify && npm run plan:deps:verify && npm run integrity:snapshot && npm run integrity:verify"
+    "done-check": "npm run build && npm run plan:refresh && npm run edges:normalize && npm run plan:evidence:recompute && npm run registry:reconcile && npm run registry:verify && npm run registry:identity:verify && npm run edges:verify && npm run parser:contracts:verify && npm run plan:deps:verify && npm run integrity:snapshot && npm run integrity:verify"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.15.1",
