@@ -1,4 +1,5 @@
 import { Neo4jService } from './src/storage/neo4j/neo4j.service.js';
+import { CONTRACT_QUERY_Q14_PROJECT_COUNTS } from './src/utils/query-contract.js';
 
 interface ProjectCountRow {
   projectId: string;
@@ -60,15 +61,7 @@ async function main(): Promise<void> {
   const neo4j = new Neo4jService();
 
   try {
-    const rows = (await neo4j.run(
-      `MATCH (n)
-       WHERE n.projectId IS NOT NULL
-       WITH n.projectId AS projectId, count(n) AS nodeCount
-       OPTIONAL MATCH ()-[r]->()
-       WHERE r.projectId = projectId
-       RETURN projectId, nodeCount, count(r) AS edgeCount
-       ORDER BY projectId`,
-    )) as ProjectCountRow[];
+    const rows = (await neo4j.run(CONTRACT_QUERY_Q14_PROJECT_COUNTS)) as ProjectCountRow[];
 
     const existingRows = (await neo4j.run(
       `MATCH (p:Project)

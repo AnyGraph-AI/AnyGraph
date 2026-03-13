@@ -1,4 +1,5 @@
 import { Neo4jService } from './src/storage/neo4j/neo4j.service.js';
+import { CONTRACT_QUERY_Q14_PROJECT_COUNTS, CONTRACT_QUERY_Q15_PROJECT_STATUS } from './src/utils/query-contract.js';
 
 interface MismatchRow {
   projectId: string;
@@ -6,6 +7,13 @@ interface MismatchRow {
   actualEdges: number;
   registeredNodes: number;
   registeredEdges: number;
+}
+
+function toNum(value: unknown): number {
+  const maybe = value as { toNumber?: () => number } | null | undefined;
+  if (maybe?.toNumber) return maybe.toNumber();
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : -1;
 }
 
 function fail(message: string): never {
@@ -30,23 +38,33 @@ async function main(): Promise<void> {
       fail(`Missing :Project rows for: ${missingIds.join(', ')}`);
     }
 
-    const mismatches = (await neo4j.run(
-      `MATCH (p:Project)
-       WHERE p.projectId IS NOT NULL
-       OPTIONAL MATCH (n {projectId: p.projectId})
-       WITH p, count(n) AS actualNodes
-       OPTIONAL MATCH ()-[r]->()
-       WHERE r.projectId = p.projectId
-       WITH p, actualNodes, count(r) AS actualEdges
-       WHERE coalesce(toInteger(p.nodeCount), -1) <> actualNodes
-          OR coalesce(toInteger(p.edgeCount), -1) <> actualEdges
-       RETURN p.projectId AS projectId,
-              actualNodes,
-              actualEdges,
-              coalesce(toInteger(p.nodeCount), -1) AS registeredNodes,
-              coalesce(toInteger(p.edgeCount), -1) AS registeredEdges
-       ORDER BY p.projectId`,
-    )) as MismatchRow[];
+    const countRows = (await neo4j.run(CONTRACT_QUERY_Q14_PROJECT_COUNTS)) as Array<Record<string, unknown>>;
+    const statusRows = (await neo4j.run(CONTRACT_QUERY_Q15_PROJECT_STATUS)) as Array<Record<string, unknown>>;
+
+    const statusByProject = new Map(
+      statusRows.map((row) => [String(row.projectId ?? ''), { nodeCount: toNum(row.nodeCount), edgeCount: toNum(row.edgeCount) }]),
+    );
+
+    const mismatches: MismatchRow[] = [];
+    for (const row of countRows) {
+      const projectId = String(row.projectId ?? '');
+      if (!projectId) continue;
+
+      const registered = statusByProject.get(projectId);
+      if (!registered) continue;
+
+      const actualNodes = toNum(row.nodeCount);
+      const actualEdges = toNum(row.edgeCount);
+      if (registered.nodeCount !== actualNodes || registered.edgeCount !== actualEdges) {
+        mismatches.push({
+          projectId,
+          actualNodes,
+          actualEdges,
+          registeredNodes: registered.nodeCount,
+          registeredEdges: registered.edgeCount,
+        });
+      }
+    }
 
     if (mismatches.length > 0) {
       const preview = mismatches

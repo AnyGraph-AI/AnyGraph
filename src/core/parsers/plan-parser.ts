@@ -1212,109 +1212,21 @@ export async function enrichCrossDomain(
       }
     }
 
-    // Phase 1c: Semantic keyword matching — match task descriptions to function names
-    // For tasks with no explicit cross-refs, extract keywords and match against functions
+    // Phase 1c: Embedding-based semantic matching (keyword matcher retired)
+    // Semantic evidence is now produced by `plan:embedding:match` (refType = semantic_embedding).
+    // Here we remove legacy semantic_keyword evidence so semantic rollups stay contract-consistent.
     {
       const session = driver.session();
       try {
-        // Get plan projects linked to code projects
-        const linked = await session.run(
-          `MATCH (pp:PlanProject)
-           WHERE pp.linkedCodeProject IS NOT NULL
-           RETURN pp.projectId AS planPid, pp.linkedCodeProject AS codePid`,
-        );
-
-        for (const linkRec of linked.records) {
-          const planPid = linkRec.get('planPid');
-          const codePid = linkRec.get('codePid');
-
-          // Get project name for context-aware noise filtering
-          const projNameResult = await session.run(
-            `MATCH (pp:PlanProject {projectId: $planPid}) RETURN pp.name AS name`,
-            { planPid },
+        const planPids = parsedPlans.map((p) => p.projectId);
+        if (planPids.length > 0) {
+          await session.run(
+            `MATCH (t:Task)-[r:HAS_CODE_EVIDENCE]->()
+             WHERE r.refType = 'semantic_keyword'
+               AND t.projectId IN $planPids
+             DELETE r`,
+            { planPids },
           );
-          const projName = projNameResult.records[0]?.get('name')?.toLowerCase() || '';
-
-          // Project-specific noise: if the project IS a parser, "parser" is noise
-          // These are terms so common in the project's domain they match everything
-          const projectNoise: Record<string, string[]> = {
-            'codegraph': ['parser', 'graph', 'node', 'edge', 'project', 'import', 'code', 'json', 'schema', 'core', 'current', 'land', 'build', 'agent', 'service'],
-            'godspeed': ['token', 'user', 'wallet', 'callback'],
-            'bible-graph': ['verse', 'node', 'edge', 'book', 'chapter'],
-            'plan-graph': ['plan', 'task', 'node', 'edge'],
-          };
-          const extraNoise = projectNoise[projName] || [];
-
-          // Get tasks without evidence in this plan project
-          // Skip tasks already audited as FALSE_POSITIVE — don't re-create bad edges
-          const tasks = await session.run(
-            `MATCH (t:Task {projectId: $planPid})
-             WHERE (t.hasCodeEvidence IS NULL OR t.hasCodeEvidence = false)
-             AND (t.auditVerdict IS NULL OR t.auditVerdict <> 'FALSE_POSITIVE')
-             RETURN t.id AS id, t.name AS name`,
-            { planPid },
-          );
-
-          for (const taskRec of tasks.records) {
-            const taskId = taskRec.get('id');
-            const taskName: string = taskRec.get('name');
-
-            // Extract meaningful keywords from task name (lowercase, > 3 chars, no noise)
-            const noise = new Set(['with', 'from', 'that', 'this', 'when', 'than', 'them', 'then',
-              'each', 'only', 'show', 'make', 'into', 'card', 'type', 'mode', 'both', 'open',
-              'used', 'uses', 'none', 'auto', 'adds', 'also', 'same', 'first', 'after', 'before',
-              'button', 'toggle', 'display', 'success', 'default', 'setting', 'settings', 'command',
-              'notification', 'position', 'positions', 'order', 'orders', 'field', 'fields', 'input',
-              'custom', 'amount', 'number', 'text', 'value', 'build', 'write', 'define', 'create',
-              'implement', 'refactor', 'based', 'using', 'existing', 'across', 'enable', 'source',
-              ...extraNoise]);
-            const keywords = taskName
-              .toLowerCase()
-              .replace(/[^a-z0-9\s-_]/g, ' ')
-              .split(/[\s\-_]+/)
-              .filter((w) => w.length > 3 && !noise.has(w));
-
-            if (keywords.length === 0) continue;
-
-            // Build keyword match: function name must contain at least one keyword
-            // Require 5+ chars for stronger signal (avoids "core", "land", "json" collisions)
-            for (const keyword of keywords) {
-              if (keyword.length < 5) continue;
-              const result = await session.run(
-                `MATCH (f {projectId: $codePid})
-                 WHERE f.coreType IN ['FunctionDeclaration', 'ArrowFunction', 'MethodDeclaration']
-                 AND toLower(f.name) CONTAINS $keyword
-                 RETURN f.id AS id, f.name AS name
-                 LIMIT 3`,
-                { codePid, keyword },
-              );
-
-              if (result.records.length > 0) {
-                // Found matching functions — create evidence edge
-                for (const funcRec of result.records) {
-                  const fnId = funcRec.get('id');
-                  await session.run(
-                    `MATCH (t {id: $taskId}), (fn {id: $fnId})
-                     MERGE (t)-[r:HAS_CODE_EVIDENCE]->(fn)
-                     ON CREATE SET r.refType = 'semantic_keyword',
-                         r.refValue = $keyword,
-                         r.codeProjectId = $codePid,
-                         r.resolvedAt = datetime()`,
-                    { taskId, fnId, keyword, codePid },
-                  );
-                  evidenceEdges++;
-                }
-
-                await session.run(
-                  `MATCH (t {id: $taskId})
-                   SET t.hasSemanticEvidence = true,
-                       t.semanticEvidenceCount = coalesce(t.semanticEvidenceCount, 0) + $cnt`,
-                  { taskId, cnt: result.records.length },
-                );
-                break; // One keyword match is enough per task
-              }
-            }
-          }
         }
       } finally {
         await session.close();
@@ -1333,7 +1245,7 @@ export async function enrichCrossDomain(
            OPTIONAL MATCH (t)-[r:HAS_CODE_EVIDENCE]->()
            WITH t,
                 sum(CASE WHEN r.refType IN ['file_path', 'function'] THEN 1 ELSE 0 END) AS explicitCount,
-                sum(CASE WHEN r.refType = 'semantic_keyword' THEN 1 ELSE 0 END) AS semanticCount
+                sum(CASE WHEN r.refType = 'semantic_embedding' THEN 1 ELSE 0 END) AS semanticCount
            SET t.hasCodeEvidence = explicitCount > 0,
                t.codeEvidenceCount = explicitCount,
                t.hasSemanticEvidence = semanticCount > 0,
