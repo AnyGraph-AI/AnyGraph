@@ -67,8 +67,29 @@ async function main(): Promise<void> {
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
   const worktreeRaw = `${git(['status', '--porcelain'])}\n--unstaged--\n${git(['diff', '--binary', 'HEAD'])}\n--staged--\n${git(['diff', '--binary', '--cached'])}`;
   const isDirty = worktreeRaw.split('\n')[0].trim().length > 0;
+  const allowDirtyCapture = String(process.env.VERIFICATION_CAPTURE_ALLOW_DIRTY ?? 'false').toLowerCase() === 'true';
+  const failOnDirty = String(process.env.VERIFICATION_CAPTURE_FAIL_ON_DIRTY ?? 'true').toLowerCase() !== 'false';
   const diffHash = `sha256:${sha256(worktreeRaw)}`;
   const capturedAt = new Date().toISOString();
+
+  if (isDirty && failOnDirty && !allowDirtyCapture) {
+    console.error(
+      JSON.stringify({
+        ok: false,
+        projectId,
+        headSha,
+        branch,
+        isDirty,
+        failOnDirty,
+        allowDirtyCapture,
+        message:
+          'Refusing verification capture on dirty worktree. Commit/stash changes or set VERIFICATION_CAPTURE_ALLOW_DIRTY=true to override intentionally.',
+      }),
+    );
+    process.exit(1);
+  }
+
+  const dirtyCaptureOverrideUsed = isDirty && allowDirtyCapture;
 
   const gateDecisionSeed = {
     projectId,
@@ -79,6 +100,7 @@ async function main(): Promise<void> {
     headSha,
     branch,
     isDirty,
+    dirtyCaptureOverrideUsed,
     diffHash,
     durationMs,
   };
@@ -132,6 +154,8 @@ async function main(): Promise<void> {
       headSha,
       branch,
       isDirty,
+      dirtyCaptureOverrideUsed,
+      failOnDirty,
       diffHash,
       durationMs,
       artifactPath: artifact?.path,

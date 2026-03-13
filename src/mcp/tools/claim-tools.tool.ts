@@ -445,9 +445,38 @@ export function createClaimGenerateTool(server: McpServer) {
         }
 
         if (domain === 'all' || domain === 'code') {
-          const code1 = await engine.generateCodeClaims('proj_60d5feed0001');
-          const code2 = await engine.generateCodeClaims('proj_c0d3e9a1f200');
-          lines.push(`💻 Code: ${code1.claims + code2.claims} claims, ${code1.evidence + code2.evidence} evidence, ${code1.hypotheses + code2.hypotheses} hypotheses`);
+          const neo4jService = new Neo4jService();
+          let codeProjectIds: string[] = [];
+
+          try {
+            const codeProjects = await neo4jService.run(
+              `MATCH (p:Project)
+               WHERE coalesce(p.projectType, '') = 'code'
+               RETURN p.projectId AS projectId
+               ORDER BY projectId`,
+            );
+            codeProjectIds = codeProjects.map((r) => str(r.projectId)).filter(Boolean);
+          } finally {
+            await neo4jService.close();
+          }
+
+          // Safety fallback for cold registries.
+          if (codeProjectIds.length === 0) {
+            codeProjectIds = ['proj_60d5feed0001', 'proj_c0d3e9a1f200'];
+          }
+
+          let codeClaims = 0;
+          let codeEvidence = 0;
+          let codeHypotheses = 0;
+
+          for (const projectId of codeProjectIds) {
+            const result = await engine.generateCodeClaims(projectId);
+            codeClaims += result.claims;
+            codeEvidence += result.evidence;
+            codeHypotheses += result.hypotheses;
+          }
+
+          lines.push(`💻 Code: ${codeClaims} claims, ${codeEvidence} evidence, ${codeHypotheses} hypotheses (${codeProjectIds.length} project(s))`);
         }
 
         if (domain === 'all' || domain === 'corpus') {

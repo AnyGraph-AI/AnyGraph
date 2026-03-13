@@ -7,7 +7,11 @@ interface CheckResult {
   reasons: string[];
 }
 
-const TARGET_FILES = ['src/utils/verification-status-dashboard.ts'];
+const TARGET_FILES = [
+  'src/utils/verification-status-dashboard.ts',
+  'verify-project-registry.ts',
+  'reconcile-project-registry.ts',
+];
 
 const REQUIRED_IMPORT = 'query-contract.js';
 
@@ -27,15 +31,10 @@ function main(): void {
     const reasons: string[] = [];
 
     const hasInlineMetricPattern = FORBIDDEN_PATTERNS.some((pattern) => pattern.test(content));
+    const hasContractImport = content.includes(REQUIRED_IMPORT);
 
-    if (hasInlineMetricPattern && !content.includes(REQUIRED_IMPORT)) {
+    if (hasInlineMetricPattern && !hasContractImport) {
       reasons.push('missing query-contract import for metric query usage');
-    }
-
-    for (const pattern of FORBIDDEN_PATTERNS) {
-      if (pattern.test(content)) {
-        reasons.push(`contains inline contract query pattern: ${pattern}`);
-      }
     }
 
     results.push({

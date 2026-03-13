@@ -4,9 +4,10 @@
  * Uses @parcel/watcher for high-performance file watching
  */
 
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { promisify } from 'util';
 
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import * as watcher from '@parcel/watcher';
@@ -87,6 +88,8 @@ class WatchManager {
   private watchers: Map<string, WatcherState> = new Map();
   private mcpServer: Server | null = null;
   private incrementalParseHandler: IncrementalParseHandler | null = null;
+  private liveRecheckQueueByProject: Map<string, Promise<void>> = new Map();
+  private execFileAsync = promisify(execFile);
 
   /**
    * Set the MCP server instance for sending notifications
@@ -135,21 +138,37 @@ class WatchManager {
       });
   }
 
-  private runProjectCommand(command: string[], timeoutMs = 600000): { ok: boolean; command: string; error?: string } {
+  private async runProjectCommand(
+    command: string[],
+    timeoutMs = 600000,
+  ): Promise<{ ok: boolean; command: string; error?: string; startedAt: string; finishedAt: string; durationMs: number }> {
+    const startedTs = Date.now();
+    const startedAt = new Date(startedTs).toISOString();
+
     try {
-      execFileSync(command[0], command.slice(1), {
+      await this.execFileAsync(command[0], command.slice(1), {
         cwd: process.cwd(),
-        stdio: 'pipe',
         encoding: 'utf8',
         timeout: timeoutMs,
       });
 
-      return { ok: true, command: command.join(' ') };
+      const finishedTs = Date.now();
+      return {
+        ok: true,
+        command: command.join(' '),
+        startedAt,
+        finishedAt: new Date(finishedTs).toISOString(),
+        durationMs: finishedTs - startedTs,
+      };
     } catch (error) {
+      const finishedTs = Date.now();
       return {
         ok: false,
         command: command.join(' '),
         error: error instanceof Error ? error.message : String(error),
+        startedAt,
+        finishedAt: new Date(finishedTs).toISOString(),
+        durationMs: finishedTs - startedTs,
       };
     }
   }
@@ -174,25 +193,65 @@ class WatchManager {
     appendFileSync(path, `${JSON.stringify(entry)}\n`, 'utf8');
   }
 
+  private enqueueLiveRecheckPipeline(
+    state: WatcherState,
+    events: WatchEvent[],
+    parseResult: { nodesUpdated: number; edgesUpdated: number },
+  ): void {
+    const queuedAt = new Date().toISOString();
+    const previous = this.liveRecheckQueueByProject.get(state.projectId) ?? Promise.resolve();
+
+    const next = previous
+      .catch(() => undefined)
+      .then(async () => {
+        await this.triggerLiveRecheckPipeline(state, events, parseResult, queuedAt);
+      })
+      .catch((error) => {
+        this.appendRecheckEventLog({
+          timestamp: new Date().toISOString(),
+          projectId: state.projectId,
+          queuedAt,
+          queueFailure: true,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        const current = this.liveRecheckQueueByProject.get(state.projectId);
+        if (current === next) this.liveRecheckQueueByProject.delete(state.projectId);
+      });
+
+    this.liveRecheckQueueByProject.set(state.projectId, next);
+  }
+
   private async triggerLiveRecheckPipeline(
     state: WatcherState,
     events: WatchEvent[],
     parseResult: { nodesUpdated: number; edgesUpdated: number },
+    queuedAt: string,
   ): Promise<void> {
     const changedPaths = events.filter((e) => e.type !== 'unlink').map((e) => e.filePath.toLowerCase());
     const hasCodeFileChange = changedPaths.some((p) => p.endsWith('.ts') || p.endsWith('.tsx'));
     const hasPlanFileChange = changedPaths.some((p) => p.includes('/plans/') && p.endsWith('.md'));
 
     const linkedPlanProjects = this.getLinkedPlanProjectsForCodeProject(state.projectId);
-    const commandResults: Array<{ ok: boolean; command: string; error?: string }> = [];
+    const commandResults: Array<{
+      ok: boolean;
+      command: string;
+      error?: string;
+      startedAt: string;
+      finishedAt: string;
+      durationMs: number;
+    }> = [];
+
+    const startedAt = new Date().toISOString();
 
     if (hasCodeFileChange && linkedPlanProjects.length > 0) {
-      commandResults.push(this.runProjectCommand(['npm', 'run', 'plan:evidence:recompute']));
+      commandResults.push(await this.runProjectCommand(['npm', 'run', 'plan:evidence:recompute']));
     }
 
     if (hasPlanFileChange) {
-      commandResults.push(this.runProjectCommand(['npm', 'run', 'plan:refresh']));
-      commandResults.push(this.runProjectCommand(['npm', 'run', 'plan:evidence:recompute']));
+      commandResults.push(await this.runProjectCommand(['npm', 'run', 'plan:refresh']));
+      commandResults.push(await this.runProjectCommand(['npm', 'run', 'plan:evidence:recompute']));
     }
 
     const evidenceChanged =
@@ -201,12 +260,18 @@ class WatchManager {
       commandResults.some((r) => r.ok && r.command.includes('plan:evidence:recompute'));
 
     if (evidenceChanged) {
-      commandResults.push(this.runProjectCommand(['node', '--loader', 'ts-node/esm', 'src/core/claims/claim-engine.ts']));
-      commandResults.push(this.runProjectCommand(['npm', 'run', 'claims:cross:synthesize']));
+      commandResults.push(await this.runProjectCommand(['node', '--loader', 'ts-node/esm', 'src/core/claims/claim-engine.ts']));
+      commandResults.push(await this.runProjectCommand(['npm', 'run', 'claims:cross:synthesize']));
     }
 
+    const finishedAt = new Date().toISOString();
+
     this.appendRecheckEventLog({
-      timestamp: new Date().toISOString(),
+      timestamp: finishedAt,
+      queuedAt,
+      startedAt,
+      finishedAt,
+      durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
       projectId: state.projectId,
       events: events.map((e) => ({ type: e.type, filePath: e.filePath })),
       linkedPlanProjects,
@@ -447,7 +512,8 @@ class WatchManager {
       }
 
       // Live re-check pipeline hooks (Milestone 6)
-      await this.triggerLiveRecheckPipeline(state, events, result);
+      // Queue asynchronously per project to avoid blocking parse event processing.
+      this.enqueueLiveRecheckPipeline(state, events, result);
 
       state.lastUpdateTime = new Date();
       const elapsedMs = Date.now() - startTime;
