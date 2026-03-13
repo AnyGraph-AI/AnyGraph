@@ -79,28 +79,64 @@ RETURN f.riskTier, round(f.riskLevel) AS risk, f.fanInCount, f.fanOutCount,
 
 ## MCP Tools
 
-| Tool | When to Use |
-|------|-------------|
-| `pre_edit_check` | **ALWAYS** before editing a function. Returns verdict + full context. |
-| `simulate_edit` | When verdict is SIMULATE_FIRST. Shows exact graph delta of your change. |
-| `impact_analysis` | Deep blast radius with transitive dependents, risk scoring, affected files. |
-| `search_codebase` | Find functions by natural language description (vector embeddings). |
-| `natural_language_to_cypher` | Ask structural questions in plain English → Cypher. |
-| `traverse_from_node` | Walk the graph from a specific node (callers, callees, imports). |
-| `detect_dead_code` | Find exported functions nobody calls. |
-| `detect_duplicate_code` | Find near-duplicates by normalized hash. |
-| `list_projects` | See all projects in the graph with stats. |
-| `swarm_graph_refresh` | After editing files, refresh the graph so next queries see fresh data. |
-| `swarm_post_task` | Post refactoring tasks with dependencies for multi-agent work. |
-| `swarm_claim_task` | Claim a pending task from the blackboard. |
-| `swarm_complete_task` | Complete/fail/request_review/approve/reject tasks. |
-| `swarm_get_tasks` | Query tasks by status/agent/swarm. |
-| `swarm_message` | Agent-to-agent messaging (blocked/conflict/alert/handoff). |
-| `swarm_pheromone` | Deposit coordination signals on nodes. |
-| `swarm_sense` | Read pheromones near a node. |
-| `state_impact` | Query state field access patterns. Shows readers/writers, detects race conditions. |
-| `registration_map` | Query framework entrypoints. "What happens when /buy is sent?" |
-| `detect_hotspots` | Ranked functions with highest risk × change frequency. |
+Current MCP surface (grouped):
+
+### Core graph + safety
+- `pre_edit_check` — **always** before editing a function
+- `simulate_edit` — parse-and-diff safety simulation before risky edits
+- `impact_analysis` — transitive blast radius, affected files, risk
+- `state_impact` — readers/writers for state fields
+- `registration_map` — runtime entrypoint routing map
+- `detect_hotspots` — risk × churn hotspots
+- `search_codebase` — semantic code search
+- `traverse_from_node` — structural graph traversal
+- `natural_language_to_cypher` — NL → Cypher conversion
+
+### Discovery + project ops
+- `list_projects`
+- `parse_typescript_project`
+- `check_parse_status`
+- `start_watch_project` / `stop_watch_project` / `list_watchers`
+- `test_neo4j_connection`
+
+### Plan graph
+- `plan_status`
+- `plan_drift`
+- `plan_gaps`
+- `plan_query`
+- `plan_priority`
+- `plan_next_tasks`
+
+### Claim layer
+- `claim_status`
+- `evidence_for`
+- `contradictions`
+- `hypotheses`
+- `claim_generate`
+- `claim_chain_path` (code → plan → document/corpus chain view)
+
+### Governance / verification status
+- `parser_contract_status`
+- `commit_audit_status`
+- `recommendation_proof_status`
+- `self_audit`
+
+### Session continuity + cold start
+- `save_session_bookmark` / `restore_session_bookmark`
+- `save_session_note` / `recall_session_notes`
+- `cleanup_session`
+- `session_context_summary` (graph cold-start: in-progress/blocked/recent changes)
+
+### Swarm coordination
+- `swarm_graph_refresh`
+- `swarm_post_task`
+- `swarm_claim_task`
+- `swarm_complete_task`
+- `swarm_get_tasks`
+- `swarm_message`
+- `swarm_pheromone`
+- `swarm_sense`
+- `swarm_cleanup`
 
 ### Multi-Agent Refactoring
 
