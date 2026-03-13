@@ -6,7 +6,6 @@ dotenv.config();
 
 const PLAN_PROJECT_ID = 'plan_codegraph';
 const RUNTIME_PLAN_PROJECT_ID = 'plan_runtime_graph';
-const ROADMAP_FILE = 'VERIFICATION_GRAPH_ROADMAP.md';
 
 function toNum(value: unknown): number {
   const maybe = value as { toNumber?: () => number } | null | undefined;
@@ -27,9 +26,9 @@ async function main(): Promise<void> {
   const neo4j = new Neo4jService();
   try {
     const milestoneRows = await neo4j.run(
-      `MATCH (m:Milestone {projectId: $projectId})
-       WHERE m.filePath ENDS WITH $roadmapFile
-         AND m.code IS NOT NULL
+      `MATCH (p:PlanProject {projectId: $projectId})
+       MATCH (m:Milestone {projectId: $projectId})-[:PART_OF]->(p)
+       WHERE m.code IS NOT NULL
          AND (m.code STARTS WITH 'VG-' OR m.code STARTS WITH 'CA-' OR m.code STARTS WITH 'RTG-')
        OPTIONAL MATCH (t:Task {projectId: $projectId})-[:PART_OF]->(m)
        WITH m.code AS bucket, t
@@ -40,8 +39,8 @@ async function main(): Promise<void> {
          sum(CASE WHEN t.status = 'planned' THEN 1 ELSE 0 END) AS planned,
          sum(CASE WHEN t.status = 'blocked' THEN 1 ELSE 0 END) AS blocked,
          sum(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) AS inProgress
-       ORDER BY bucket`,
-      { projectId: planProjectId, roadmapFile: ROADMAP_FILE },
+       ORDER BY split(bucket, '-')[0], toInteger(coalesce(split(bucket, '-')[1], '0'))`,
+      { projectId: planProjectId },
     );
 
     const nextTaskRows = await neo4j.run(
@@ -78,12 +77,16 @@ async function main(): Promise<void> {
        UNWIND tasks AS t
        OPTIONAL MATCH (t)-[r:HAS_CODE_EVIDENCE]->(e)
        WHERE coalesce(r.projectId, t.projectId) = t.projectId
-       WITH tasks, t, count(e) AS evidenceHits
+       WITH tasks, t,
+            count(DISTINCT r) AS evidenceEdgeHits,
+            count(DISTINCT e) AS artifactHits
        WITH
          tasks,
-         count(DISTINCT CASE WHEN evidenceHits > 0 THEN t END) AS withEvidence,
-         count(DISTINCT CASE WHEN t.status = 'done' AND evidenceHits = 0 THEN t END) AS doneWithoutEvidence
-       RETURN size(tasks) AS totalTasks, withEvidence, doneWithoutEvidence`,
+         count(DISTINCT CASE WHEN evidenceEdgeHits > 0 THEN t END) AS withEvidence,
+         count(DISTINCT CASE WHEN t.status = 'done' AND evidenceEdgeHits = 0 THEN t END) AS doneWithoutEvidence,
+         sum(evidenceEdgeHits) AS evidenceEdgeCount,
+         sum(artifactHits) AS evidenceArtifactCount
+       RETURN size(tasks) AS totalTasks, withEvidence, doneWithoutEvidence, evidenceEdgeCount, evidenceArtifactCount`,
       { runtimeProjectId },
     );
 
@@ -115,7 +118,15 @@ async function main(): Promise<void> {
         totalTasks: toNum(row.totalTasks),
         withEvidence: toNum(row.withEvidence),
         doneWithoutEvidence: toNum(row.doneWithoutEvidence),
-      }))[0] ?? { totalTasks: 0, withEvidence: 0, doneWithoutEvidence: 0 },
+        evidenceEdgeCount: toNum(row.evidenceEdgeCount),
+        evidenceArtifactCount: toNum(row.evidenceArtifactCount),
+      }))[0] ?? {
+        totalTasks: 0,
+        withEvidence: 0,
+        doneWithoutEvidence: 0,
+        evidenceEdgeCount: 0,
+        evidenceArtifactCount: 0,
+      },
     };
 
     console.log(JSON.stringify(summary, null, 2));

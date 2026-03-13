@@ -129,9 +129,9 @@ ORDER BY projectId
 ## Q10 — Verification Done-vs-Proven Consistency (VG-6 acceptance)
 
 ```cypher
-MATCH (t:Task {projectId: 'plan_codegraph'})
-WHERE t.filePath ENDS WITH 'VERIFICATION_GRAPH_ROADMAP.md'
-  AND t.name STARTS WITH 'Validate invariant:'
+MATCH (m:Milestone {projectId: 'plan_codegraph', code: 'VG-5'})
+MATCH (t:Task {projectId: 'plan_codegraph'})-[:PART_OF]->(m)
+WHERE t.name STARTS WITH 'Validate invariant:'
 OPTIONAL MATCH (:InvariantProof {projectId: 'plan_codegraph'})-[p:PROVES]->(t)
 WITH t, count(p) AS proofCount
 RETURN
@@ -144,9 +144,9 @@ RETURN
 ## Q11 — Verification Status Dashboard (graph-native, no line-range bucketing)
 
 ```cypher
-MATCH (m:Milestone {projectId: 'plan_codegraph'})
-WHERE m.filePath ENDS WITH 'VERIFICATION_GRAPH_ROADMAP.md'
-  AND m.code IS NOT NULL
+MATCH (p:PlanProject {projectId: 'plan_codegraph'})
+MATCH (m:Milestone {projectId: 'plan_codegraph'})-[:PART_OF]->(p)
+WHERE m.code IS NOT NULL
   AND (m.code STARTS WITH 'VG-' OR m.code STARTS WITH 'CA-' OR m.code STARTS WITH 'RTG-')
 OPTIONAL MATCH (t:Task {projectId: 'plan_codegraph'})-[:PART_OF]->(m)
 WITH m.code AS bucket, t
@@ -157,7 +157,7 @@ RETURN
   sum(CASE WHEN t.status = 'planned' THEN 1 ELSE 0 END) AS planned,
   sum(CASE WHEN t.status = 'blocked' THEN 1 ELSE 0 END) AS blocked,
   sum(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) AS inProgress
-ORDER BY bucket
+ORDER BY split(bucket, '-')[0], toInteger(coalesce(split(bucket, '-')[1], '0'))
 ```
 
 ```cypher
@@ -176,12 +176,16 @@ WITH collect(t) AS tasks
 UNWIND tasks AS t
 OPTIONAL MATCH (t)-[r:HAS_CODE_EVIDENCE]->(e)
 WHERE coalesce(r.projectId, t.projectId) = t.projectId
-WITH tasks, t, count(e) AS evidenceHits
+WITH tasks, t,
+     count(DISTINCT r) AS evidenceEdgeHits,
+     count(DISTINCT e) AS artifactHits
 WITH
   tasks,
-  count(DISTINCT CASE WHEN evidenceHits > 0 THEN t END) AS withEvidence,
-  count(DISTINCT CASE WHEN t.status = 'done' AND evidenceHits = 0 THEN t END) AS doneWithoutEvidence
-RETURN size(tasks) AS totalTasks, withEvidence, doneWithoutEvidence
+  count(DISTINCT CASE WHEN evidenceEdgeHits > 0 THEN t END) AS withEvidence,
+  count(DISTINCT CASE WHEN t.status = 'done' AND evidenceEdgeHits = 0 THEN t END) AS doneWithoutEvidence,
+  sum(evidenceEdgeHits) AS evidenceEdgeCount,
+  sum(artifactHits) AS evidenceArtifactCount
+RETURN size(tasks) AS totalTasks, withEvidence, doneWithoutEvidence, evidenceEdgeCount, evidenceArtifactCount
 ```
 
 ---
@@ -196,7 +200,8 @@ RETURN size(tasks) AS totalTasks, withEvidence, doneWithoutEvidence
 
 ## Versioning
 
-- Contract version: `v1.4`
+- Contract version: `v1.5`
+- Migration note (v1.5): Hardened Q10/Q11 to remove roadmap filePath dependence (PlanProject anchor + milestone code routing), added milestone numeric ordering, and formalized runtime evidence multiplicity outputs (`evidenceEdgeCount`, `evidenceArtifactCount`) with task-level evidence rollup semantics.
 - Migration note (v1.4): Added Q11 graph-native verification status dashboard contract (milestone PART_OF bucketing, DISTINCT dependency blockers, explicit/effective blocked split, null-status debt metric, runtime evidence rollup).
 - Migration note (v1.3): Added Q10 done-vs-proven verification consistency contract for VG-6 acceptance (explicit invariant proof linkage checks).
 - Migration note (v1.2): Added Q9 dependency-integrity contract (raw directive fidelity + tokenization sanity) to support graph-native commit auditing and `plan:deps:verify` gating.

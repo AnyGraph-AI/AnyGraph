@@ -5,7 +5,7 @@ import { Neo4jService } from '../storage/neo4j/neo4j.service.js';
 dotenv.config();
 
 const PLAN_PROJECT_ID = 'plan_codegraph';
-const ROADMAP_FILE = 'VERIFICATION_GRAPH_ROADMAP.md';
+const VERIFICATION_MILESTONE_CODE = 'VG-5';
 
 interface DoneVsProvenRow {
   task: string;
@@ -34,9 +34,9 @@ async function main(): Promise<void> {
   const neo4j = new Neo4jService();
   try {
     const rows = await neo4j.run(
-      `MATCH (t:Task {projectId: $projectId})
-       WHERE t.filePath ENDS WITH $roadmapFile
-         AND t.name STARTS WITH 'Validate invariant:'
+      `MATCH (m:Milestone {projectId: $projectId, code: $milestoneCode})
+       MATCH (t:Task {projectId: $projectId})-[:PART_OF]->(m)
+       WHERE t.name STARTS WITH 'Validate invariant:'
        OPTIONAL MATCH (:InvariantProof {projectId: $projectId})-[p:PROVES]->(t)
        WITH t, count(p) AS proofCount
        RETURN
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
          coalesce(t.proofInvariantId, '') AS proofInvariantId,
          proofCount
        ORDER BY t.line`,
-      { projectId, roadmapFile: ROADMAP_FILE },
+      { projectId, milestoneCode: VERIFICATION_MILESTONE_CODE },
     );
 
     const typedRows: DoneVsProvenRow[] = rows.map((row) => ({
