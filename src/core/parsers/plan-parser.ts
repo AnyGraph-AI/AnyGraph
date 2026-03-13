@@ -559,6 +559,9 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
           risk: risk !== '—' && risk !== '-' ? risk : null,
           crossRefCount: crossRefs.length,
           crossRefs: crossRefs.map((r) => `${r.type}:${r.value}`).join('|'),
+          descriptionText: taskText,
+          embeddingInput: `task: ${taskText}\nproject: ${ctx.projectId}\nfile: ${ctx.filePath}\nsection: ${currentSectionKey}`,
+          embeddingInputVersion: 1,
           hasCodeEvidence: false,
           codeEvidenceCount: 0,
         },
@@ -619,6 +622,9 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
           ordinal: taskOrdinalInSection,
           crossRefCount: crossRefs.length,
           crossRefs: crossRefs.map((r) => `${r.type}:${r.value}`).join('|'),
+          descriptionText: text,
+          embeddingInput: `task: ${text}\nproject: ${ctx.projectId}\nfile: ${ctx.filePath}\nsection: ${currentSectionKey}`,
+          embeddingInputVersion: 1,
           // These get filled by enrichment:
           hasCodeEvidence: false,
           codeEvidenceCount: 0,
@@ -712,6 +718,34 @@ function extractCrossReferences(text: string): CrossReference[] {
 // CROSS-DOMAIN ENRICHMENT
 // ============================================================================
 
+const DEFAULT_PLAN_CODE_PROJECT_MAP: Record<string, string> = {
+  plan_codegraph: 'proj_c0d3e9a1f200',
+  plan_godspeed: 'proj_60d5feed0001',
+  plan_bible_graph: 'proj_0e32f3c187f4',
+  plan_plan_graph: 'proj_c0d3e9a1f200',
+  plan_runtime_graph: 'proj_c0d3e9a1f200',
+};
+
+async function loadPlanCodeProjectMap(): Promise<Record<string, string>> {
+  const mapPath = path.join(process.cwd(), 'config', 'plan-code-project-map.json');
+
+  try {
+    const raw = await fs.readFile(mapPath, 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, string>;
+
+    return {
+      ...DEFAULT_PLAN_CODE_PROJECT_MAP,
+      ...Object.fromEntries(
+        Object.entries(parsed ?? {}).filter(
+          ([k, v]) => typeof k === 'string' && k.trim().length > 0 && typeof v === 'string' && v.trim().length > 0,
+        ),
+      ),
+    };
+  } catch {
+    return { ...DEFAULT_PLAN_CODE_PROJECT_MAP };
+  }
+}
+
 /**
  * Resolve unresolved references against the code graph.
  * Creates HAS_CODE_EVIDENCE edges from Task nodes to SourceFile/Function nodes.
@@ -735,9 +769,31 @@ export async function enrichCrossDomain(
   let evidenceEdges = 0;
   const driftDetected: DriftItem[] = [];
 
+  const planToCodeProjectMap = await loadPlanCodeProjectMap();
+
   try {
     // Collect all unresolved refs
     const allRefs = parsedPlans.flatMap((p) => p.unresolvedRefs);
+
+    // Phase 0: establish explicit plan↔code project mapping edges
+    {
+      const session = driver.session();
+      try {
+        for (const [planProjectId, codeProjectId] of Object.entries(planToCodeProjectMap)) {
+          await session.run(
+            `MATCH (pp:PlanProject {projectId: $planProjectId}), (cp:Project {projectId: $codeProjectId})
+             MERGE (pp)-[r:TARGETS]->(cp)
+             SET r.projectId = $planProjectId,
+                 r.refType = 'project_mapping',
+                 r.refValue = $codeProjectId,
+                 r.resolvedAt = datetime()`,
+            { planProjectId, codeProjectId },
+          );
+        }
+      } finally {
+        await session.close();
+      }
+    }
 
     // Phase 1: Resolve refs and create evidence edges
     {
@@ -846,6 +902,8 @@ export async function enrichCrossDomain(
             }
           } else if (ref.refType === 'file_path') {
             const filename = path.basename(ref.refValue);
+            const sourcePlanProjectId = ref.taskId.split(':')[0];
+            const targetCodeProjectId = planToCodeProjectMap[sourcePlanProjectId] ?? null;
             const result = await session.run(
               `MATCH (sf)
                WHERE (
@@ -859,9 +917,10 @@ export async function enrichCrossDomain(
                  OR sf.semanticType = 'source-file'
                  OR sf.semanticType = 'module'
                )
+               AND ($targetCodeProjectId IS NULL OR sf.projectId = $targetCodeProjectId)
                RETURN sf.id AS id, sf.name AS name, sf.filePath AS filePath, sf.projectId AS projectId
                LIMIT 5`,
-              { filename, refValue: ref.refValue },
+              { filename, refValue: ref.refValue, targetCodeProjectId },
             );
 
             if (result.records.length > 0) {
@@ -894,6 +953,8 @@ export async function enrichCrossDomain(
             }
           } else if (ref.refType === 'function') {
             const funcName = ref.refValue.split('.').pop() || ref.refValue;
+            const sourcePlanProjectId = ref.taskId.split(':')[0];
+            const targetCodeProjectId = planToCodeProjectMap[sourcePlanProjectId] ?? null;
             const result = await session.run(
               `MATCH (fn)
                WHERE fn.name = $funcName
@@ -904,9 +965,10 @@ export async function enrichCrossDomain(
                    OR fn.coreType IN ['FunctionDeclaration', 'MethodDeclaration', 'VariableDeclaration']
                    OR fn.semanticType IN ['function', 'method', 'variable']
                  )
+                 AND ($targetCodeProjectId IS NULL OR fn.projectId = $targetCodeProjectId)
                RETURN fn.id AS id, fn.name AS name, fn.projectId AS projectId
                LIMIT 5`,
-              { funcName },
+              { funcName, targetCodeProjectId },
             );
 
             if (result.records.length > 0) {
