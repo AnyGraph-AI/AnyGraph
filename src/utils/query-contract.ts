@@ -113,7 +113,11 @@ RETURN
   m.gateFailures AS gateFailures,
   m.failuresResolvedBeforeCommit AS failuresResolvedBeforeCommit,
   m.regressionsAfterMerge AS regressionsAfterMerge,
+  m.preventedRuns AS preventedRuns,
+  m.preventedEdgesDiagnostic AS preventedEdgesDiagnostic,
+  m.totalRegressionEvents AS totalRegressionEvents,
   m.interceptionRate AS interceptionRate,
+  m.operationalInterceptionRate AS operationalInterceptionRate,
   m.invariantViolations AS invariantViolations,
   m.falseCompletionEvents AS falseCompletionEvents,
   m.meanRecoveryRuns AS meanRecoveryRuns
@@ -127,6 +131,9 @@ RETURN
   m.gateFailures AS gateFailures,
   m.failuresResolvedBeforeCommit AS failuresResolvedBeforeCommit,
   m.regressionsAfterMerge AS regressionsAfterMerge,
+  m.preventedRuns AS preventedRuns,
+  m.preventedEdgesDiagnostic AS preventedEdgesDiagnostic,
+  m.totalRegressionEvents AS totalRegressionEvents,
   m.invariantViolations AS invariantViolations,
   m.falseCompletionEvents AS falseCompletionEvents,
   m.meanRecoveryRuns AS meanRecoveryRuns

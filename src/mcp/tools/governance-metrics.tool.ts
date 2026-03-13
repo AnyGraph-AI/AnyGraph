@@ -53,7 +53,7 @@ export function createGovernanceMetricsStatusTool(server: McpServer) {
           lines.push('\n## Series');
           for (const row of sliced as Array<Record<string, unknown>>) {
             lines.push(
-              `- ${toStr(row.timestamp)} | interception=${toNum(row.interceptionRate).toFixed(4)} | gateFailures=${toNum(row.gateFailures)} | resolvedBeforeCommit=${toNum(row.failuresResolvedBeforeCommit)} | regressionsAfterMerge=${toNum(row.regressionsAfterMerge)} | meanRecoveryRuns=${toNum(row.meanRecoveryRuns).toFixed(2)}`,
+              `- ${toStr(row.timestamp)} | interception=${toNum(row.interceptionRate).toFixed(4)} | gateFailures=${toNum(row.gateFailures)} | resolvedBeforeCommit=${toNum(row.failuresResolvedBeforeCommit)} | preventedRuns=${toNum(row.preventedRuns)} | regressionsAfterMerge=${toNum(row.regressionsAfterMerge)} | meanRecoveryRuns=${toNum(row.meanRecoveryRuns).toFixed(2)}`,
             );
           }
 
@@ -79,8 +79,12 @@ export function createGovernanceMetricsStatusTool(server: McpServer) {
         lines.push(`- verificationRuns: ${toNum(row.verificationRuns)}`);
         lines.push(`- gateFailures: ${toNum(row.gateFailures)}`);
         lines.push(`- failuresResolvedBeforeCommit: ${toNum(row.failuresResolvedBeforeCommit)}`);
+        lines.push(`- preventedRuns: ${toNum(row.preventedRuns)}`);
+        lines.push(`- preventedEdgesDiagnostic: ${toNum(row.preventedEdgesDiagnostic)}`);
+        lines.push(`- totalRegressionEvents: ${toNum(row.totalRegressionEvents)}`);
         lines.push(`- regressionsAfterMerge: ${toNum(row.regressionsAfterMerge)}`);
         lines.push(`- interceptionRate: ${toNum(row.interceptionRate).toFixed(6)}`);
+        lines.push(`- operationalInterceptionRate: ${toNum(row.operationalInterceptionRate).toFixed(6)}`);
 
         lines.push('\n## Quality Signals');
         lines.push(`- invariantViolations: ${toNum(row.invariantViolations)}`);

@@ -119,7 +119,23 @@ async function main(): Promise<void> {
     )) as Array<Record<string, unknown>>;
     const falseCompletionEvents = toNum(falseCompletionRow[0]?.falseCompletionEvents ?? 0);
 
+    const operationalRows = (await neo4j.run(
+      `OPTIONAL MATCH (re:RegressionEvent {projectId: $projectId})
+       WITH collect(DISTINCT re) AS regressions
+       OPTIONAL MATCH (pr:VerificationRun {projectId: $projectId})-[pe:PREVENTED]->(:RegressionEvent {projectId: $projectId})
+       RETURN size(regressions) AS totalRegressionEvents,
+              count(DISTINCT pr) AS preventedRuns,
+              count(DISTINCT pe) AS preventedEdgesDiagnostic`,
+      { projectId },
+    )) as Array<Record<string, unknown>>;
+
+    const totalRegressionEvents = toNum(operationalRows[0]?.totalRegressionEvents ?? 0);
+    const preventedRuns = toNum(operationalRows[0]?.preventedRuns ?? 0);
+    const preventedEdgesDiagnostic = toNum(operationalRows[0]?.preventedEdgesDiagnostic ?? 0);
+
     const interceptionRate = gateFailures > 0 ? failuresResolvedBeforeCommit / gateFailures : 1;
+    const operationalInterceptionRate =
+      totalRegressionEvents > 0 ? preventedRuns / totalRegressionEvents : 1;
     const meanRecoveryRuns = recoveryCount > 0 ? recoveryRunDistanceTotal / recoveryCount : 0;
 
     const metricSeed = {
@@ -131,7 +147,11 @@ async function main(): Promise<void> {
       gateFailures,
       failuresResolvedBeforeCommit,
       regressionsAfterMerge,
+      preventedRuns,
+      preventedEdgesDiagnostic,
+      totalRegressionEvents,
       interceptionRate: round(interceptionRate, 6),
+      operationalInterceptionRate: round(operationalInterceptionRate, 6),
       invariantViolations,
       falseCompletionEvents,
       meanRecoveryRuns: round(meanRecoveryRuns, 4),
@@ -153,7 +173,11 @@ async function main(): Promise<void> {
            m.gateFailures = $gateFailures,
            m.failuresResolvedBeforeCommit = $failuresResolvedBeforeCommit,
            m.regressionsAfterMerge = $regressionsAfterMerge,
+           m.preventedRuns = $preventedRuns,
+           m.preventedEdgesDiagnostic = $preventedEdgesDiagnostic,
+           m.totalRegressionEvents = $totalRegressionEvents,
            m.interceptionRate = $interceptionRate,
+           m.operationalInterceptionRate = $operationalInterceptionRate,
            m.invariantViolations = $invariantViolations,
            m.falseCompletionEvents = $falseCompletionEvents,
            m.meanRecoveryRuns = $meanRecoveryRuns,
@@ -171,7 +195,11 @@ async function main(): Promise<void> {
         gateFailures,
         failuresResolvedBeforeCommit,
         regressionsAfterMerge,
+        preventedRuns,
+        preventedEdgesDiagnostic,
+        totalRegressionEvents,
         interceptionRate,
+        operationalInterceptionRate,
         invariantViolations,
         falseCompletionEvents,
         meanRecoveryRuns,
@@ -226,7 +254,11 @@ async function main(): Promise<void> {
       gateFailures,
       failuresResolvedBeforeCommit,
       regressionsAfterMerge,
+      preventedRuns,
+      preventedEdgesDiagnostic,
+      totalRegressionEvents,
       interceptionRate: round(interceptionRate, 6),
+      operationalInterceptionRate: round(operationalInterceptionRate, 6),
       invariantViolations,
       falseCompletionEvents,
       meanRecoveryRuns: round(meanRecoveryRuns, 4),

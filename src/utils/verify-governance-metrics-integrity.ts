@@ -21,17 +21,19 @@ async function main(): Promise<void> {
   try {
     const coverageRows = (await neo4j.run(
       `MATCH (g:GateDecision {projectId: $projectId})
-       OPTIONAL MATCH (g)-[:AFFECTS_COMMIT]->(:CommitSnapshot {projectId: $projectId})
-       WITH count(DISTINCT g) AS gateDecisions, count(*) AS affectsCommitEdges
+       OPTIONAL MATCH (g)-[ac:AFFECTS_COMMIT]->(:CommitSnapshot {projectId: $projectId})
+       WITH count(DISTINCT g) AS gateDecisions, count(DISTINCT ac) AS affectsCommitEdges
        MATCH (m:GovernanceMetricSnapshot {projectId: $projectId})
        WITH gateDecisions, affectsCommitEdges, count(m) AS metricSnapshots
-       MATCH (re:RegressionEvent {projectId: $projectId})
-       OPTIONAL MATCH (:VerificationRun {projectId: $projectId})-[:PREVENTED]->(re)
+       OPTIONAL MATCH (re:RegressionEvent {projectId: $projectId})
+       WITH gateDecisions, affectsCommitEdges, metricSnapshots, collect(DISTINCT re) AS regressions
+       OPTIONAL MATCH (pr:VerificationRun {projectId: $projectId})-[pe:PREVENTED]->(re2:RegressionEvent {projectId: $projectId})
        RETURN gateDecisions,
               affectsCommitEdges,
               metricSnapshots,
-              count(DISTINCT re) AS regressionEvents,
-              count(*) AS preventedEdges`,
+              size(regressions) AS regressionEvents,
+              count(DISTINCT pr) AS preventedRuns,
+              count(DISTINCT pe) AS preventedEdgesDiagnostic`,
       { projectId },
     )) as Array<Record<string, unknown>>;
 
@@ -51,7 +53,8 @@ async function main(): Promise<void> {
     const affectsCommitEdges = toNum(coverage.affectsCommitEdges);
     const metricSnapshots = toNum(coverage.metricSnapshots);
     const regressionEvents = toNum(coverage.regressionEvents);
-    const preventedEdges = toNum(coverage.preventedEdges);
+    const preventedRuns = toNum(coverage.preventedRuns);
+    const preventedEdgesDiagnostic = toNum(coverage.preventedEdgesDiagnostic);
 
     const latest = latestRows[0] ?? {};
     const previous = latestRows[1] ?? {};
@@ -63,7 +66,7 @@ async function main(): Promise<void> {
 
     const hasMetricHash = String(latest.metricHash ?? '').startsWith('sha256:');
     const attributionCoverage = gateDecisions > 0 ? affectsCommitEdges / gateDecisions : 1;
-    const preventionCoverage = regressionEvents > 0 ? preventedEdges / regressionEvents : 1;
+    const preventionCoverage = regressionEvents > 0 ? preventedRuns / regressionEvents : 1;
 
     const interceptionDrop = Math.max(0, previousInterception - latestInterception);
     const recoveryIncrease = Math.max(0, latestRecovery - previousRecovery);
@@ -87,7 +90,8 @@ async function main(): Promise<void> {
       gateDecisions,
       affectsCommitEdges,
       regressionEvents,
-      preventedEdges,
+      preventedRuns,
+      preventedEdgesDiagnostic,
       attributionCoverage,
       preventionCoverage,
       latestInterception,

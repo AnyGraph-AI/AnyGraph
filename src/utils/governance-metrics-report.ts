@@ -53,16 +53,19 @@ async function main(): Promise<void> {
     const row = rows[0] as Record<string, unknown> | undefined;
 
     const operationalRows = await neo4j.run(
-      `MATCH (re:RegressionEvent {projectId: $projectId})
-       RETURN count(re) AS total,
-              sum(CASE WHEN re.status = 'prevented_before_commit' THEN 1 ELSE 0 END) AS prevented`,
+      `OPTIONAL MATCH (re:RegressionEvent {projectId: $projectId})
+       WITH collect(DISTINCT re) AS regressions
+       OPTIONAL MATCH (pr:VerificationRun {projectId: $projectId})-[pe:PREVENTED]->(:RegressionEvent {projectId: $projectId})
+       RETURN size(regressions) AS total,
+              count(DISTINCT pr) AS preventedRuns,
+              count(DISTINCT pe) AS preventedEdgesDiagnostic`,
       { projectId },
     );
 
     const totalRegressionEvents = toNum((operationalRows[0] as any)?.total);
-    const preventedRegressionEvents = toNum((operationalRows[0] as any)?.prevented);
-    const operationalInterceptionRate =
-      totalRegressionEvents > 0 ? preventedRegressionEvents / totalRegressionEvents : 1;
+    const preventedRuns = toNum((operationalRows[0] as any)?.preventedRuns);
+    const preventedEdgesDiagnostic = toNum((operationalRows[0] as any)?.preventedEdgesDiagnostic);
+    const operationalInterceptionRate = totalRegressionEvents > 0 ? preventedRuns / totalRegressionEvents : 1;
 
     console.log(
       JSON.stringify(
@@ -80,7 +83,11 @@ async function main(): Promise<void> {
                 gateFailures: toNum(row.gateFailures),
                 failuresResolvedBeforeCommit: toNum(row.failuresResolvedBeforeCommit),
                 regressionsAfterMerge: toNum(row.regressionsAfterMerge),
+                preventedRuns: toNum(row.preventedRuns),
+                preventedEdgesDiagnostic: toNum(row.preventedEdgesDiagnostic),
+                totalRegressionEvents: toNum(row.totalRegressionEvents),
                 strictInterceptionRate: toNum(row.interceptionRate),
+                operationalInterceptionRate: toNum(row.operationalInterceptionRate),
                 invariantViolations: toNum(row.invariantViolations),
                 falseCompletionEvents: toNum(row.falseCompletionEvents),
                 meanRecoveryRuns: toNum(row.meanRecoveryRuns),
@@ -88,7 +95,8 @@ async function main(): Promise<void> {
             : null,
           operationalView: {
             totalRegressionEvents,
-            preventedRegressionEvents,
+            preventedRuns,
+            preventedEdgesDiagnostic,
             operationalInterceptionRate,
           },
         },
