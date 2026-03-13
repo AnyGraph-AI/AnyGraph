@@ -74,6 +74,7 @@
     "embedding:fp:verify": "node --loader ts-node/esm verify-embedding-fp-rate.ts",
     "integrity:snapshot:fields:verify": "node --loader ts-node/esm verify-integrity-snapshot-fields.ts",
     "integrity:daily:job": "node --loader ts-node/esm run-integrity-daily-job.ts",
+    "claims:cross:synthesize": "node --loader ts-node/esm synthesize-cross-domain-claims.ts",
     "query:contract:verify": "node --loader ts-node/esm verify-query-contract-usage.ts",
     "edges:normalize": "node --loader ts-node/esm normalize-edge-project-ids.ts",
     "edges:verify": "node --loader ts-node/esm verify-edge-tagging.ts",
