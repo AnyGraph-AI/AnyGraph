@@ -175,7 +175,9 @@ export async function ingestRuntimeGateEvidence(
        MERGE (r)-[e3:EMITS_GATE_DECISION]->(g)
        SET e3.projectId = $projectId, e3.updatedAt = toString(datetime())
        MERGE (g)-[e4:BASED_ON_RUN]->(r)
-       SET e4.projectId = $projectId, e4.updatedAt = toString(datetime())`,
+       SET e4.projectId = $projectId, e4.updatedAt = toString(datetime())
+       MERGE (g)-[e5:AFFECTS_COMMIT]->(c)
+       SET e5.projectId = $projectId, e5.updatedAt = toString(datetime())`,
       {
         projectId: input.projectId,
         runId,
@@ -184,7 +186,7 @@ export async function ingestRuntimeGateEvidence(
         gateDecisionId,
       },
     );
-    edgesCreated += 4;
+    edgesCreated += 5;
 
     if (input.artifact && artifactId) {
       await neo4j.run(

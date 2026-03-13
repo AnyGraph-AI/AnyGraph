@@ -88,7 +88,10 @@
     "done-check": "npm run build && npm run plan:refresh && npm run edges:normalize && npm run plan:evidence:recompute && npm run document:evidence:link-runtime && npm run verification:proof:record && npm run registry:reconcile && npm run registry:verify && npm run registry:identity:verify && npm run edges:verify && npm run parser:contracts:verify && npm run query:contract:verify && npm run plan:deps:verify && npm run governance:stale:verify && npm run document:witness:advisory && npm run integrity:snapshot && npm run integrity:snapshot:fields:verify && npm run integrity:verify",
     "document:witness:advisory": "node --loader ts-node/esm src/utils/verify-document-witness-advisory.ts",
     "document:namespace:audit": "node --loader ts-node/esm src/utils/document-namespace-audit.ts",
-    "document:evidence:link-runtime": "node --loader ts-node/esm src/utils/link-document-runtime-evidence.ts"
+    "document:evidence:link-runtime": "node --loader ts-node/esm src/utils/link-document-runtime-evidence.ts",
+    "governance:attribution:backfill": "node --loader ts-node/esm src/utils/governance-attribution-backfill.ts",
+    "governance:metrics:snapshot": "node --loader ts-node/esm src/utils/governance-metrics-snapshot.ts",
+    "governance:metrics:report": "node --loader ts-node/esm src/utils/governance-metrics-report.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.15.1",

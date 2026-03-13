@@ -102,3 +102,32 @@ RETURN
   c.status AS status,
   count(c) AS claimCount
 ORDER BY projectId, claimType, status`;
+
+export const CONTRACT_QUERY_Q18_GOVERNANCE_METRIC_LATEST = `MATCH (m:GovernanceMetricSnapshot {projectId: $projectId})
+RETURN
+  m.id AS id,
+  m.timestamp AS timestamp,
+  m.snapshotWindow AS snapshotWindow,
+  m.schemaVersion AS schemaVersion,
+  m.verificationRuns AS verificationRuns,
+  m.gateFailures AS gateFailures,
+  m.failuresResolvedBeforeCommit AS failuresResolvedBeforeCommit,
+  m.regressionsAfterMerge AS regressionsAfterMerge,
+  m.interceptionRate AS interceptionRate,
+  m.invariantViolations AS invariantViolations,
+  m.falseCompletionEvents AS falseCompletionEvents,
+  m.meanRecoveryRuns AS meanRecoveryRuns
+ORDER BY m.timestamp DESC
+LIMIT 1`;
+
+export const CONTRACT_QUERY_Q18_GOVERNANCE_METRIC_TREND = `MATCH (m:GovernanceMetricSnapshot {projectId: $projectId})
+RETURN
+  m.timestamp AS timestamp,
+  m.interceptionRate AS interceptionRate,
+  m.gateFailures AS gateFailures,
+  m.failuresResolvedBeforeCommit AS failuresResolvedBeforeCommit,
+  m.regressionsAfterMerge AS regressionsAfterMerge,
+  m.invariantViolations AS invariantViolations,
+  m.falseCompletionEvents AS falseCompletionEvents,
+  m.meanRecoveryRuns AS meanRecoveryRuns
+ORDER BY m.timestamp ASC`;
