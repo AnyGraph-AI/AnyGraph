@@ -551,6 +551,11 @@ Rules:
 - Do not mark plan checkboxes complete without integrity evidence artifact (command output + commit).
 - Temporary threshold overrides must be explicit and documented in commit message (no silent relaxations).
 
+Strict rollout commands:
+- `npm run done-check:strict:smoke` (strict dependency mode, advisory document/metrics enforcement)
+- `npm run done-check:strict:full` (strict dependency + fail-closed document/metrics enforcement)
+- Runbook: `docs/GOVERNANCE_STRICT_ROLLOUT.md`
+
 ### IR Parity Gate (Required for IR pipeline changes)
 When touching parser/IR/materializer paths, also run:
 

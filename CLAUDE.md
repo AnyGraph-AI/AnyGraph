@@ -314,6 +314,10 @@ npm run integrity:verify
 Scoped dependency enforcement:
 - `plan:deps:verify` reports scoped dependency hygiene metrics.
 - Use `STRICT_SCOPED_DEPENDS_ON=true` to fail-closed when scoped tasks are missing required task-level dependencies.
+- Strict governance rollouts:
+  - `npm run done-check:strict:smoke`
+  - `npm run done-check:strict:full`
+- Runbook: `docs/GOVERNANCE_STRICT_ROLLOUT.md`
 
 Threshold policy:
 - Default policy is strict (fail on violations over configured limits).

@@ -525,6 +525,10 @@ Post-ingestion verification chain (SARIF → scope → governance → runtime pr
 Dependency-order guard:
 - `plan:deps:verify` now reports scoped dependency hygiene metrics (`scopedTasksChecked`, `scopedMissingDepends`, `scopedExceptionCount`).
 - Set `STRICT_SCOPED_DEPENDS_ON=true` to fail-closed on missing task-level dependencies in scoped milestone families.
+- Strict rollout commands:
+  - `npm run done-check:strict:smoke`
+  - `npm run done-check:strict:full`
+- Rollout + rollback policy: `docs/GOVERNANCE_STRICT_ROLLOUT.md`
 
 Recommendation freshness rule: if any plan markdown was edited, re-ingest plans before running recommendation tools (`plan_priority`, `plan_next_tasks`). Freshness guard blocks stale recommendations unless `allowStale=true`.
 
