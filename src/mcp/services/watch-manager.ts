@@ -4,6 +4,10 @@
  * Uses @parcel/watcher for high-performance file watching
  */
 
+import { execFileSync } from 'child_process';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
+import { join } from 'path';
+
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import * as watcher from '@parcel/watcher';
 import type { AsyncSubscription } from '@parcel/watcher';
@@ -131,6 +135,89 @@ class WatchManager {
       });
   }
 
+  private runProjectCommand(command: string[], timeoutMs = 600000): { ok: boolean; command: string; error?: string } {
+    try {
+      execFileSync(command[0], command.slice(1), {
+        cwd: process.cwd(),
+        stdio: 'pipe',
+        encoding: 'utf8',
+        timeout: timeoutMs,
+      });
+
+      return { ok: true, command: command.join(' ') };
+    } catch (error) {
+      return {
+        ok: false,
+        command: command.join(' '),
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private getLinkedPlanProjectsForCodeProject(codeProjectId: string): string[] {
+    try {
+      const mapPath = join(process.cwd(), 'config', 'plan-code-project-map.json');
+      if (!existsSync(mapPath)) return [];
+      const mapping = JSON.parse(readFileSync(mapPath, 'utf8')) as Record<string, string>;
+      return Object.entries(mapping)
+        .filter(([, pid]) => pid === codeProjectId)
+        .map(([planProjectId]) => planProjectId);
+    } catch {
+      return [];
+    }
+  }
+
+  private appendRecheckEventLog(entry: Record<string, unknown>): void {
+    const dir = join(process.cwd(), 'artifacts');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'watcher-recheck-events.jsonl');
+    appendFileSync(path, `${JSON.stringify(entry)}\n`, 'utf8');
+  }
+
+  private async triggerLiveRecheckPipeline(
+    state: WatcherState,
+    events: WatchEvent[],
+    parseResult: { nodesUpdated: number; edgesUpdated: number },
+  ): Promise<void> {
+    const changedPaths = events.filter((e) => e.type !== 'unlink').map((e) => e.filePath.toLowerCase());
+    const hasCodeFileChange = changedPaths.some((p) => p.endsWith('.ts') || p.endsWith('.tsx'));
+    const hasPlanFileChange = changedPaths.some((p) => p.includes('/plans/') && p.endsWith('.md'));
+
+    const linkedPlanProjects = this.getLinkedPlanProjectsForCodeProject(state.projectId);
+    const commandResults: Array<{ ok: boolean; command: string; error?: string }> = [];
+
+    if (hasCodeFileChange && linkedPlanProjects.length > 0) {
+      commandResults.push(this.runProjectCommand(['npm', 'run', 'plan:evidence:recompute']));
+    }
+
+    if (hasPlanFileChange) {
+      commandResults.push(this.runProjectCommand(['npm', 'run', 'plan:refresh']));
+      commandResults.push(this.runProjectCommand(['npm', 'run', 'plan:evidence:recompute']));
+    }
+
+    const evidenceChanged =
+      parseResult.nodesUpdated > 0 ||
+      parseResult.edgesUpdated > 0 ||
+      commandResults.some((r) => r.ok && r.command.includes('plan:evidence:recompute'));
+
+    if (evidenceChanged) {
+      commandResults.push(this.runProjectCommand(['node', '--loader', 'ts-node/esm', 'src/core/claims/claim-engine.ts']));
+      commandResults.push(this.runProjectCommand(['npm', 'run', 'claims:cross:synthesize']));
+    }
+
+    this.appendRecheckEventLog({
+      timestamp: new Date().toISOString(),
+      projectId: state.projectId,
+      events: events.map((e) => ({ type: e.type, filePath: e.filePath })),
+      linkedPlanProjects,
+      parseResult,
+      hasCodeFileChange,
+      hasPlanFileChange,
+      evidenceChanged,
+      commandResults,
+    });
+  }
+
   /**
    * Start watching a project for file changes
    */
@@ -191,8 +278,10 @@ class WatchManager {
 
           for (const event of events) {
             try {
-              // Filter for TypeScript files
-              if (!event.path.endsWith('.ts') && !event.path.endsWith('.tsx')) {
+              // Filter for relevant files (TypeScript + plan markdown)
+              const isTypeScript = event.path.endsWith('.ts') || event.path.endsWith('.tsx');
+              const isPlanMarkdown = event.path.endsWith('.md') && event.path.includes('/plans/');
+              if (!isTypeScript && !isPlanMarkdown) {
                 continue;
               }
 
@@ -356,6 +445,9 @@ class WatchManager {
       if (result.nodesUpdated > 0 || result.edgesUpdated > 0) {
         await this.runPostIncrementalEnrichment(state.projectId);
       }
+
+      // Live re-check pipeline hooks (Milestone 6)
+      await this.triggerLiveRecheckPipeline(state, events, result);
 
       state.lastUpdateTime = new Date();
       const elapsedMs = Date.now() - startTime;
