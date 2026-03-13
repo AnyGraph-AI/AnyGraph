@@ -141,6 +141,49 @@ RETURN
   sum(CASE WHEN proofCount > 0 AND t.status <> 'done' THEN 1 ELSE 0 END) AS proofWithoutDone
 ```
 
+## Q11 — Verification Status Dashboard (graph-native, no line-range bucketing)
+
+```cypher
+MATCH (m:Milestone {projectId: 'plan_codegraph'})
+WHERE m.filePath ENDS WITH 'VERIFICATION_GRAPH_ROADMAP.md'
+  AND m.code IS NOT NULL
+  AND (m.code STARTS WITH 'VG-' OR m.code STARTS WITH 'CA-' OR m.code STARTS WITH 'RTG-')
+OPTIONAL MATCH (t:Task {projectId: 'plan_codegraph'})-[:PART_OF]->(m)
+WITH m.code AS bucket, t
+RETURN
+  bucket,
+  count(t) AS total,
+  sum(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS done,
+  sum(CASE WHEN t.status = 'planned' THEN 1 ELSE 0 END) AS planned,
+  sum(CASE WHEN t.status = 'blocked' THEN 1 ELSE 0 END) AS blocked,
+  sum(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) AS inProgress
+ORDER BY bucket
+```
+
+```cypher
+MATCH (t:Task {projectId: 'plan_codegraph'})
+OPTIONAL MATCH (t)-[:DEPENDS_ON]->(d:Task {projectId: 'plan_codegraph'})
+WITH t, count(DISTINCT CASE WHEN coalesce(d.status, 'planned') <> 'done' THEN d END) AS openDeps
+RETURN
+  sum(CASE WHEN coalesce(t.status, 'planned') = 'blocked' THEN 1 ELSE 0 END) AS explicitBlocked,
+  sum(CASE WHEN coalesce(t.status, 'planned') <> 'done' AND openDeps > 0 THEN 1 ELSE 0 END) AS effectiveBlocked,
+  sum(CASE WHEN t.status IS NULL THEN 1 ELSE 0 END) AS nullStatusCount
+```
+
+```cypher
+MATCH (t:Task {projectId: 'plan_runtime_graph'})
+WITH collect(t) AS tasks
+UNWIND tasks AS t
+OPTIONAL MATCH (t)-[r:HAS_CODE_EVIDENCE]->(e)
+WHERE coalesce(r.projectId, t.projectId) = t.projectId
+WITH tasks, t, count(e) AS evidenceHits
+WITH
+  tasks,
+  count(DISTINCT CASE WHEN evidenceHits > 0 THEN t END) AS withEvidence,
+  count(DISTINCT CASE WHEN t.status = 'done' AND evidenceHits = 0 THEN t END) AS doneWithoutEvidence
+RETURN size(tasks) AS totalTasks, withEvidence, doneWithoutEvidence
+```
+
 ---
 
 ## Enforcement
@@ -153,7 +196,8 @@ RETURN
 
 ## Versioning
 
-- Contract version: `v1.3`
+- Contract version: `v1.4`
+- Migration note (v1.4): Added Q11 graph-native verification status dashboard contract (milestone PART_OF bucketing, DISTINCT dependency blockers, explicit/effective blocked split, null-status debt metric, runtime evidence rollup).
 - Migration note (v1.3): Added Q10 done-vs-proven verification consistency contract for VG-6 acceptance (explicit invariant proof linkage checks).
 - Migration note (v1.2): Added Q9 dependency-integrity contract (raw directive fidelity + tokenization sanity) to support graph-native commit auditing and `plan:deps:verify` gating.
 - Migration note (v1.1): Q7 now reports invariant violations from the latest audit run per project (high-severity checks), matching `graph-integrity-snapshot.ts` and `verify-graph-integrity.ts` semantics.

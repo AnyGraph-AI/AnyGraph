@@ -109,7 +109,7 @@ const CHECKBOX_DONE = /^(\s*)- \[x\]\s+(.+)$/;
 const CHECKBOX_PLANNED = /^(\s*)- \[ \]\s+(.+)$/;
 
 // Header patterns
-const MILESTONE_HEADER = /^##\s+Milestone\s+(\d+)[\s:]*(.*)$/i;
+const MILESTONE_HEADER = /^###?\s+Milestone\s+([A-Za-z0-9][A-Za-z0-9_-]*)(?:\s*[:\-—]\s*(.*))?$/i;
 const SPRINT_HEADER = /^###?\s+Sprint\s+(\d+)[\s:]*(.*)$/i;
 const GENERIC_H2 = /^##\s+(.+)$/;
 
@@ -273,20 +273,23 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
     // --- Milestone headers ---
     const milestoneMatch = line.match(MILESTONE_HEADER);
     if (milestoneMatch) {
-      const num = milestoneMatch[1];
-      const title = milestoneMatch[2].trim().replace(/[✅🔜❌🟡🟢⬜]/g, '').trim();
+      const milestoneCode = milestoneMatch[1];
+      const rawTitle = milestoneMatch[2] ?? '';
+      const title = rawTitle.trim().replace(/[✅🔜❌🟡🟢⬜]/g, '').trim();
       const isDone = line.includes('✅');
       const isNext = line.includes('🔜');
+      const milestoneNumber = /^\d+$/.test(milestoneCode) ? parseInt(milestoneCode, 10) : null;
 
-      const sectionKey = `milestone-${num}`;
+      const sectionKey = `milestone-${milestoneCode.toLowerCase()}`;
       const nodeId = stableId(ctx.projectId, PlanNodeType.MILESTONE, ctx.filePath, sectionKey, 0);
       nodes.push({
         id: nodeId,
         labels: ['CodeNode', PlanNodeType.MILESTONE],
         properties: {
           projectId: ctx.projectId,
-          name: `Milestone ${num}: ${title}`,
-          number: parseInt(num),
+          name: title ? `Milestone ${milestoneCode}: ${title}` : `Milestone ${milestoneCode}`,
+          code: milestoneCode,
+          number: milestoneNumber,
           coreType: PlanNodeType.MILESTONE,
           status: isDone ? TaskStatus.DONE : isNext ? TaskStatus.IN_PROGRESS : TaskStatus.PLANNED,
           filePath: ctx.filePath,
