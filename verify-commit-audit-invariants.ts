@@ -602,7 +602,7 @@ async function checkReadinessSemanticsContract(): Promise<InvariantResult> {
   const contract = readFileSync(contractPath, 'utf8');
 
   const hasDependsOnRule =
-    contract.includes('readiness semantics are defined only by `DEPENDS_ON` edges');
+    contract.toLowerCase().includes('readiness semantics are defined only by `depends_on` edges');
 
   return {
     key: 'readiness_semantics_contract',
