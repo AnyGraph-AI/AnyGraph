@@ -37,11 +37,12 @@ import { createSwarmSenseTool } from './swarm-sense.tool.js';
 import { createTestNeo4jConnectionTool } from './test-neo4j-connection.tool.js';
 import { createTraverseFromNodeTool } from './traverse-from-node.tool.js';
 import { createPlanStatusTool, createPlanDriftTool, createPlanGapsTool, createPlanQueryTool, createPlanPriorityTool, createPlanNextTasksTool } from './plan-status.tool.js';
-import { createClaimStatusTool, createEvidenceForTool, createContradictionsTool, createHypothesesTool, createClaimGenerateTool } from './claim-tools.tool.js';
+import { createClaimStatusTool, createEvidenceForTool, createContradictionsTool, createHypothesesTool, createClaimGenerateTool, createClaimChainPathTool } from './claim-tools.tool.js';
 import { createSelfAuditTool } from './self-audit.tool.js';
 import { createParserContractStatusTool } from './parser-contract.tool.js';
 import { createCommitAuditStatusTool } from './commit-audit-status.tool.js';
 import { createRecommendationProofStatusTool } from './recommendation-proof-status.tool.js';
+import { createSessionContextSummaryTool } from './session-context-summary.tool.js';
 
 // Track tool calls for debugging
 let globalToolCallCount = 0;
@@ -145,6 +146,10 @@ export const registerAllTools = (server: McpServer): void => {
   createContradictionsTool(server);
   createHypothesesTool(server);
   createClaimGenerateTool(server);
+  createClaimChainPathTool(server);
+
+  // Register session context cold-start tool
+  createSessionContextSummaryTool(server);
 
   // Register self-audit tool
   createSelfAuditTool(server);

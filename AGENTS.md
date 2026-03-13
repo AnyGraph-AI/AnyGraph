@@ -482,6 +482,7 @@ When asked "what next?", run this loop in order:
 **Graph-order discipline rule:** if a proposed next step is not present as a Task node in the plan graph, add it to the appropriate plan markdown first, re-ingest plans, then execute. Do not perform off-graph follow-on work except emergency break/fix.
 
 1. **State snapshot**
+   - `session_context_summary` (cold-start from graph truth)
    - `plan_status`
    - `plan_priority`
    - `self_audit` summary

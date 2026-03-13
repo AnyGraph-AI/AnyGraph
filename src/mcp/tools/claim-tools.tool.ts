@@ -6,6 +6,7 @@
  * contradictions — Claims with high contradiction weight
  * hypotheses — Auto-generated investigation targets from evidence gaps
  * claim_generate — Trigger claim generation pipeline
+ * claim_chain_path — Visualize cross-domain claim chain paths (code → plan → document)
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -352,6 +353,73 @@ export function createHypothesesTool(server: McpServer) {
 // ============================================================================
 // claim_generate — Trigger claim pipeline
 // ============================================================================
+
+export function createClaimChainPathTool(server: McpServer) {
+  const neo4jService = new Neo4jService();
+
+  server.tool(
+    'claim_chain_path',
+    'Visualize cross-domain claim chains from code claims through plan claims to document/corpus/cross claims. ' +
+      'Use this to see traceable impact paths and chain bottlenecks.',
+    {
+      projectId: z.string().optional().describe('Project id filter (e.g., plan_codegraph)') ,
+      limit: z.number().optional().describe('Max paths to return (default 20)'),
+    },
+    async (args) => {
+      try {
+        const limit = neo4j.int(args.limit || 20);
+        const params: Record<string, any> = { limit };
+        let projectClause = '';
+
+        if (args.projectId) {
+          projectClause = 'AND coalesce(plan.projectId, code.projectId, doc.projectId) = $projectId';
+          params.projectId = args.projectId;
+        }
+
+        const rows = await neo4jService.run(
+          `MATCH (plan:Claim {domain: 'plan'})-[:DEPENDS_ON]->(code:Claim {domain: 'code'})
+           OPTIONAL MATCH (doc:Claim)-[:DEPENDS_ON]->(plan)
+           WHERE doc.domain IN ['document', 'corpus', 'cross']
+           WITH code, plan, doc
+           WHERE true ${projectClause}
+           RETURN
+             code.id AS codeId,
+             code.claimType AS codeType,
+             code.statement AS codeStatement,
+             plan.id AS planId,
+             plan.claimType AS planType,
+             plan.statement AS planStatement,
+             doc.id AS docId,
+             doc.claimType AS docType,
+             doc.statement AS docStatement,
+             coalesce(plan.projectId, code.projectId, doc.projectId) AS projectId
+           ORDER BY projectId, codeId, planId
+           LIMIT $limit`,
+          params,
+        );
+
+        const lines: string[] = ['# 🔗 Claim Chain Paths\n'];
+
+        if (rows.length === 0) {
+          lines.push('No code → plan → document claim chains found for current filters.');
+          return createSuccessResponse(lines.join('\n'));
+        }
+
+        for (const row of rows) {
+          lines.push(`## ${str(row.projectId)} | ${str(row.codeType)} → ${str(row.planType)}${row.docId ? ` → ${str(row.docType)}` : ''}`);
+          lines.push(`- 💻 code: ${str(row.codeStatement)}`);
+          lines.push(`- 📋 plan: ${str(row.planStatement)}`);
+          if (row.docId) lines.push(`- 📄 doc/corpus: ${str(row.docStatement)}`);
+          lines.push('');
+        }
+
+        return createSuccessResponse(lines.join('\n'));
+      } catch (err: any) {
+        return createErrorResponse(err.message || String(err));
+      }
+    },
+  );
+}
 
 export function createClaimGenerateTool(server: McpServer) {
   server.tool(
