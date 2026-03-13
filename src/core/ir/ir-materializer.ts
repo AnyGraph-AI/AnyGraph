@@ -35,7 +35,7 @@ export class IrMaterializer {
 
     let nodesCreated = 0;
     for (const batch of nodeBatches) {
-      const payload = batch.map((n) => this.mapNode(n));
+      const payload = batch.map((n) => this.mapNode(n, doc.sourceKind));
       // MERGE on {id, projectId} to avoid duplicates on re-run without clearProjectFirst.
       // Sets all properties on both CREATE and MATCH to ensure idempotent upserts.
       const result = await this.neo4jService.run(
@@ -74,8 +74,21 @@ export class IrMaterializer {
     };
   }
 
-  private mapNode(node: IrNode): { labels: string[]; properties: Record<string, unknown> } {
+  private mapNode(node: IrNode, sourceKind: IrDocument['sourceKind']): { labels: string[]; properties: Record<string, unknown> } {
     const labels = ['IRNode', node.type];
+
+    if (sourceKind === 'document') {
+      const canonicalKinds = new Set(['DocumentCollection', 'DocumentNode', 'Paragraph', 'ExtractedEntity', 'DocumentWitness']);
+      if (canonicalKinds.has(node.kind)) {
+        labels.push(node.kind);
+      }
+      if (node.type === 'Entity') {
+        labels.push('ExtractedEntity');
+      }
+    }
+
+    const extraProps = (node.properties ?? {}) as Record<string, unknown>;
+
     return {
       labels,
       properties: {
@@ -92,6 +105,11 @@ export class IrMaterializer {
         provenanceKind: node.provenanceKind,
         range: node.range ? JSON.stringify(node.range) : undefined,
         properties: Object.keys(node.properties ?? {}).length > 0 ? JSON.stringify(node.properties) : undefined,
+        contentHash: typeof extraProps.contentHash === 'string' ? extraProps.contentHash : undefined,
+        sourceType: typeof extraProps.sourceType === 'string' ? extraProps.sourceType : undefined,
+        witnessId: typeof extraProps.witnessId === 'string' ? extraProps.witnessId : undefined,
+        extractionTimestamp:
+          typeof extraProps.extractionTimestamp === 'string' ? extraProps.extractionTimestamp : undefined,
       },
     };
   }

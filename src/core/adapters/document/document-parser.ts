@@ -6,6 +6,7 @@ import type {
   DocumentAdapterSchema,
   DocumentCollection,
   DocumentNode,
+  DocumentWitness,
   ExtractedEntity,
   Paragraph,
 } from './document-schema.js';
@@ -70,6 +71,7 @@ export async function parseDocumentCollection(
   const documents: DocumentNode[] = [];
   const paragraphs: Paragraph[] = [];
   const entities: ExtractedEntity[] = [];
+  const witnesses: DocumentWitness[] = [];
 
   for (const filePath of files) {
     const extension = extname(filePath).toLowerCase();
@@ -109,6 +111,18 @@ export async function parseDocumentCollection(
       pageCount: pageCount || undefined,
       paragraphCount: paraTexts.length,
       createdAt: new Date().toISOString(),
+    });
+
+    const witnessId = createHash('sha256').update(paraTexts.map((p) => p.text).join('\n')).digest('hex');
+    witnesses.push({
+      id: deterministicId(options.projectId, 'DocumentWitness', witnessId, filePath),
+      projectId: options.projectId,
+      witnessId,
+      sourceType: extension === '.pdf' ? 'pdf' : 'text',
+      sourcePath: filePath,
+      contentHash,
+      extractionTimestamp: new Date().toISOString(),
+      documentId,
     });
 
     for (let idx = 0; idx < paraTexts.length; idx++) {
@@ -154,6 +168,7 @@ export async function parseDocumentCollection(
     documents,
     paragraphs,
     entities,
+    witnesses,
   };
 }
 
@@ -271,6 +286,39 @@ export function documentSchemaToIr(schema: DocumentAdapterSchema): IrDocument {
     }
   }
 
+  for (const witness of schema.witnesses) {
+    nodes.push({
+      id: witness.id,
+      type: 'Artifact',
+      kind: 'DocumentWitness',
+      name: `witness:${witness.witnessId.slice(0, 12)}`,
+      projectId: witness.projectId,
+      sourcePath: witness.sourcePath,
+      parserTier: 1,
+      confidence: 1,
+      provenanceKind: 'parser',
+      properties: {
+        witnessId: witness.witnessId,
+        sourceType: witness.sourceType,
+        sourcePath: witness.sourcePath,
+        contentHash: witness.contentHash,
+        extractionTimestamp: witness.extractionTimestamp,
+        documentId: witness.documentId,
+      },
+    });
+
+    edges.push({
+      type: 'REFERENCES',
+      from: witness.id,
+      to: witness.documentId,
+      projectId: witness.projectId,
+      parserTier: 1,
+      confidence: 1,
+      provenanceKind: 'parser',
+      properties: { relation: 'witness_materializes_document' },
+    });
+  }
+
   return {
     version: 'ir.v1',
     projectId: schema.collection.projectId,
@@ -283,6 +331,7 @@ export function documentSchemaToIr(schema: DocumentAdapterSchema): IrDocument {
       documentCount: schema.documents.length,
       paragraphCount: schema.paragraphs.length,
       entityCount: schema.entities.length,
+      witnessCount: schema.witnesses.length,
     },
   };
 }

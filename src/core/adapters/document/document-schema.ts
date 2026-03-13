@@ -1,4 +1,4 @@
-export type DocumentNodeKind = 'DocumentCollection' | 'DocumentNode' | 'Paragraph' | 'ExtractedEntity';
+export type DocumentNodeKind = 'DocumentCollection' | 'DocumentNode' | 'Paragraph' | 'ExtractedEntity' | 'DocumentWitness';
 
 export interface DocumentCollection {
   id: string;
@@ -46,9 +46,21 @@ export interface ExtractedEntity {
   extractor: 'regex' | 'dictionary' | 'llm';
 }
 
+export interface DocumentWitness {
+  id: string;
+  projectId: string;
+  witnessId: string;
+  sourceType: 'pdf' | 'text';
+  sourcePath: string;
+  contentHash: string;
+  extractionTimestamp: string;
+  documentId: string;
+}
+
 export interface DocumentAdapterSchema {
   collection: DocumentCollection;
   documents: DocumentNode[];
   paragraphs: Paragraph[];
   entities: ExtractedEntity[];
+  witnesses: DocumentWitness[];
 }
