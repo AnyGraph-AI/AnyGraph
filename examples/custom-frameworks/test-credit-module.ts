@@ -1,6 +1,6 @@
-import { TypeScriptParser } from '../../dist/core/parsers/typescript-parser.js';
-import { FAIRSQUARE_FRAMEWORK_SCHEMA } from '../../dist/core/config/fairsquare-framework-schema.js';
-import { CORE_TYPESCRIPT_SCHEMA } from '../../dist/core/config/schema.js';
+import { TypeScriptParser } from '../../src/core/parsers/typescript-parser.js';
+import { FAIRSQUARE_FRAMEWORK_SCHEMA } from '../../src/core/config/fairsquare-framework-schema.js';
+import { CORE_TYPESCRIPT_SCHEMA } from '../../src/core/config/schema.js';
 
 async function test() {
   // Update these paths to point to your FairSquare project module

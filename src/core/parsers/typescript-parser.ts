@@ -563,7 +563,17 @@ export class TypeScriptParser {
       // Use ts-morph's module resolution to get the actual file path
       // This correctly resolves relative imports like './auth.controller' to absolute paths
       try {
-        const targetSourceFile = importDecl.getModuleSpecifierSourceFile();
+        let targetSourceFile = importDecl.getModuleSpecifierSourceFile();
+
+        // ESM .js → .ts fallback: TypeScript ESM projects use .js extensions in imports
+        // but the actual source files are .ts. ts-morph can't always follow this.
+        if (!targetSourceFile && moduleSpecifier.endsWith('.js')) {
+          const tsSpecifier = moduleSpecifier.replace(/\.js$/, '.ts');
+          const resolvedDir = path.dirname(sourceFile.getFilePath());
+          const candidatePath = path.resolve(resolvedDir, tsSpecifier);
+          targetSourceFile = this.project.getSourceFile(candidatePath) ?? null;
+        }
+
         if (targetSourceFile) {
           this.deferredEdges.push({
             edgeType: CoreEdgeType.IMPORTS,
@@ -740,7 +750,16 @@ export class TypeScriptParser {
       );
 
       try {
-        const targetSourceFile = importDecl.getModuleSpecifierSourceFile();
+        let targetSourceFile = importDecl.getModuleSpecifierSourceFile();
+
+        // ESM .js → .ts fallback for namespace imports
+        if (!targetSourceFile && moduleSpecifier.endsWith('.js')) {
+          const tsSpecifier = moduleSpecifier.replace(/\.js$/, '.ts');
+          const resolvedDir = path.dirname(sourceFile.getFilePath());
+          const candidatePath = path.resolve(resolvedDir, tsSpecifier);
+          targetSourceFile = this.project.getSourceFile(candidatePath) ?? null;
+        }
+
         if (targetSourceFile) {
           this.deferredEdges.push({
             edgeType: CoreEdgeType.RESOLVES_TO,
