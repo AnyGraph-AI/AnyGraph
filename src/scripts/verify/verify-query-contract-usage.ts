@@ -9,8 +9,8 @@ interface CheckResult {
 
 const TARGET_FILES = [
   'src/utils/verification-status-dashboard.ts',
-  'verify-project-registry.ts',
-  'reconcile-project-registry.ts',
+  'src/scripts/verify/verify-project-registry.ts',
+  'src/scripts/tools/reconcile-project-registry.ts',
 ];
 
 const REQUIRED_IMPORT = 'query-contract.js';
