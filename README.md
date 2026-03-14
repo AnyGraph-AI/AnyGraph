@@ -1,14 +1,33 @@
-# CodeGraph
+# AnythingGraph
 
-A Neo4j code knowledge graph that gives AI coding agents structural awareness before they edit. Parses TypeScript codebases into nodes (every function, class, method, variable, import, type) and edges (calls, imports, containment, state access, temporal coupling, ownership, architecture layers). Pre-computes risk scores, blast radius, and change impact.
+A universal reasoning graph that cross-references code, plans, documents, and corpora in Neo4j. Parses structured knowledge into nodes and edges, generates claims, detects drift, and self-audits. AI agents query the graph before editing to see blast radius, risk, dependencies, and cross-domain consequences.
 
-**The thesis:** AI agents break things because they can't see the full dependency web. CodeGraph makes hidden connections queryable — the same way a document investigation graph makes hidden relationships in a corpus queryable.
+**The thesis:** Understanding lives in connections, not individual files. A function's risk depends on who calls it, what plan tasks reference it, what state it mutates, and how often it changes. AnythingGraph makes all of that queryable.
+
+Code parsing was the proof of concept. The architecture is the product.
+
+## Current State
+
+- **63,000+ nodes, 415,000+ edges** across 22 projects
+- **6 operational layers**: Code, Corpus, Documents (planned), Plans, Claims, Reasoning
+- **39 MCP tools** for agents to query, edit, and coordinate
+- **132+ hermetic tests** across 20 test suites
+- **v0.1.0** — TypeScript parser shipping, universal IR layer next
+
+### Projects in the Graph
+
+| Domain | Projects | What's In Them |
+|--------|----------|----------------|
+| **Code** | CodeGraph (self-graph), GodSpeed, Bible-graph | TypeScript AST → nodes/edges, risk scoring, blast radius |
+| **Corpus** | KJV Bible, Deuterocanon, Pseudepigrapha, Early Contested, Quran | Verse/Chapter/Book nodes, cross-references, entity resolution |
+| **Plans** | codegraph, godspeed, bible-graph, plan-graph, hygiene-governance, + 3 more | Task/Milestone/Sprint tracking, auto-completion detection |
+| **Claims** | 414 claims, 1,400+ evidence nodes, 52 hypotheses | Cross-layer synthesis, self-audit verdicts |
 
 ## Quick Start
 
 ### Prerequisites
 - Node.js 22+
-- Neo4j (installed natively on WSL, not Docker)
+- Neo4j 5.x (native install, not Docker)
 - `npm install` in this directory
 
 ### Start Neo4j
@@ -17,113 +36,30 @@ sudo neo4j start
 ```
 Auth: `neo4j` / `codegraph` — `bolt://localhost:7687`
 
-### Graph a TypeScript project
-
-**Step 1: Create a tsconfig.json** in the target project (if it doesn't have one):
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "esModuleInterop": true,
-    "strict": false,
-    "skipLibCheck": true,
-    "outDir": "dist"
-  },
-  "include": ["src/**/*.ts"]
-}
-```
-
-**Step 2: Edit `parse-and-ingest.ts`** — update the project path, ID, and tsconfig location. Or create a new script:
-```typescript
-import { TypeScriptParser } from './src/core/parsers/typescript-parser.js';
-import { CORE_TYPESCRIPT_SCHEMA } from './src/core/config/schema.js';
-
-const PROJECT_PATH = '/path/to/your/project/';
-const PROJECT_ID = 'proj_your_project_id';
-const TSCONFIG = 'tsconfig.json';
-
-const parser = new TypeScriptParser(PROJECT_PATH, TSCONFIG, CORE_TYPESCRIPT_SCHEMA, [], undefined, PROJECT_ID);
-await parser.parseWorkspace();
-const { nodes, edges } = parser.exportToJson();
-// ... ingest to Neo4j (see parse-and-ingest.ts for full pipeline)
-```
-
-**Step 3: Run the parser + ingest:**
+### Parse a TypeScript project
 ```bash
-cd codegraph && npx tsx src/scripts/entry/parse-and-ingest.ts
+# Parse and ingest to Neo4j
+npx tsx src/scripts/entry/parse-and-ingest.ts
+
+# Parse CodeGraph itself (self-graph)
+npx tsx src/scripts/entry/parse-and-ingest-self.ts
+
+# Run 17-step post-ingest enrichment
+bash post-ingest-all.sh
 ```
 
-**Step 4: Run post-ingest enrichment (17 steps):**
+### Query the graph
 ```bash
-cd codegraph && bash post-ingest-all.sh
-```
-This adds: risk scoring, state edges, git frequency, POSSIBLE_CALL, virtual dispatch, registration properties, project node, author ownership, architecture layers, riskLevel v2 promotion, provenance + confidence, unresolved reference nodes, audit subgraph, test coverage mapping, embeddings, evaluation (regression detection).
+# List all projects
+cypher-shell -u neo4j -p codegraph "MATCH (p:Project) RETURN p.name, p.projectId, p.nodeCount, p.edgeCount"
 
-**Step 5: Query the graph:**
-```bash
-cypher-shell -u neo4j -p codegraph "MATCH (p:Project) RETURN p.name, p.nodeCount, p.edgeCount"
+# Find riskiest functions
+cypher-shell -u neo4j -p codegraph "MATCH (f:CodeNode {projectId: 'proj_c0d3e9a1f200'}) WHERE f.riskTier IN ['CRITICAL', 'HIGH'] RETURN f.name, f.riskTier, f.kind ORDER BY f.riskLevel DESC LIMIT 10"
 ```
 
-### Graph CodeGraph itself (self-graph)
+### Start the MCP server
 ```bash
-cd codegraph && npx tsx src/scripts/entry/parse-and-ingest-self.ts
-```
-
-## What's In The Graph
-
-### Node Types (15)
-| Type | What It Represents |
-|------|-------------------|
-| `SourceFile` | A `.ts` file |
-| `Function` | Named function (top-level or inner) |
-| `Method` | Class method |
-| `Class` | Class declaration |
-| `Interface` | Interface declaration |
-| `TypeAlias` | `type X = ...` |
-| `Variable` | const/let/var (exported AND non-exported) |
-| `Property` | Class property |
-| `Parameter` | Function/method parameter |
-| `Import` | Import statement |
-| `Field` | Tracked state field (e.g., `ctx.session.pendingBuy`) |
-| `Entrypoint` | Framework registration (command, callback, event) |
-| `Author` | Git author (from `git blame`) |
-| `ArchitectureLayer` | Inferred layer (Presentation, Domain, Data, etc.) |
-| `Project` | Top-level project with stats |
-
-### Edge Types (13)
-| Edge | Meaning |
-|------|---------|
-| `CALLS` | Function invocation (with conditional, isAsync, crossFile, resolutionKind) |
-| `CONTAINS` | Parent → child |
-| `IMPORTS` | File-level import (with dynamic flag) |
-| `RESOLVES_TO` | Import symbol → canonical declaration |
-| `REGISTERED_BY` | Handler → entrypoint |
-| `READS_STATE` / `WRITES_STATE` | Function → state Field |
-| `POSSIBLE_CALL` | Dynamic dispatch (with confidence) |
-| `CO_CHANGES_WITH` | Temporal coupling from git (with coChangeCount, strength) |
-| `OWNED_BY` | SourceFile → Author |
-| `BELONGS_TO_LAYER` | SourceFile → ArchitectureLayer |
-| `HAS_PARAMETER` | Function → Parameter |
-| `HAS_MEMBER` | Class/Interface → Method/Property |
-
-### Key Properties
-- `riskLevel` / `riskTier` (LOW/MEDIUM/HIGH/CRITICAL) — pre-computed risk score
-- `riskLevel` — risk with temporal coupling + author entropy baked in
-- `fanInCount` / `fanOutCount` — caller/callee counts
-- `sourceCode` — full source text (read implementations without opening files)
-- `authorEntropy` — number of distinct git authors (fragmented ownership)
-- `architectureLayer` — inferred from directory structure
-- `gitChangeFrequency` — 0.0-1.0, how often the file changes
-
-## MCP Server
-
-33 tools available via MCP:
-
-```bash
-# Start the server
-node codegraph/dist/mcp/mcp.server.js
+node dist/mcp/mcp.server.js
 
 # Or configure for Claude Code (.mcp.json):
 {
@@ -136,147 +72,273 @@ node codegraph/dist/mcp/mcp.server.js
 }
 ```
 
-### Core Tools
+## Graph Schema
+
+### Node Label Model
+
+Code nodes use a **multi-label model**: every code declaration is a `CodeNode` with additional labels for language (`TypeScript`) and kind (`Function`, `Method`, `Class`, etc.). The `kind` property provides the discriminator.
+
+| Label Pattern | What It Represents |
+|--------------|-------------------|
+| `CodeNode:TypeScript:Function` | Named function |
+| `CodeNode:TypeScript:Method` | Class method |
+| `CodeNode:TypeScript:Class` | Class declaration |
+| `CodeNode:TypeScript:Interface` | Interface declaration |
+| `CodeNode:TypeScript:Variable` | const/let/var |
+| `CodeNode:TypeScript:TypeAlias` | `type X = ...` |
+| `CodeNode:TypeScript:Property` | Class property |
+| `CodeNode:TypeScript:Parameter` | Function parameter |
+| `CodeNode:TypeScript:Import` | Import statement |
+| `CodeNode:TypeScript:Enum` | Enum declaration |
+| `CodeNode:TypeScript:Constructor` | Class constructor |
+| `CodeNode:SourceFile:TypeScript` | A `.ts` file |
+| `CodeNode:Entrypoint` | Framework registration (command, callback, event) |
+| `CodeNode:Task` | Plan task node |
+| `CodeNode:Milestone` | Plan milestone node |
+| `CodeNode:Decision` | Plan decision node |
+| `CodeNode:VerificationRun` | Governance verification run |
+| `CodeNode:GateDecision` | Gate pass/fail decision |
+| `CodeNode:GovernanceMetricSnapshot` | Governance metrics snapshot |
+| `Project` | Top-level project with stats |
+| `IntegritySnapshot` | Graph integrity snapshot |
+| `MetricResult` | Single metric value |
+| `Claim` | Domain-agnostic assertion with evidence |
+| `Hypothesis` | Auto-generated investigation target |
+| `Evidence` | Supporting/contradicting evidence for claims |
+| `Verse` / `Chapter` / `Book` | Corpus text nodes |
+| `IRNode:Entity` / `IRNode:Site` / `IRNode:Artifact` | Intermediate representation nodes |
+
+### Edge Types (47)
+
+**Code structure:**
+`CALLS`, `CONTAINS`, `IMPORTS`, `RESOLVES_TO`, `HAS_PARAMETER`, `HAS_MEMBER`, `REGISTERED_BY`, `READS_STATE`, `WRITES_STATE`, `POSSIBLE_CALL`, `EXTENDS`, `IMPLEMENTS`, `ORIGINATES_IN`, `OWNED_BY`, `BELONGS_TO_LAYER`, `DECLARES`
+
+**Corpus:**
+`CROSS_REFERENCES`, `NEXT_VERSE`, `MENTIONS_PERSON`, `MENTIONS`, `CURATED_PARALLEL`, `REFERENCES`
+
+**Plans & governance:**
+`PART_OF`, `DEPENDS_ON`, `HAS_CODE_EVIDENCE`, `TARGETS`, `BLOCKS`, `NEXT_STAGE`, `READS_PLAN_FIELD`, `MUTATES_TASK_FIELD`, `EMITS_NODE_TYPE`, `EMITS_EDGE_TYPE`
+
+**Claims & reasoning:**
+`SUPPORTED_BY`, `CONTRADICTED_BY`, `WITNESSES`, `PROVES`, `ANCHORS`
+
+**Governance provenance:**
+`MEASURED`, `DERIVED_FROM_PROOF`, `DERIVED_FROM_RUN`, `DERIVED_FROM_COMMIT`, `DERIVED_FROM_GATE`, `AFFECTS_COMMIT`, `CAPTURED_COMMIT`, `CAPTURED_WORKTREE`, `EMITS_GATE_DECISION`, `BASED_ON_RUN`, `GENERATED_ARTIFACT`, `USED_BY`
+
+### Key Properties
+
+**On CodeNode (functions/methods):**
+- `riskLevel` (float), `riskTier` (LOW/MEDIUM/HIGH/CRITICAL)
+- `fanInCount`, `fanOutCount` — caller/callee counts
+- `lineCount`, `isExported`, `sourceCode` (full source text)
+- `kind` — Function, Method, Class, Variable, etc.
+- `registrationKind`, `registrationTrigger` — framework handlers
+
+**On SourceFile:**
+- `gitChangeFrequency` (0.0-1.0), `authorEntropy`, `primaryAuthor`, `architectureLayer`
+
+**On CALLS edges:**
+- `conditional`, `conditionalKind`, `isAsync`, `crossFile`, `resolutionKind`
+
+## MCP Tools (39)
+
+### Core Analysis
 | Tool | Purpose |
 |------|---------|
 | `pre_edit_check` | **Gate.** Call before editing any function. Returns verdict. |
-| `simulate_edit` | Preview graph delta of a change before applying it. |
-| `impact_analysis` | Deep blast radius with transitive dependents. |
-| `search_codebase` | Natural language search (vector embeddings). |
-| `natural_language_to_cypher` | Ask questions in English → Cypher. |
-| `traverse_from_node` | Walk the graph from a node. |
-| `detect_dead_code` | Find unused exports. |
-| `detect_hotspots` | Ranked functions by risk × change frequency. |
-| `state_impact` | State field access patterns, race condition detection. |
-| `registration_map` | Query framework entrypoints by trigger. |
-| `swarm_graph_refresh` | Re-parse changed files after edits. |
+| `simulate_edit` | Preview graph delta before applying changes |
+| `impact_analysis` | Deep blast radius with transitive dependents |
+| `search_codebase` | Semantic search via vector embeddings |
+| `natural_language_to_cypher` | NL → Cypher conversion |
+| `traverse_from_node` | Walk the graph from a node |
+| `detect_dead_code` | Find unused exports |
+| `detect_duplicate_code` | Find near-duplicates by normalized hash |
+| `detect_hotspots` | Ranked risk × change frequency |
+| `state_impact` | State field access patterns, race condition detection |
+| `registration_map` | Framework entrypoint queries |
 
-### Swarm Tools (multi-agent coordination)
+### Plan Tracking
 | Tool | Purpose |
 |------|---------|
-| `swarm_post_task` | Post task with dependencies, context, priority. |
-| `swarm_claim_task` | Claim a pending task. Returns unread messages. |
-| `swarm_complete_task` | Complete/fail/request_review/approve/reject. |
-| `swarm_get_tasks` | Query tasks by status/agent/swarm. |
-| `swarm_message` | Agent-to-agent messaging (blocked/conflict/alert/handoff). |
-| `swarm_pheromone` | Deposit coordination signals on nodes. |
-| `swarm_sense` | Read pheromones near a node. |
-| `swarm_graph_refresh` | Re-parse after edits so next agent has fresh data. |
+| `plan_status` | Completion rates per project |
+| `plan_drift` / `plan_gaps` / `plan_query` | Drift detection, gap analysis, free-form queries |
+| `plan_priority` / `plan_next_tasks` | Dynamic priority ranking |
 
-## Agent Workflows
+### Claims & Reasoning
+| Tool | Purpose |
+|------|---------|
+| `claim_status` / `evidence_for` / `contradictions` / `hypotheses` | Claim lifecycle |
+| `claim_generate` / `claim_chain_path` | Generation pipeline, cross-layer chain view |
 
-### For coding agents editing this codebase
-Read `AGENTS.md` — full schema, queries, pre-edit protocol.
+### Governance & Verification
+| Tool | Purpose |
+|------|---------|
+| `self_audit` | Generate questions, apply verdicts, detect drift |
+| `commit_audit_status` | Latest commit audit result |
+| `recommendation_proof_status` | Recommendation truth-health |
+| `governance_metrics_status` | Governance observability snapshot |
+| `parser_contract_status` | Parser regression checks |
 
-### For coding agents editing any CodeGraph-tracked project
-Read `SKILL.md` — universal agent skill with pre-edit gate, query cookbook, decision tables.
+### Session & Discovery
+| Tool | Purpose |
+|------|---------|
+| `list_projects` / `parse_typescript_project` / `check_parse_status` | Project management |
+| `start_watch_project` / `stop_watch_project` / `list_watchers` | File watching |
+| `session_context_summary` | Cold-start context |
+| `save_session_bookmark` / `restore_session_bookmark` | Session continuity |
+| `save_session_note` / `recall_session_notes` / `cleanup_session` | Session notes |
+| `test_neo4j_connection` / `hello` | Diagnostics |
 
-### For multi-agent refactoring swarms
-Read `swarm/COORDINATOR.md` (decomposition algorithm) + `swarm/WORKER.md` (worker protocol).
+### Swarm Coordination (multi-agent)
+`swarm_post_task`, `swarm_claim_task`, `swarm_complete_task`, `swarm_get_tasks`, `swarm_message`, `swarm_pheromone`, `swarm_sense`, `swarm_graph_refresh`, `swarm_cleanup`
 
-## Operations
+## npm Scripts (Categorized)
 
-| Command | What It Does |
-|---------|-------------|
-| `npx tsx src/scripts/entry/parse-and-ingest.ts` | Parse GodSpeed + ingest to Neo4j |
-| `npx tsx src/scripts/entry/parse-and-ingest-self.ts` | Parse CodeGraph itself (self-graph) |
-| `bash post-ingest-all.sh` | Run all 17 post-ingest enrichment passes |
-| `npx tsx edit-simulation.ts <file> <modified>` | Preview graph delta |
-| `npx tsx temporal-coupling.ts codegraph` | Mine git co-change patterns |
-| `npx tsx seed-author-ownership.ts codegraph` | Git blame → Author nodes |
-| `npx tsx seed-architecture-layers.ts codegraph` | Directory → layer classification |
-| `npx tsx seed-git-frequency.ts` | Git log → change frequency |
-| `npx tsx src/scripts/entry/watch.ts codegraph` | File watcher (incremental re-parse) |
-| `npx tsx compute-reparse-set.ts FILE.ts` | What files need reparsing if X changes |
-| `npx tsx verify-completeness.ts` | Verify 100% declaration coverage |
-| `npx vitest run tests/graph-integrity.test.ts` | Run 19 integrity tests |
-| `npx tsx embed-nodes.ts` | Generate OpenAI embeddings for all nodes |
+### Build & Dev
+`build`, `dev`, `lint`, `format`, `test`, `prepare`, `prepublishOnly`
 
-## Current Graphs
+### Governance (done-check pipeline)
+`done-check`, `done-check:strict:smoke`, `done-check:strict:full`, `commit:audit:verify`, `governance:metrics:snapshot`, `governance:metrics:report`, `governance:metrics:integrity:verify`, `governance:stale:verify`, `governance:attribution:backfill`, `governance:metric:def:sync`, `governance:metric:def:verify`
 
-| Project | ID | Nodes | Edges | Files |
-|---------|-----|-------|-------|-------|
-| GodSpeed (Telegram trading bot) | `proj_60d5feed0001` | 2,095 | 4,458 | 36 |
-| CodeGraph (self-graph) | `proj_c0d3e9a1f200` | 2,107 | 3,468 | 95 |
+### Integrity & Verification
+`integrity:snapshot`, `integrity:verify`, `integrity:snapshot:fields:verify`, `integrity:daily:job`, `verification:sarif:import`, `verification:scope:resolve`, `verification:exception:enforce`, `verification:advisory:gate`, `verification:done-check:capture`, `verification:done-check:capture:only`, `verification:proof:record`, `verification:proof:status`, `verification:status:dashboard`, `verification:recommendation:mismatch`, `verification:pilot:ir:validate`, `verification:pilot:vg5:thresholds`, `verification:ingest`
 
-Both coexist in the same Neo4j instance, separated by `projectId`.
+### Registry & Edges
+`registry:reconcile`, `registry:verify`, `registry:backfill`, `registry:duplicates:report`, `registry:identity:verify`, `edges:normalize`, `edges:verify`
 
-## Extending to Non-Code Corpora
+### Plans & Evidence
+`plan:deps:verify`, `plan:refresh`, `plan:evidence:recompute`, `plan:embedding:match`, `evidence:backfill`, `evidence:coverage`
 
-The graph schema is general. The same architecture can graph any structured corpus:
+### Claims & Embeddings
+`claims:cross:synthesize`, `code:embedding-inputs:enrich`, `embedding:fp:verify`
 
-| Code Concept | Corpus Equivalent |
-|-------------|-------------------|
-| Function | Document / Entity |
-| CALLS | REFERENCES / MENTIONS |
-| IMPORTS | CITES / LINKS_TO |
-| CONTAINS | SECTION_OF / PART_OF |
-| Field | Metadata field / Tag |
-| READS_STATE / WRITES_STATE | USES_CONCEPT / DEFINES_CONCEPT |
-| CO_CHANGES_WITH | CO_OCCURS_WITH |
-| OWNED_BY | AUTHORED_BY |
-| ArchitectureLayer | Category / Topic |
-| riskLevel | Importance / Centrality score |
+### Document Adapter
+`doc:ingest`, `document:claims:grade`, `document:claims:verify`, `document:evidence:link-runtime`, `document:namespace:audit`, `document:namespace:reconcile`, `document:namespace:verify`, `document:witness:advisory`, `document:wording:verify`
 
-To graph a corpus:
-1. Write a parser that emits nodes and edges in the same JSON format as the TypeScript parser
-2. Use `ingest-to-neo4j.ts` to load into Neo4j (it's schema-agnostic — it just reads nodes/edges arrays)
-3. Write post-ingest enrichment passes for your domain (risk scoring, co-occurrence, authorship)
-4. The MCP tools (`search_codebase`, `traverse_from_node`, `impact_analysis`) work on any graph shape
+### Hygiene Governance
+`hygiene:foundation:sync`, `hygiene:foundation:verify`, `hygiene:topology:sync`, `hygiene:topology:verify`, `hygiene:ownership:sync`, `hygiene:ownership:verify`, `hygiene:exception:sync`, `hygiene:exception:verify`, `hygiene:platform:verify`, `hygiene:proof:scope:sync`, `hygiene:proof:verify`, `hygiene:deps:sync`
 
-The GOYFILES investigation graph (Epstein document corpus) is the proof that this pattern works at scale: 200K+ nodes, millions of edges, same Neo4j + agent + query pattern.
+### IR & Parser
+`ir:parity`, `ir:parity:resume`, `parser:contracts:verify`, `parser:gold:harness`, `python:parse:ir`, `query:contract:verify`
+
+### Corpus
+`corpus:bible:hash-ingest`
+
+### Audit
+`audit:anchor:resolve`
+
+### MCP Server
+`mcp`
+
+## Test Infrastructure
+
+### TDD Harness (132+ tests, 20 suites)
+
+The test harness provides hermetic, deterministic testing for all governance surfaces:
+
+| Module | What It Does |
+|--------|-------------|
+| `frozen-clock.ts` | Deterministic `Date.now()` via monkey-patch |
+| `frozen-locale.ts` | Deterministic locale/timezone |
+| `seeded-rng.ts` | Seeded xorshift128+ PRNG |
+| `network-guard.ts` | Blocks `Socket.prototype.connect` — no network in tests |
+| `ephemeral-graph.ts` | projectId-isolated Neo4j runtime (`__test_<uuid>`) |
+| `replay.ts` | Full hermetic env setup/teardown + replay from decision packets |
+| `snapshot-digest.ts` | SHA-256 determinism assertions |
+| `structural-constraints.ts` | Graph structural integrity checks |
+| `migration-contracts.ts` | Migration contract verification |
+| `structural-drift.ts` | Structural drift guards |
+| `policy-bundle.ts` | Policy assembly, digest pinning, gate mode resolution |
+| `gate-evaluator.ts` | Deterministic gate evaluation from immutable inputs |
+| `pbt-runner.ts` | Property-based testing with stateful action sequences |
+| `metamorphic.ts` | Query equivalence + semantics-preserving mutation checks |
+| `mutation-library.ts` | Preserving/breaking mutations for metamorphic testing |
+| `flake-governance.ts` | Auto-quarantine, reintegration, budget tracking |
+| `ai-tevv.ts` | AI eval case runner with per-hazard thresholds + lineage-gated promotion |
+| `provenance-hardening.ts` | SLSA-shaped provenance envelopes with fail-closed policy |
+| `confidence-analytics.ts` | Regression budgets, completeness trends, override entropy, policy effectiveness |
+
+### Fixture Tiers
+- `fixtures/micro/` — 8 small deterministic fixtures (code-graph + plan-graph)
+- `fixtures/scenario/` — 2 multi-step scenario fixtures
+- `fixtures/sampled/` — Sampled production data (skeleton)
+- `fixtures/stress/` — Large-scale stress fixtures (skeleton)
+
+## Six Operational Layers
+
+| Layer | Status | Nodes | What It Does |
+|-------|--------|-------|-------------|
+| **Code** | ✅ 3 projects | ~8,500 | TypeScript parsing, CALLS/RESOLVES_TO, risk scoring, blast radius |
+| **Corpus** | ✅ 5 projects | ~45,000 | Bible + Quran + Deuterocanon + Pseudepigrapha + Early Contested |
+| **Documents** | 🔲 Adapter built | — | Generic PDF/text ingestion (pipeline exists, not yet populated) |
+| **Plans** | ✅ 8 projects | ~5,000 | Task/Milestone tracking, drift detection, cross-domain evidence |
+| **Claims** | ✅ | ~2,900 | 414 claims, 1,400+ evidence nodes, cross-layer synthesis |
+| **Reasoning** | ✅ | ~500 | 52 hypotheses from evidence gaps, self-audit |
 
 ## Architecture
 
 ```
 codegraph/
 ├── src/
+│   ├── cli/                  # CLI (init, parse, enrich, serve, risk, analyze, status)
 │   ├── core/
-│   │   ├── parsers/          # ts-morph TypeScript parser (the engine)
-│   │   ├── config/           # Schema definitions + framework schemas
+│   │   ├── parsers/          # TypeScript (ts-morph), Plan, Python (scaffold)
+│   │   ├── config/           # Schemas, invariants, change-class matrix, eval lineage
+│   │   ├── claims/           # Claim engine (3 domain + 5 cross-layer synthesizers)
 │   │   ├── embeddings/       # OpenAI embeddings + NL→Cypher
-│   │   ├── utils/            # File change detection, graph factory
-│   │   └── workspace/        # Project detection
+│   │   ├── ir/               # Intermediate representation (v1 schema, materializer, validator)
+│   │   ├── adapters/document/ # Document parser, entity extractor, PDF extractor
+│   │   ├── verification/     # Advisory gate, exception enforcement
+│   │   ├── test-harness/     # 15 hermetic test modules + fixtures
+│   │   └── utils/            # File detection, graph factory, path utils
 │   ├── mcp/
-│   │   ├── tools/            # MCP tools (live inventory evolves)
+│   │   ├── tools/            # 39 MCP tools
 │   │   ├── handlers/         # Graph generation, traversal, incremental parse
-│   │   ├── services/         # Watch manager, job manager
-│   │   └── mcp.server.ts     # MCP server entry point
-│   └── storage/
-│       └── neo4j/            # Neo4j service + queries
-├── swarm/
-│   ├── COORDINATOR.md        # Multi-agent coordinator protocol
-│   └── WORKER.md             # Worker protocol
+│   │   └── services/         # Watch manager, job manager
+│   ├── scripts/
+│   │   ├── entry/            # Parse, ingest, watch entry points
+│   │   ├── tools/            # Edit simulation, reconciliation, embedding
+│   │   └── verify/           # 16 verification scripts
+│   ├── storage/neo4j/        # Neo4j driver + queries
+│   └── utils/                # 40+ utility scripts (governance, hygiene, evidence, verification)
+├── swarm/                    # Multi-agent coordinator + worker protocols
+├── plans/                    # Plan files (codegraph, godspeed, bible-graph, etc.)
+├── fixtures/                 # Test fixtures (micro, scenario, sampled, stress)
+├── artifacts/                # Generated governance artifacts (snapshots, metrics)
+├── docs/                     # Governance rollout, Python scaffolding, audit standards
 ├── AGENTS.md                 # Agent instructions for editing CodeGraph
 ├── SKILL.md                  # Universal agent skill for any project
-├── CHANGELOG.md              # Version history
-├── parse-and-ingest.ts       # GodSpeed parser + ingest script
-├── parse-and-ingest-self.ts  # Self-graph script
-├── post-ingest-all.sh        # 17-step enrichment pipeline
-├── edit-simulation.ts        # Delta graph preview
-├── temporal-coupling.ts      # Git co-change mining
-├── seed-author-ownership.ts  # Git blame → Author nodes
-├── seed-architecture-layers.ts # Directory → layer classification
-├── verify-completeness.ts    # Declaration coverage verification
-└── .codegraph.yml            # Project-specific config (framework, state roots, risk)
+├── CLAUDE.md                 # Claude Code / ACP agent instructions
+└── .codegraph.yml            # Project config (framework, state roots, risk)
 ```
+
+## Agent Workflows
+
+- **Editing this codebase**: Read `AGENTS.md`
+- **Editing any CodeGraph-tracked project**: Read `SKILL.md`
+- **Using Claude Code / ACP**: Read `CLAUDE.md`
+- **Multi-agent refactoring**: Read `swarm/COORDINATOR.md` + `swarm/WORKER.md`
 
 ## Tech Stack
 
-- **Parser**: ts-morph (semantic TypeScript parsing — resolves types, not just syntax)
-- **Graph**: Neo4j + APOC (same as GOYFILES investigation graph)
-- **MCP**: @modelcontextprotocol/sdk (tool inventory evolves; verify live registry/status)
-- **Embeddings**: OpenAI text-embedding-3-large (optional, for semantic search)
-- **NL→Cypher**: OpenAI gpt-4o (optional, for natural language queries)
-- **Tests**: Vitest (19 integrity tests)
+- **Parser**: ts-morph (semantic TypeScript — resolves types, not just syntax)
+- **Graph**: Neo4j 5.x (same architecture as GOYFILES investigation graph)
+- **MCP**: @modelcontextprotocol/sdk
+- **Embeddings**: OpenAI text-embedding-3-large (optional)
+- **NL→Cypher**: OpenAI gpt-4o (optional)
+- **Tests**: Custom hermetic harness (132+ tests) + Vitest
 - **File watching**: @parcel/watcher (native inotify)
+- **CLI**: commander
 
-## Key Design Decisions
+## What's Next
 
-- **ts-morph over tree-sitter**: Semantic type resolution catches what syntax-only parsing misses
-- **Forked from drewdrewH/code-graph-context v2.9.0**: Gave us ~60% of Phase 1 for free
-- **Pre-computed risk scores**: Agents check one property, not run a scoring query every time
-- **Edit simulation before writing**: Shows exactly what breaks, not just what might
-- **Graph informs, not gatekeeps**: SKILL.md sets expectations, no compliance theater
-- **100% declaration coverage**: Every const, let, var, function, class in source = a node
-- **Separate projectId**: Multiple codebases coexist in one Neo4j instance
+1. **IR layer**: Parser → IR → Enrichment → Graph (language-agnostic intermediate representation)
+2. **Python parser**: CPython ast + Pyright sidecar (scaffold exists)
+3. **GitHub push + npm publish**: Package distribution
+4. **Document adapter population**: Generic PDF/text ingestion at scale
+
+Full roadmap: `plans/codegraph/MULTI_LANGUAGE_ASSESSMENT.md`
+
+## License
+
+v0.1.0 — Forked from drewdrewH/code-graph-context v2.9.0

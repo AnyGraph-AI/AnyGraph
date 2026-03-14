@@ -1,8 +1,10 @@
-# CodeGraph — Agent Skill
+# AnythingGraph — Agent Skill
 
 ## What This Is
 
-A Neo4j code knowledge graph containing **every declaration** in the codebase — functions, classes, methods, variables, imports, types — as nodes. Every call, import, containment, state access, ownership, and co-change pattern is an edge. Risk scores, fan-in/fan-out, architecture layers, and author ownership are pre-computed.
+A universal reasoning graph (63,000+ nodes, 415,000+ edges, 22 projects) that cross-references code, plans, documents, and corpora in Neo4j. Every declaration — functions, classes, methods, variables, imports, types — is a node. Every call, import, containment, state access, ownership, and co-change pattern is an edge. Risk scores, fan-in/fan-out, architecture layers, and author ownership are pre-computed.
+
+Code nodes use **multi-label**: `CodeNode:TypeScript:Function`, `CodeNode:TypeScript:Method`, etc. The `kind` property discriminates. Plan nodes are `CodeNode:Task`, `CodeNode:Milestone`, `CodeNode:Decision`.
 
 **You query the graph before you edit. That's not a suggestion.**
 
@@ -32,8 +34,8 @@ MATCH (n {projectId: 'PID'}) RETURN labels(n)[0] AS type, count(n) AS cnt ORDER 
 
 **Step 3:** Find the riskiest functions (these are the landmines).
 ```cypher
-MATCH (f {projectId: 'PID'})
-WHERE (f:Function OR f:Method) AND f.riskTier IN ['CRITICAL', 'HIGH']
+MATCH (f:CodeNode {projectId: 'PID'})
+WHERE f.kind IN ['Function', 'Method'] AND f.riskTier IN ['CRITICAL', 'HIGH']
 RETURN f.name, f.riskTier, round(f.riskLevel) AS risk, f.fanInCount, f.filePath
 ORDER BY f.riskLevel DESC LIMIT 20
 ```
@@ -55,8 +57,8 @@ After these 4 queries you know: what projects exist, what node types they contai
 
 1. **Call `pre_edit_check`** (MCP) or run:
 ```cypher
-MATCH (f {projectId: 'PID'})
-WHERE (f:Function OR f:Method) AND f.name = 'FUNCTION_NAME'
+MATCH (f:CodeNode {projectId: 'PID'})
+WHERE f.kind IN ['Function', 'Method'] AND f.name = 'FUNCTION_NAME'
 OPTIONAL MATCH (caller)-[:CALLS]->(f)
 RETURN f.riskTier, round(f.riskLevel) AS risk, f.fanInCount, f.fanOutCount,
        f.lineCount, f.isExported, f.filePath,
@@ -79,7 +81,7 @@ RETURN f.riskTier, round(f.riskLevel) AS risk, f.fanInCount, f.fanOutCount,
 
 ## MCP Tools
 
-Current MCP surface (grouped):
+39 MCP tools (grouped):
 
 ### Core graph + safety
 - `pre_edit_check` — **always** before editing a function
@@ -165,49 +167,64 @@ MCP config (`.mcp.json`):
 
 ## Graph Schema
 
-### Node Types
-| Type | What It Represents |
-|------|-------------------|
-| `SourceFile` | A `.ts` file |
-| `Function` | Named function (top-level or inner) |
-| `Method` | Class method |
-| `Class` | Class declaration |
-| `Interface` | Interface declaration |
-| `TypeAlias` | `type X = ...` |
-| `Variable` | const/let/var (exported AND non-exported module-scope state) |
-| `Property` | Class property |
-| `Parameter` | Function/method parameter |
-| `Import` | Import statement |
-| `Field` | Tracked state field (e.g., `ctx.session.pendingBuy`) |
-| `Entrypoint` | Framework registration point (command, callback, event) |
-| `Author` | Git author (from `git blame`) |
-| `ArchitectureLayer` | Inferred layer (Presentation, Domain, Data, etc.) |
-| `Project` | Top-level project node with counts and status |
-| `UnresolvedReference` | Import/call the parser couldn't resolve |
-| `AuditCheck` | Structural invariant check result |
-| `InvariantViolation` | Specific invariant failure |
-| `EvaluationRun` | Metrics snapshot for regression tracking |
-| `MetricResult` | Single metric value from an evaluation run |
+### Node Label Model
+
+Code nodes use **multi-label**: `CodeNode:TypeScript:Function`, `CodeNode:TypeScript:Method`, etc. The `kind` property on `CodeNode` provides the discriminator. Query with `f:CodeNode` and filter on `f.kind`.
+
+| Label Pattern | What It Represents |
+|--------------|-------------------|
+| `CodeNode:TypeScript:Function` | Named function |
+| `CodeNode:TypeScript:Method` | Class method |
+| `CodeNode:TypeScript:Class` | Class declaration |
+| `CodeNode:TypeScript:Interface` | Interface declaration |
+| `CodeNode:TypeScript:Variable` | const/let/var |
+| `CodeNode:TypeScript:TypeAlias` | `type X = ...` |
+| `CodeNode:TypeScript:Property` | Class property |
+| `CodeNode:TypeScript:Parameter` | Function parameter |
+| `CodeNode:TypeScript:Import` | Import statement |
+| `CodeNode:TypeScript:Enum` | Enum declaration |
+| `CodeNode:TypeScript:Constructor` | Class constructor |
+| `CodeNode:SourceFile:TypeScript` | A `.ts` file |
+| `CodeNode:Entrypoint` | Framework registration (command, callback, event) |
+| `CodeNode:Task` | Plan task |
+| `CodeNode:Milestone` | Plan milestone |
+| `CodeNode:Decision` | Plan decision |
+| `CodeNode:VerificationRun` | Governance verification run |
+| `CodeNode:GateDecision` | Gate pass/fail decision |
+| `CodeNode:GovernanceMetricSnapshot` | Governance metrics |
+| `Project` | Top-level project with stats |
+| `IntegritySnapshot` | Graph integrity snapshot |
+| `MetricResult` | Single metric value |
+| `Claim` / `Evidence` / `Hypothesis` | Claims layer |
+| `Verse` / `Chapter` / `Book` | Corpus text nodes |
+| `IRNode` | Intermediate representation nodes |
 
 ### Edge Types
+
+**Code structure:**
 | Edge | Meaning | Key Properties |
 |------|---------|---------------|
 | `CALLS` | Function invocation | `conditional`, `conditionalKind`, `isAsync`, `crossFile`, `resolutionKind` |
-| `CONTAINS` | Parent → child (file→fn, fn→inner fn, class→method) | — |
-| `IMPORTS` | File-level import | `dynamic` (true for `await import()`) |
-| `RESOLVES_TO` | Import symbol → canonical declaration across files | — |
-| `REGISTERED_BY` | Handler → entrypoint registration | — |
-| `READS_STATE` | Function → Field it reads | — |
-| `WRITES_STATE` | Function → Field it writes | — |
-| `POSSIBLE_CALL` | Dynamic dispatch target | `confidence`, `reason` |
-| `CO_CHANGES_WITH` | File ↔ File temporal coupling from git | `coChangeCount`, `strength` |
-| `OWNED_BY` | SourceFile → Author (primary git blame owner) | — |
+| `CONTAINS` | Parent → child | — |
+| `IMPORTS` | File-level import | `dynamic` |
+| `RESOLVES_TO` | Import symbol → canonical declaration | — |
+| `REGISTERED_BY` | Handler → entrypoint | — |
+| `READS_STATE` / `WRITES_STATE` | Function → state Field | — |
+| `POSSIBLE_CALL` | Dynamic dispatch | `confidence`, `reason` |
+| `OWNED_BY` | SourceFile → Author | — |
 | `BELONGS_TO_LAYER` | SourceFile → ArchitectureLayer | — |
-| `HAS_PARAMETER` | Function → Parameter | — |
-| `HAS_MEMBER` | Class/Interface → Method/Property | — |
-| `ORIGINATES_IN` | UnresolvedReference → Function/File | — |
-| `FOUND` | AuditCheck → InvariantViolation | — |
-| `MEASURED` | EvaluationRun → MetricResult | — |
+| `HAS_PARAMETER` / `HAS_MEMBER` | Structural containment | — |
+| `EXTENDS` / `IMPLEMENTS` | Class inheritance | — |
+| `ORIGINATES_IN` | Unresolved reference → source | — |
+
+**Plans & governance:**
+`PART_OF`, `DEPENDS_ON`, `HAS_CODE_EVIDENCE`, `TARGETS`, `NEXT_STAGE`, `READS_PLAN_FIELD`, `MUTATES_TASK_FIELD`, `EMITS_NODE_TYPE`, `EMITS_EDGE_TYPE`
+
+**Claims & corpus:**
+`SUPPORTED_BY`, `CONTRADICTED_BY`, `WITNESSES`, `PROVES`, `ANCHORS`, `CROSS_REFERENCES`, `MENTIONS_PERSON`, `MENTIONS`
+
+**Governance provenance:**
+`MEASURED`, `DERIVED_FROM_PROOF`, `DERIVED_FROM_RUN`, `DERIVED_FROM_COMMIT`, `DERIVED_FROM_GATE`, `AFFECTS_COMMIT`, `CAPTURED_COMMIT`, `CAPTURED_WORKTREE`, `EMITS_GATE_DECISION`, `BASED_ON_RUN`, `GENERATED_ARTIFACT`, `USED_BY`
 
 ### Key Properties
 
@@ -243,11 +260,12 @@ MCP config (`.mcp.json`):
 
 ### Blast radius — what breaks if I change this:
 ```cypher
-MATCH (f:Function {name: 'NAME', projectId: 'PID'})
+MATCH (f:CodeNode {name: 'NAME', projectId: 'PID'})
+WHERE f.kind IN ['Function', 'Method']
 OPTIONAL MATCH (caller)-[:CALLS]->(f)
 OPTIONAL MATCH (f)-[:CALLS]->(callee)
-OPTIONAL MATCH (f)-[:READS_STATE]->(r:Field)
-OPTIONAL MATCH (f)-[:WRITES_STATE]->(w:Field)
+OPTIONAL MATCH (f)-[:READS_STATE]->(r)
+OPTIONAL MATCH (f)-[:WRITES_STATE]->(w)
 RETURN f.riskTier, round(f.riskLevel) AS risk,
        collect(DISTINCT caller.name) AS calledBy,
        collect(DISTINCT callee.name) AS calls,
@@ -257,7 +275,7 @@ RETURN f.riskTier, round(f.riskLevel) AS risk,
 
 ### Guaranteed vs conditional callers:
 ```cypher
-MATCH (caller)-[c:CALLS]->(f:Function {name: 'NAME', projectId: 'PID'})
+MATCH (caller)-[c:CALLS]->(f:CodeNode {name: 'NAME', projectId: 'PID'})
 RETURN caller.name, c.conditional, c.conditionalKind, caller.filePath
 ORDER BY c.conditional
 ```
@@ -265,14 +283,15 @@ Unconditional callers (conditional=false) WILL break. Conditional callers MIGHT 
 
 ### Read a function's source code from the graph:
 ```cypher
-MATCH (f:Function {name: 'NAME', projectId: 'PID'})
+MATCH (f:CodeNode {name: 'NAME', projectId: 'PID'})
+WHERE f.kind IN ['Function', 'Method']
 RETURN f.sourceCode
 ```
 You can understand what a function does without opening the file.
 
 ### Who else writes the same state field:
 ```cypher
-MATCH (f)-[:WRITES_STATE]->(field:Field {name: 'FIELD', projectId: 'PID'})
+MATCH (f)-[:WRITES_STATE]->(field {name: 'FIELD', projectId: 'PID'})
 RETURN f.name AS writer, f.filePath
 ```
 Multiple writers on the same state = race condition risk.
@@ -344,23 +363,24 @@ Check this before adding state — the variable might already exist.
 
 ### Dead code (exported but never called):
 ```cypher
-MATCH (f {projectId: 'PID'})
-WHERE (f:Function OR f:Method) AND f.isExported = true
+MATCH (f:CodeNode {projectId: 'PID'})
+WHERE f.kind IN ['Function', 'Method'] AND f.isExported = true
 AND NOT ()-[:CALLS]->(f) AND NOT (f)<-[:REGISTERED_BY]-()
 RETURN f.name, f.filePath
 ```
 
 ### God functions (>200 lines):
 ```cypher
-MATCH (f:Function {projectId: 'PID'})
-WHERE f.lineCount > 200
+MATCH (f:CodeNode {projectId: 'PID'})
+WHERE f.kind = 'Function' AND f.lineCount > 200
 RETURN f.name, f.lineCount, round(f.riskLevel) AS risk, f.filePath
 ORDER BY f.lineCount DESC
 ```
 
 ### Inner functions trapped in a parent:
 ```cypher
-MATCH (parent:Function {projectId: 'PID'})-[:CONTAINS]->(inner:Function)
+MATCH (parent:CodeNode {projectId: 'PID'})-[:CONTAINS]->(inner:CodeNode)
+WHERE parent.kind = 'Function' AND inner.kind = 'Function'
 WITH parent, count(inner) AS innerCount
 WHERE innerCount > 3
 RETURN parent.name, innerCount, parent.lineCount, parent.filePath
@@ -433,29 +453,33 @@ Use `list_projects` (MCP) or the Project query to find the right `projectId`.
 
 ---
 
-## Universal Architecture (In Progress)
+## Universal Architecture
 
-CodeGraph is expanding from TypeScript-only to a universal reasoning graph. Full plan: `plans/codegraph/MULTI_LANGUAGE_ASSESSMENT.md`
+AnythingGraph is a universal reasoning graph, not a TypeScript-only tool. Full plan: `plans/codegraph/MULTI_LANGUAGE_ASSESSMENT.md`
+
+### Six Operational Layers
+| Layer | Status | What It Does |
+|-------|--------|-------------|
+| **Code** | ✅ 3 projects | TypeScript parsing, CALLS/RESOLVES_TO, risk scoring, blast radius |
+| **Corpus** | ✅ 5 projects | Bible + Quran + Deuterocanon + Pseudepigrapha + Early Contested |
+| **Documents** | 🔲 Adapter built | Generic PDF/text ingestion (pipeline exists, not yet populated) |
+| **Plans** | ✅ 8 projects | Task/Milestone tracking, drift detection, cross-domain evidence |
+| **Claims** | ✅ 414 claims | Domain-agnostic assertions with evidence grades |
+| **Reasoning** | ✅ 52 hypotheses | Auto-generated from evidence gaps, self-audit |
 
 ### Three-Tier Parser Architecture
 - **Tier 0 (compiler)**: ts-morph (TS ✅), Eclipse JDT (Java), go/ast+go/types (Go), Roslyn (C#)
-- **Tier 1 (workspace-semantic)**: Pyright sidecar (Python — NEXT), rust-analyzer (Rust — future)
+- **Tier 1 (workspace-semantic)**: Pyright sidecar (Python — scaffold exists), rust-analyzer (Rust — future)
 - **Tier 2 (structural)**: tree-sitter fallback for all other languages
 
-### IR Layer (Coming)
+### IR Layer (exists, not yet primary path)
 ```
-Parser → IR → Enrichment → Graph
+Parser → IR v1 → Enrichment Plugins → Graph
 ```
-All parsers will output a language-agnostic IR before graph ingestion. This prevents language-specific assumptions from contaminating the enrichment pipeline.
+IR schema, materializer, and validator exist in `src/core/ir/`. Current TS parser still writes Neo4j directly. IR becomes the primary path when multi-language ships.
 
-### Plan Graph
-Project plans in `plans/` directory are parsed into Task/Milestone/Sprint nodes and cross-referenced against code graphs. Auto-detects task completion by checking if referenced code exists.
-
-### Four Graph Domains
-- Code graphs (this skill) — source code structure
-- Corpus graphs — Bible, Quran, structured texts
-- Document graphs — legal filings, evidence
-- Plan graphs — task tracking, cross-domain linking
+### Test Infrastructure (132+ tests)
+Hermetic test harness with frozen clock, network guard, ephemeral graph, seeded RNG, PBT runner, metamorphic testing, AI TEVV, SLSA-shaped provenance, confidence analytics. All in `src/core/test-harness/`.
 
 ---
 

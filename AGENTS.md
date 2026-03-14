@@ -4,9 +4,9 @@
 
 AnythingGraph (repo: codegraph) is a **universal reasoning graph**. It ingests code, plans, corpora, and documents into Neo4j, cross-references across domains, generates claims with evidence, detects drift, and self-audits. Code parsing was the proof of concept — the architecture handles any structured knowledge.
 
-**Current state**: 50,972 nodes, 555,014 edges, 12 projects, and 6 operational layers (tooling surface evolves; verify live MCP tool inventory in graph/runtime status).
+**Current state**: 63,000+ nodes, 415,000+ edges, 22 projects, 39 MCP tools, 132+ hermetic tests, and 6 operational layers.
 
-**Six layers**: Code (3 projects) → Corpus (5 projects) → Plans (4 projects) → Claims (346) → Reasoning (233 hypotheses) → Self-Audit.
+**Six layers**: Code (3 projects) → Corpus (5 projects) → Plans (8 projects) → Claims (414) → Reasoning (52 hypotheses) → Self-Audit.
 
 Every function, task, verse, claim, and entity is a node. Every call, evidence link, mention, and dependency is an edge.
 **Query the graph before you edit. That's the entire point.**
@@ -28,52 +28,60 @@ cypher-shell -u neo4j -p codegraph "YOUR CYPHER QUERY"
 
 ## Graph Schema
 
-### Node Types
-| Type | What It Represents |
-|------|-------------------|
-| `SourceFile` | A `.ts` file |
-| `Function` | Named function declaration (top-level or inner) |
-| `Method` | Class method |
-| `Class` | Class declaration |
-| `Interface` | Interface declaration |
-| `TypeAlias` | Type alias (`type X = ...`) |
-| `Variable` | const/let/var declaration (exported AND non-exported) |
-| `Property` | Class property |
-| `Parameter` | Function/method parameter |
-| `Import` | Import statement |
-| `Field` | Tracked state field (e.g., session properties) |
-| `Entrypoint` | Framework registration point |
-| `Author` | Git author (from `git blame`) |
-| `ArchitectureLayer` | Inferred layer (Presentation, Domain, Data, etc.) |
-| `Project` | Top-level project node with stats |
-| `UnresolvedReference` | Import/call the parser couldn't resolve |
-| `AuditCheck` | Structural invariant check result |
-| `InvariantViolation` | Specific invariant failure |
-| `EvaluationRun` | Metrics snapshot for regression tracking |
-| `MetricResult` | Single metric value from an evaluation run |
+### Node Label Model
+
+Code nodes use **multi-label**: `CodeNode:TypeScript:Function`, `CodeNode:TypeScript:Method`, etc. The `kind` property on `CodeNode` provides the discriminator.
+
+| Label Pattern | What It Represents |
+|--------------|-------------------|
+| `CodeNode:TypeScript:Function` | Named function |
+| `CodeNode:TypeScript:Method` | Class method |
+| `CodeNode:TypeScript:Class` | Class declaration |
+| `CodeNode:TypeScript:Interface` | Interface declaration |
+| `CodeNode:TypeScript:Variable` | const/let/var |
+| `CodeNode:TypeScript:TypeAlias` | `type X = ...` |
+| `CodeNode:TypeScript:Property` | Class property |
+| `CodeNode:TypeScript:Parameter` | Function parameter |
+| `CodeNode:TypeScript:Import` | Import statement |
+| `CodeNode:TypeScript:Enum` | Enum declaration |
+| `CodeNode:TypeScript:Constructor` | Class constructor |
+| `CodeNode:SourceFile:TypeScript` | A `.ts` file |
+| `CodeNode:Entrypoint` | Framework registration (command, callback, event) |
+| `CodeNode:Task` / `CodeNode:Milestone` / `CodeNode:Decision` | Plan nodes |
+| `CodeNode:VerificationRun` / `CodeNode:GateDecision` | Governance nodes |
+| `CodeNode:GovernanceMetricSnapshot` / `CodeNode:MetricSurface` | Metrics nodes |
+| `Project` | Top-level project with stats |
+| `IntegritySnapshot` / `MetricResult` | Integrity tracking |
+| `Claim` / `Evidence` / `Hypothesis` | Claims layer |
+| `Verse` / `Chapter` / `Book` | Corpus text nodes |
+| `IRNode:Entity` / `IRNode:Site` / `IRNode:Artifact` | IR nodes |
 
 Framework-specific labels (added when `.codegraph.yml` specifies a framework):
 `CallbackQueryHandler`, `CommandHandler`, `EventHandler`, `Middleware`, `BotFactory`
 
 ### Edge Types
+
+**Code structure:**
 | Edge | Meaning | Key Properties |
 |------|---------|---------------|
 | `CALLS` | Function invocation | `conditional`, `conditionalKind`, `isAsync`, `crossFile`, `resolutionKind` |
-| `CONTAINS` | Parent → child (file→function, function→inner function, class→method) | — |
-| `IMPORTS` | File-level import | `dynamic` (true for `await import()`) |
-| `RESOLVES_TO` | Import symbol → canonical declaration across files | — |
-| `REGISTERED_BY` | Handler → entrypoint registration | — |
-| `READS_STATE` | Function → Field (reads session/state) | — |
-| `WRITES_STATE` | Function → Field (writes session/state) | — |
-| `POSSIBLE_CALL` | Dynamic dispatch target (ternary/interface) | `confidence`, `reason` |
-| `CO_CHANGES_WITH` | File → File (temporal coupling from git) | `coChangeCount`, `strength` |
-| `OWNED_BY` | SourceFile → Author (primary git blame owner) | — |
+| `CONTAINS` | Parent → child | — |
+| `IMPORTS` | File-level import | `dynamic` |
+| `RESOLVES_TO` | Import → canonical declaration | — |
+| `REGISTERED_BY` | Handler → entrypoint | — |
+| `READS_STATE` / `WRITES_STATE` | Function → state field | — |
+| `POSSIBLE_CALL` | Dynamic dispatch | `confidence`, `reason` |
+| `OWNED_BY` | SourceFile → Author | — |
 | `BELONGS_TO_LAYER` | SourceFile → ArchitectureLayer | — |
-| `HAS_PARAMETER` | Function → Parameter | — |
-| `HAS_MEMBER` | Class/Interface → Method/Property | — |
-| `ORIGINATES_IN` | UnresolvedReference → Function/File | — |
-| `FOUND` | AuditCheck → InvariantViolation | — |
-| `MEASURED` | EvaluationRun → MetricResult | — |
+| `HAS_PARAMETER` / `HAS_MEMBER` | Structural containment | — |
+| `EXTENDS` / `IMPLEMENTS` | Inheritance | — |
+| `ORIGINATES_IN` | Unresolved reference → source | — |
+
+**Plans & governance:** `PART_OF`, `DEPENDS_ON`, `HAS_CODE_EVIDENCE`, `TARGETS`, `NEXT_STAGE`, `READS_PLAN_FIELD`, `MUTATES_TASK_FIELD`, `EMITS_NODE_TYPE`, `EMITS_EDGE_TYPE`
+
+**Claims & corpus:** `SUPPORTED_BY`, `CONTRADICTED_BY`, `WITNESSES`, `PROVES`, `ANCHORS`, `CROSS_REFERENCES`, `MENTIONS_PERSON`, `MENTIONS`
+
+**Governance provenance:** `MEASURED`, `DERIVED_FROM_PROOF`, `DERIVED_FROM_RUN`, `DERIVED_FROM_COMMIT`, `DERIVED_FROM_GATE`, `AFFECTS_COMMIT`, `CAPTURED_COMMIT`, `CAPTURED_WORKTREE`, `EMITS_GATE_DECISION`, `BASED_ON_RUN`, `GENERATED_ARTIFACT`, `USED_BY`
 
 ### Key Node Properties
 | Property | Type | On | Meaning |
@@ -82,20 +90,21 @@ Framework-specific labels (added when `.codegraph.yml` specifies a framework):
 | `filePath` | string | all | Absolute file path |
 | `startLine` / `endLine` | int | all | Source location |
 | `sourceCode` | string | all | Full source text |
-| `isExported` | bool | Function/Variable/Class | Exported from module? |
-| `isInnerFunction` | bool | Function | Declared inside another function? |
-| `riskLevel` | float | Function/Method | Pre-computed risk score |
-| `riskTier` | string | Function/Method | LOW / MEDIUM / HIGH / CRITICAL |
-| `fanInCount` | int | Function/Method | How many things call this |
-| `fanOutCount` | int | Function/Method | How many things this calls |
-| `lineCount` | int | Function/Method | Lines of code |
-| `gitChangeFrequency` | float | SourceFile/Function | 0.0-1.0, how often this changes |
+| `kind` | string | CodeNode | Discriminator: Function, Method, Class, Variable, etc. |
+| `isExported` | bool | CodeNode | Exported from module? |
+| `isInnerFunction` | bool | CodeNode | Declared inside another function? |
+| `riskLevel` | float | CodeNode | Pre-computed risk score |
+| `riskTier` | string | CodeNode | LOW / MEDIUM / HIGH / CRITICAL |
+| `fanInCount` | int | CodeNode | How many things call this |
+| `fanOutCount` | int | CodeNode | How many things this calls |
+| `lineCount` | int | CodeNode | Lines of code |
+| `gitChangeFrequency` | float | SourceFile/CodeNode | 0.0-1.0, how often this changes |
 | `authorEntropy` | int | SourceFile | Number of distinct git authors |
 | `primaryAuthor` | string | SourceFile | Author with most lines (git blame) |
 | `ownershipPct` | int | SourceFile | % of lines owned by primary author |
 | `architectureLayer` | string | SourceFile | Inferred layer name |
-| `registrationKind` | string | Function/Entrypoint | command, callback, event, middleware |
-| `registrationTrigger` | string | Function/Entrypoint | Trigger pattern (e.g., 'start', 'home_buy') |
+| `registrationKind` | string | CodeNode/Entrypoint | command, callback, event, middleware |
+| `registrationTrigger` | string | CodeNode/Entrypoint | Trigger pattern (e.g., 'start', 'home_buy') |
 | `sourceKind` | string | edges | Provenance: 'typeChecker', 'frameworkExtractor', 'heuristic', 'postIngest', 'gitMining' |
 | `confidence` | float | edges | 0.0-1.0 confidence of the edge derivation |
 
