@@ -46,6 +46,60 @@ export {
   type EphemeralGraphRuntime,
   type TestFixture,
 } from './ephemeral-graph.js';
+export {
+  assemblePolicyBundle,
+  computeBundleDigest,
+  verifyBundleDigest,
+  resolveGateMode,
+  getApplicableInvariants,
+  type PolicyBundle,
+  type GateModeOverride,
+  type WaiverPolicy,
+} from './policy-bundle.js';
+export {
+  evaluateGate,
+  createInputSnapshot,
+  verifyInputDigest,
+  computeReplayHash,
+  verifyReplayConsistency,
+  type GateInputSnapshot,
+  type InvariantCheckResult,
+  type LaneResult,
+  type DecisionLog,
+  type DecisionLogEntry,
+  type GateEvaluatorConfig,
+} from './gate-evaluator.js';
+export {
+  runPBT,
+  SeededRNG,
+  saveCounterexamples,
+  shrinkCounterexample,
+  type GovAction,
+  type StateInvariant,
+  type PBTConfig,
+  type PBTRunResult,
+  type Counterexample,
+} from './pbt-runner.js';
+export {
+  checkQueryEquivalence,
+  checkAllQueryEquivalences,
+  checkSemanticsMutation,
+  type MetamorphicRelation,
+  type RelationResult,
+  type QueryEquivalenceRelation,
+  type SemanticsMutation,
+  type QueryEquivalenceResult,
+  type MutationResult,
+} from './metamorphic.js';
+export {
+  FlakeTracker,
+  DEFAULT_FLAKE_CONFIG,
+  type FlakeGovernanceConfig,
+  type FlakeRecord,
+  type FlakeReport,
+  type LaneFlakeReport,
+  type TestRun,
+} from './flake-governance.js';
 
 // ============================================================================
 // HERMETIC ENVIRONMENT — ALL-IN-ONE
