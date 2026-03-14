@@ -1,0 +1,21 @@
+{
+  "ok": false,
+  "projectId": "proj_c0d3e9a1f200",
+  "repoRoot": "/home/jonathan/.openclaw/workspace/codegraph",
+  "codeownersPath": ".github/CODEOWNERS",
+  "codeownersEntries": 1,
+  "ownershipScopeCount": 1,
+  "parityOk": true,
+  "staleDays": 45,
+  "criticalFilesChecked": 108,
+  "unownedCriticalCount": 4,
+  "staleCriticalCount": 0,
+  "violationsCreated": 4,
+  "unownedCritical": [
+    "src/utils/verify-hygiene-topology.ts",
+    "src/utils/verify-hygiene-proof.ts",
+    "src/utils/verify-hygiene-exceptions.ts",
+    "src/utils/verify-hygiene-platform-parity.ts"
+  ],
+  "staleCritical": []
+}

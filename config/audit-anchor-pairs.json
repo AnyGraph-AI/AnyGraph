@@ -1,0 +1,12 @@
+{
+  "current": "baseline-2026-03-13",
+  "pairs": {
+    "baseline-2026-03-13": {
+      "label": "baseline-2026-03-13",
+      "codegraphCommit": "d871d5a4c8df968ae701f0c44e75de119cd7c086",
+      "workspaceCommit": "cb3a983a6bf66f87d8db23b5a4cb44d3530f24db",
+      "updatedAt": "2026-03-13T23:40:00.000Z",
+      "note": "Cross-repo anchor mapping after workspace mismatch with codegraph anchor"
+    }
+  }
+}

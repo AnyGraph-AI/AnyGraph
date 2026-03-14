@@ -526,22 +526,29 @@ Dependency-order guard:
 - `plan:deps:verify` now reports scoped dependency hygiene metrics (`scopedTasksChecked`, `scopedMissingDepends`, `scopedExceptionCount`).
 - Set `STRICT_SCOPED_DEPENDS_ON=true` to fail-closed on missing task-level dependencies in scoped milestone families.
 - Strict rollout commands:
-  - `npm run done-check:strict:smoke`
-  - `npm run done-check:strict:full`
+  - `npm run done-check:strict:smoke` (includes capture-only runtime proof)
+  - `npm run done-check:strict:full` (includes capture-only runtime proof)
+- Dev-only dirty capture override: `VERIFICATION_CAPTURE_ALLOW_DIRTY=true`
+- GM-8 closure guard: `plan:deps:verify` fails when a GM-8 task is `done` with zero `HAS_CODE_EVIDENCE`.
 - Rollout + rollback policy: `docs/GOVERNANCE_STRICT_ROLLOUT.md`
 
 Recommendation freshness rule: if any plan markdown was edited, re-ingest plans before running recommendation tools (`plan_priority`, `plan_next_tasks`). Freshness guard blocks stale recommendations unless `allowStale=true`.
+
+Governance freshness source rule: `governance:stale:verify` uses the latest timestamp from either `VerificationRun.ranAt` or `GovernanceMetricSnapshot.timestamp`.
 
 ```bash
 npm run verification:sarif:import -- <projectId> <sarifPath>
 npm run verification:scope:resolve -- <projectId>
 npm run verification:exception:enforce -- <projectId>
 npm run verification:advisory:gate -- <projectId> [policyBundleId]
+# canonical strict path usually runs this implicitly:
+npm run verification:done-check:capture:only -- [projectId] [policyBundleId]
+# legacy wrapper (runs done-check + capture):
 npm run verification:done-check:capture -- [projectId] [policyBundleId]
 npm run commit:audit:verify -- <baseRef> <headRef>
 ```
 
-Use `verification:done-check:capture` to record a graph-proven execution trace (git state, gate result, artifact hash). Use `commit:audit:verify` to run invariant checks (schema, edge taxonomy, dependency, parser contract, coverage drift) over any commit range.
+Use `verification:done-check:capture:only` (or strict done-check scripts that chain it) to record a graph-proven execution trace (git state, gate result, artifact hash). Use `commit:audit:verify` to run invariant checks (schema, edge taxonomy, dependency, parser contract, coverage drift) over any commit range.
 
 MCP status tools:
 - `commit_audit_status` — latest commit-audit result view

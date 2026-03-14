@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "projectId": "proj_c0d3e9a1f200",
+  "filesScanned": 16575,
+  "findingsCount": 1,
+  "findingsBySubtype": {
+    "extension_not_allowed": 1
+  },
+  "exceptionPatterns": [],
+  "maxPathLength": 180,
+  "maxSourceFileBytes": 1048576,
+  "sampleFindings": [
+    {
+      "subtype": "extension_not_allowed",
+      "severity": "low",
+      "rel": ".github/CODEOWNERS",
+      "reason": "Extension (none) not in allowed list"
+    }
+  ]
+}

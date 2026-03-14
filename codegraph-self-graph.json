@@ -1,30 +1,31 @@
 {
   "summary": {
-    "files": 99,
-    "nodes": 1918,
-    "edges": 3026
+    "files": 213,
+    "nodes": 3508,
+    "edges": 5621
   },
   "nodeTypes": {
-    "SourceFile": 98,
-    "Function": 112,
-    "Parameter": 419,
-    "Import": 473,
-    "Variable": 356,
-    "Interface": 119,
-    "TypeAlias": 29,
-    "Class": 19,
-    "Method": 207,
-    "Property": 70,
-    "Constructor": 13,
-    "Enum": 3
+    "SourceFile": 212,
+    "Interface": 232,
+    "Function": 468,
+    "Parameter": 811,
+    "Import": 823,
+    "TypeAlias": 65,
+    "Variable": 519,
+    "Class": 24,
+    "Method": 250,
+    "Property": 83,
+    "Constructor": 17,
+    "Enum": 4
   },
   "edgeTypes": {
-    "CONTAINS": 1111,
-    "HAS_PARAMETER": 419,
-    "HAS_MEMBER": 290,
-    "CALLS": 379,
-    "IMPORTS": 286,
-    "RESOLVES_TO": 534,
-    "EXTENDS": 7
+    "CONTAINS": 2135,
+    "HAS_PARAMETER": 811,
+    "HAS_MEMBER": 350,
+    "CALLS": 1105,
+    "IMPORTS": 459,
+    "RESOLVES_TO": 753,
+    "EXTENDS": 7,
+    "IMPLEMENTS": 1
   }
 }

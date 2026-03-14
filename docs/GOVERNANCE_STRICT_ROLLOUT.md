@@ -26,6 +26,8 @@ Flags:
 
 Goal: validate dependency hygiene under strict parsing without hard-failing document/metrics contracts.
 
+Note: strict smoke/full commands now chain capture-only runtime proof (`verification:done-check:capture:only`).
+
 ### Phase 2 — CI strict smoke (merge gate candidate)
 
 Command:
@@ -69,7 +71,7 @@ Rollback from strict full to strict smoke (or default) when any trigger hits:
    - `recoveryIncrease > 2`, or
    - `advisoryOk=false` under strict mode
 2. `document:witness:advisory` fails under enforce mode
-3. `plan:deps:verify` fails due to missing scoped dependencies
+3. `plan:deps:verify` fails due to missing scoped dependencies (including GM-8 done-without-evidence guard).
 
 Rollback command (safe mode):
 
@@ -88,6 +90,8 @@ npm run done-check
 - Run `governance:metrics:report` and confirm strict/operational consistency.
 - Confirm `document:namespace:verify` and `document:wording:verify` are green.
 - Confirm latest metric snapshot includes `metricHash` and canonical fields.
+- Confirm freshness check source is current (`VerificationRun.ranAt` or `GovernanceMetricSnapshot.timestamp`).
+- For local dirty worktrees only, use explicit override for capture step: `VERIFICATION_CAPTURE_ALLOW_DIRTY=true`.
 
 ## Canonical metric notes
 

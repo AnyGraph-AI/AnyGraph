@@ -12,23 +12,23 @@ python3 post-ingest-enrich.py
 
 echo ""
 echo "=== 2/17: State edges (READS_STATE/WRITES_STATE) ==="
-npx tsx create-state-edges.ts 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/enrichment/create-state-edges.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 3/17: Git change frequency ==="
-npx tsx seed-git-frequency.ts 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/enrichment/seed-git-frequency.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 4/17: Temporal coupling (git co-change mining) ==="
-npx tsx temporal-coupling.ts godspeed 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/enrichment/temporal-coupling.ts godspeed 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 5/17: POSSIBLE_CALL edges (dynamic dispatch) ==="
-npx tsx create-possible-call-edges.ts 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/enrichment/create-possible-call-edges.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 6/17: Virtual dispatch (interface/inheritance) ==="
-npx tsx create-virtual-dispatch-edges.ts 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/enrichment/create-virtual-dispatch-edges.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 7/17: Registration properties (registrationKind/Trigger) ==="
@@ -66,11 +66,11 @@ RETURN 'Project node updated: ' + toString(nodes) + ' nodes, ' + toString(edges)
 
 echo ""
 echo "=== 9/17: Author ownership (git blame) ==="
-npx tsx seed-author-ownership.ts godspeed 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/enrichment/seed-author-ownership.ts godspeed 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 10/17: Architecture layers ==="
-npx tsx seed-architecture-layers.ts godspeed 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/enrichment/seed-architecture-layers.ts godspeed 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 11/17: riskLevel v2 promotion (temporal coupling + author entropy) ==="
@@ -93,27 +93,27 @@ RETURN 'Promoted riskLevel v2 on ' + toString(count(f)) + ' nodes' AS status
 
 echo ""
 echo "=== 12/17: Provenance + confidence on edges ==="
-npx tsx add-provenance.ts 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/enrichment/add-provenance.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 13/17: Unresolved reference nodes ==="
-npx tsx create-unresolved-nodes.ts 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/enrichment/create-unresolved-nodes.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 14/17: Audit subgraph (invariant checks) ==="
-npx tsx run-audit.ts 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/verify/run-audit.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 15/17: Test coverage mapping ==="
-npx tsx seed-test-coverage.ts . 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/enrichment/seed-test-coverage.ts . 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 16/17: Embeddings (OpenAI — set STRUCTURAL_ONLY=true to skip) ==="
-npx tsx embed-nodes.ts 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/enrichment/embed-nodes.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "=== 17/17: Evaluation (regression detection) ==="
-npx tsx run-evaluation.ts 2>&1 | grep -v "dotenv\|tip:"
+npx tsx src/scripts/verify/run-evaluation.ts 2>&1 | grep -v "dotenv\|tip:"
 
 echo ""
 echo "✅ All post-ingest passes complete!"

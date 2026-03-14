@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **AnythingGraph** (repo: codegraph) is an MCP server that builds **universal reasoning graphs**. Give it any structured knowledge — code, documents, plans, corpora — and it parses, cross-references, generates claims, detects drift, and self-audits. Code parsing was the proof of concept. The architecture is the product.
 
-**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 45 MCP tools.
+**Current state**: 50,972 nodes, 555,014 edges, 12 projects (tool inventory evolves; verify live MCP tool list from runtime/registry).
 
 ### Six Operational Layers
 | Layer | Status | What It Does |
@@ -47,14 +47,14 @@ TypeScript Project → AST Parser (ts-morph) → Graph Nodes/Edges → Neo4j + V
 
 ### Data Flow (Target — Universal)
 ```
-Any Source → Language Parser → IR v1 → Enrichment Plugins → Neo4j → MCP Tools (43 tools)
+Any Source → Language Parser → IR v1 → Enrichment Plugins → Neo4j → MCP Tools
 ```
 
 ### Key Directories
 
 - `src/mcp/` - MCP server entry point and tools
   - `mcp.server.ts` - Server initialization
-  - `tools/` - 45 MCP tools across code, plan, claim, swarm, and self-audit domains
+  - `tools/` - MCP tools across code, plan, claim, swarm, and self-audit domains
   - `handlers/` - Business logic for graph generation and traversal
 - `src/core/` - Core business logic
   - `parsers/typescript-parser.ts` - TypeScript AST parser (~1000 lines)
@@ -118,7 +118,7 @@ If upgrading from a version without multi-project support, note these breaking c
 
 **Note:** There is no automatic migration path. Existing graphs must be rebuilt to use the new ID format with projectId isolation.
 
-### MCP Tools (44 total)
+### MCP Tools (live inventory; see runtime registry)
 
 **Code Analysis:**
 | Tool | Purpose |
@@ -314,9 +314,11 @@ npm run integrity:verify
 Scoped dependency enforcement:
 - `plan:deps:verify` reports scoped dependency hygiene metrics.
 - Use `STRICT_SCOPED_DEPENDS_ON=true` to fail-closed when scoped tasks are missing required task-level dependencies.
+- GM-8 closure guard: fail if a GM-8 task is `done` and has zero `HAS_CODE_EVIDENCE` edges.
 - Strict governance rollouts:
-  - `npm run done-check:strict:smoke`
-  - `npm run done-check:strict:full`
+  - `npm run done-check:strict:smoke` (includes capture-only runtime proof)
+  - `npm run done-check:strict:full` (includes capture-only runtime proof)
+- Dev-only dirty-capture override: `VERIFICATION_CAPTURE_ALLOW_DIRTY=true`
 - Runbook: `docs/GOVERNANCE_STRICT_ROLLOUT.md`
 
 Threshold policy:
@@ -342,6 +344,8 @@ Resume controls:
 ### Verification Pipeline Commands
 Recommendation freshness rule: run plan re-ingest before recommendation tools (`plan_priority`, `plan_next_tasks`) if plan markdown changed. Freshness guard now blocks stale reads unless `allowStale=true`.
 
+Governance freshness source rule: `governance:stale:verify` uses the newest timestamp from either `VerificationRun.ranAt` or `GovernanceMetricSnapshot.timestamp`.
+
 ```bash
 # Import SARIF findings
 npm run verification:sarif:import -- <projectId> <sarifPath>
@@ -355,7 +359,10 @@ npm run verification:exception:enforce -- <projectId>
 # Advisory gate (decision logs + replayability hashes)
 npm run verification:advisory:gate -- <projectId> [policyBundleId]
 
-# Runtime truth capture (done-check + git state + decision/artifact hashes into graph)
+# Runtime truth capture
+# canonical strict path: done-check strict scripts chain capture-only
+npm run verification:done-check:capture:only -- [projectId] [policyBundleId]
+# legacy wrapper (runs done-check + capture):
 npm run verification:done-check:capture -- [projectId] [policyBundleId]
 
 # Commit audit (invariants over a commit range)

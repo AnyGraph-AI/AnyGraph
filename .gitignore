@@ -155,3 +155,11 @@ artifacts/ir-parity/
 artifacts/integrity-snapshots/
 artifacts/commit-audit/
 artifacts/verification-pilot/
+artifacts/document-namespace-audit/
+artifacts/document-witness-advisory/
+artifacts/document-wording-contract/
+artifacts/embedding-matcher/
+artifacts/governance-metric-integrity/
+artifacts/governance-metrics/
+artifacts/project-registry/
+artifacts/watcher-recheck-events.jsonl

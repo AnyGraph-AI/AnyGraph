@@ -52,7 +52,7 @@ const { nodes, edges } = parser.exportToJson();
 
 **Step 3: Run the parser + ingest:**
 ```bash
-cd codegraph && npx tsx parse-and-ingest.ts
+cd codegraph && npx tsx src/scripts/entry/parse-and-ingest.ts
 ```
 
 **Step 4: Run post-ingest enrichment (17 steps):**
@@ -68,7 +68,7 @@ cypher-shell -u neo4j -p codegraph "MATCH (p:Project) RETURN p.name, p.nodeCount
 
 ### Graph CodeGraph itself (self-graph)
 ```bash
-cd codegraph && npx tsx parse-and-ingest-self.ts
+cd codegraph && npx tsx src/scripts/entry/parse-and-ingest-self.ts
 ```
 
 ## What's In The Graph
@@ -178,15 +178,15 @@ Read `swarm/COORDINATOR.md` (decomposition algorithm) + `swarm/WORKER.md` (worke
 
 | Command | What It Does |
 |---------|-------------|
-| `npx tsx parse-and-ingest.ts` | Parse GodSpeed + ingest to Neo4j |
-| `npx tsx parse-and-ingest-self.ts` | Parse CodeGraph itself (self-graph) |
+| `npx tsx src/scripts/entry/parse-and-ingest.ts` | Parse GodSpeed + ingest to Neo4j |
+| `npx tsx src/scripts/entry/parse-and-ingest-self.ts` | Parse CodeGraph itself (self-graph) |
 | `bash post-ingest-all.sh` | Run all 17 post-ingest enrichment passes |
 | `npx tsx edit-simulation.ts <file> <modified>` | Preview graph delta |
 | `npx tsx temporal-coupling.ts codegraph` | Mine git co-change patterns |
 | `npx tsx seed-author-ownership.ts codegraph` | Git blame → Author nodes |
 | `npx tsx seed-architecture-layers.ts codegraph` | Directory → layer classification |
 | `npx tsx seed-git-frequency.ts` | Git log → change frequency |
-| `npx tsx watch.ts codegraph` | File watcher (incremental re-parse) |
+| `npx tsx src/scripts/entry/watch.ts codegraph` | File watcher (incremental re-parse) |
 | `npx tsx compute-reparse-set.ts FILE.ts` | What files need reparsing if X changes |
 | `npx tsx verify-completeness.ts` | Verify 100% declaration coverage |
 | `npx vitest run tests/graph-integrity.test.ts` | Run 19 integrity tests |
@@ -238,7 +238,7 @@ codegraph/
 │   │   ├── utils/            # File change detection, graph factory
 │   │   └── workspace/        # Project detection
 │   ├── mcp/
-│   │   ├── tools/            # 33 MCP tools
+│   │   ├── tools/            # MCP tools (live inventory evolves)
 │   │   ├── handlers/         # Graph generation, traversal, incremental parse
 │   │   ├── services/         # Watch manager, job manager
 │   │   └── mcp.server.ts     # MCP server entry point
@@ -265,7 +265,7 @@ codegraph/
 
 - **Parser**: ts-morph (semantic TypeScript parsing — resolves types, not just syntax)
 - **Graph**: Neo4j + APOC (same as GOYFILES investigation graph)
-- **MCP**: @modelcontextprotocol/sdk (33 tools)
+- **MCP**: @modelcontextprotocol/sdk (tool inventory evolves; verify live registry/status)
 - **Embeddings**: OpenAI text-embedding-3-large (optional, for semantic search)
 - **NL→Cypher**: OpenAI gpt-4o (optional, for natural language queries)
 - **Tests**: Vitest (19 integrity tests)

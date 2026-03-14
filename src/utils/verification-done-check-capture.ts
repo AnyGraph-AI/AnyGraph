@@ -47,21 +47,27 @@ function stableJson(input: Record<string, unknown>): string {
 }
 
 async function main(): Promise<void> {
-  const projectId = process.argv[2] ?? 'proj_c0d3e9a1f200';
-  const policyBundleId = process.argv[3] ?? 'verification-gate-policy-v1';
+  const argv = process.argv.slice(2);
+  const captureOnly = argv.includes('--capture-only');
+  const positional = argv.filter((arg) => !arg.startsWith('--'));
+
+  const projectId = positional[0] ?? 'proj_c0d3e9a1f200';
+  const policyBundleId = positional[1] ?? 'verification-gate-policy-v1';
 
   const started = Date.now();
   const ranAt = new Date(started).toISOString();
 
-  const doneCheck = spawnSync('npm', ['run', 'done-check'], {
-    stdio: 'inherit',
-    shell: false,
-    env: process.env,
-  });
+  const doneCheck = captureOnly
+    ? null
+    : spawnSync('npm', ['run', 'done-check'], {
+        stdio: 'inherit',
+        shell: false,
+        env: process.env,
+      });
 
   const ended = Date.now();
   const durationMs = Math.max(0, ended - started);
-  const ok = doneCheck.status === 0;
+  const ok = captureOnly ? true : doneCheck?.status === 0;
 
   const headSha = git(['rev-parse', 'HEAD']);
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -149,6 +155,7 @@ async function main(): Promise<void> {
   console.log(
     JSON.stringify({
       ok,
+      mode: captureOnly ? 'capture-only' : 'run-and-capture',
       projectId,
       runId,
       headSha,
@@ -165,7 +172,7 @@ async function main(): Promise<void> {
     }),
   );
 
-  process.exit(doneCheck.status ?? (ok ? 0 : 1));
+  process.exit(doneCheck?.status ?? (ok ? 0 : 1));
 }
 
 main().catch((error) => {

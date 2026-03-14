@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "projectId": "proj_c0d3e9a1f200",
+  "advisoryMode": true,
+  "enforce": false,
+  "checks": {
+    "codeownersExists": true,
+    "origin": null,
+    "githubRepoParsed": false,
+    "branchProtection": "unknown",
+    "rulesets": "unknown",
+    "requiredStatusChecks": "unknown",
+    "requiredReviews": "unknown"
+  },
+  "violations": [],
+  "snapshotId": "hygiene-metric:proj_c0d3e9a1f200:platform:1773458560537"
+}

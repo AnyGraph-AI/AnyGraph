@@ -4,7 +4,7 @@
 
 AnythingGraph (repo: codegraph) is a **universal reasoning graph**. It ingests code, plans, corpora, and documents into Neo4j, cross-references across domains, generates claims with evidence, detects drift, and self-audits. Code parsing was the proof of concept — the architecture handles any structured knowledge.
 
-**Current state**: 50,972 nodes, 555,014 edges, 12 projects, 45 MCP tools, 6 operational layers.
+**Current state**: 50,972 nodes, 555,014 edges, 12 projects, and 6 operational layers (tooling surface evolves; verify live MCP tool inventory in graph/runtime status).
 
 **Six layers**: Code (3 projects) → Corpus (5 projects) → Plans (4 projects) → Claims (346) → Reasoning (233 hypotheses) → Self-Audit.
 
@@ -311,7 +311,7 @@ MCP config for Claude Code (`.mcp.json` in project root):
 
 ### Parse + ingest a project:
 ```bash
-cd codegraph && npx tsx parse-and-ingest.ts
+cd codegraph && npx tsx src/scripts/entry/parse-and-ingest.ts
 ```
 
 ### Full post-ingest pipeline (17 steps):
@@ -362,7 +362,7 @@ cd codegraph && npx tsx seed-architecture-layers.ts codegraph
 
 ### File watcher (incremental re-parse on save):
 ```bash
-cd codegraph && npx tsx watch.ts codegraph
+cd codegraph && npx tsx src/scripts/entry/watch.ts codegraph
 ```
 
 ### Start Neo4j (after reboot):
@@ -552,8 +552,10 @@ Rules:
 - Temporary threshold overrides must be explicit and documented in commit message (no silent relaxations).
 
 Strict rollout commands:
-- `npm run done-check:strict:smoke` (strict dependency mode, advisory document/metrics enforcement)
-- `npm run done-check:strict:full` (strict dependency + fail-closed document/metrics enforcement)
+- `npm run done-check:strict:smoke` (strict dependency mode, advisory document/metrics enforcement; includes capture-only runtime proof)
+- `npm run done-check:strict:full` (strict dependency + fail-closed document/metrics enforcement; includes capture-only runtime proof)
+- Dev-only override for dirty worktree capture: `VERIFICATION_CAPTURE_ALLOW_DIRTY=true`
+- GM-8 closure guard: `plan:deps:verify` fails when a GM-8 task is `done` without `HAS_CODE_EVIDENCE`.
 - Runbook: `docs/GOVERNANCE_STRICT_ROLLOUT.md`
 
 ### IR Parity Gate (Required for IR pipeline changes)
@@ -574,6 +576,8 @@ The verification subsystem ingests tool findings, enforces governance, and captu
 
 **Recommendation freshness rule (VG-6):** before running `plan_priority` or `plan_next_tasks`, re-ingest plans if there were markdown edits in `plans/` (`npx tsx src/core/parsers/plan-parser.ts /home/jonathan/.openclaw/workspace/plans --ingest --enrich`). MCP tools now hard-fail with `PLAN_FRESHNESS_GUARD_FAILED` when plan ingest is stale unless `allowStale=true`.
 
+**Governance freshness source rule:** `governance:stale:verify` uses the newest runtime evidence timestamp from either `VerificationRun.ranAt` or `GovernanceMetricSnapshot.timestamp`.
+
 **Commands (in pipeline order):**
 ```bash
 # 1. Import SARIF findings into VerificationRun + AdjudicationRecord + AnalysisScope nodes
@@ -588,7 +592,11 @@ npm run verification:exception:enforce -- <projectId>
 # 4. Advisory gate: compute advisory decisions, persist decision logs + replayability hashes
 npm run verification:advisory:gate -- <projectId> [policyBundleId]
 
-# 5. Runtime truth capture: run done-check, capture git state + gate decision + artifact hash into graph
+# 5. Runtime truth capture:
+#    - canonical strict path: use done-check strict scripts (they chain capture-only)
+#    - explicit capture-only path (after another gate run):
+npm run verification:done-check:capture:only -- [projectId] [policyBundleId]
+#    - legacy wrapper (runs done-check + capture):
 npm run verification:done-check:capture -- [projectId] [policyBundleId]
 
 # 6. Commit audit: invariant checks over a commit range (schema, edge taxonomy, deps, parser contracts, coverage drift)
