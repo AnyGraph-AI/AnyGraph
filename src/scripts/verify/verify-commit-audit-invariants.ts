@@ -539,7 +539,9 @@ async function checkCoverageDriftGuardrails(
   neo4j: Neo4jService,
   changedFiles: string[],
 ): Promise<InvariantResult> {
-  const changedSourceFiles = changedFiles.filter((f) => f.startsWith('src/') && f.endsWith('.ts'));
+  const changedSourceFiles = changedFiles.filter(
+    (f) => f.startsWith('src/') && f.endsWith('.ts') && !f.includes('__tests__/') && !f.endsWith('.test.ts')
+  );
   const changedPlanFiles = changedFiles.filter((f) => f.startsWith('plans/') && f.endsWith('.md'));
 
   let mappedSource: string[] = [];
