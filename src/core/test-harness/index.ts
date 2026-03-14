@@ -18,6 +18,14 @@ import { seedRNG, restoreRNG, getRNGState } from './seeded-rng.js';
 export { freezeClock, advanceClock, restoreClock, getFrozenClockState, requireFrozenClock } from './frozen-clock.js';
 export { freezeLocale, restoreLocale, getFrozenLocaleState, requireFrozenLocale } from './frozen-locale.js';
 export { seedRNG, restoreRNG, getRNGState, requireSeededRNG } from './seeded-rng.js';
+export {
+  createEphemeralGraph,
+  codeGraphFixture,
+  planGraphFixture,
+  type EphemeralGraphConfig,
+  type EphemeralGraphRuntime,
+  type TestFixture,
+} from './ephemeral-graph.js';
 
 // ============================================================================
 // HERMETIC ENVIRONMENT — ALL-IN-ONE
