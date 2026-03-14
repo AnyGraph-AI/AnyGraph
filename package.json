@@ -85,6 +85,8 @@
     "edges:normalize": "node --loader ts-node/esm src/scripts/enrichment/normalize-edge-project-ids.ts",
     "edges:verify": "node --loader ts-node/esm src/scripts/verify/verify-edge-tagging.ts",
     "plan:evidence:recompute": "node --loader ts-node/esm src/scripts/tools/recompute-plan-evidence-flags.ts",
+    "evidence:backfill": "node --loader ts-node/esm src/utils/evidence-backfill-fast-track.ts",
+    "evidence:coverage": "node --loader ts-node/esm src/utils/evidence-backfill-fast-track.ts --report-only",
     "integrity:snapshot": "node --loader ts-node/esm src/scripts/verify/graph-integrity-snapshot.ts",
     "integrity:verify": "node --loader ts-node/esm src/scripts/verify/verify-graph-integrity.ts",
     "parser:contracts:verify": "node --loader ts-node/esm src/scripts/verify/verify-parser-contracts.ts",
