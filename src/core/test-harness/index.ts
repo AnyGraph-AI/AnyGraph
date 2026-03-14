@@ -14,10 +14,12 @@
 import { freezeClock, restoreClock, getFrozenClockState } from './frozen-clock.js';
 import { freezeLocale, restoreLocale, getFrozenLocaleState } from './frozen-locale.js';
 import { seedRNG, restoreRNG, getRNGState } from './seeded-rng.js';
+import { blockNetwork, unblockNetwork, getBlockedRequests, type NetworkGuardConfig } from './network-guard.js';
 
 export { freezeClock, advanceClock, restoreClock, getFrozenClockState, requireFrozenClock } from './frozen-clock.js';
 export { freezeLocale, restoreLocale, getFrozenLocaleState, requireFrozenLocale } from './frozen-locale.js';
 export { seedRNG, restoreRNG, getRNGState, requireSeededRNG } from './seeded-rng.js';
+export { blockNetwork, unblockNetwork, getBlockedRequests, requireNetworkBlocked, type NetworkGuardConfig } from './network-guard.js';
 export {
   createEphemeralGraph,
   codeGraphFixture,
@@ -42,12 +44,17 @@ export interface HermeticEnvConfig {
   rngSeed?: string;
   /** Override Math.random (default: true) */
   overrideMathRandom?: boolean;
+  /** Block ambient network access (default: true) */
+  blockNetwork?: boolean;
+  /** Network guard config (hosts/ports whitelist) */
+  networkGuard?: NetworkGuardConfig;
 }
 
 export interface HermeticEnvState {
   clock: { frozenAt: string; active: boolean } | null;
   locale: { timezone: string; locale: string; active: boolean } | null;
   rng: { seed: string; active: boolean } | null;
+  network: { blocked: boolean; blockedRequests: number } | null;
 }
 
 /**
@@ -63,11 +70,16 @@ export function setupHermeticEnv(config: HermeticEnvConfig = {}): HermeticEnvSta
     locale = 'en-US',
     rngSeed = 'test-seed-0',
     overrideMathRandom = true,
+    blockNetwork: shouldBlockNetwork = true,
+    networkGuard,
   } = config;
 
   freezeClock(frozenClock);
   freezeLocale(timezone, locale);
   seedRNG(rngSeed, overrideMathRandom);
+  if (shouldBlockNetwork) {
+    blockNetwork(networkGuard);
+  }
 
   return getHermeticState();
 }
@@ -76,6 +88,7 @@ export function setupHermeticEnv(config: HermeticEnvConfig = {}): HermeticEnvSta
  * Tear down the hermetic environment, restoring all original behavior.
  */
 export function teardownHermeticEnv(): void {
+  unblockNetwork();
   restoreRNG();
   restoreLocale();
   restoreClock();
@@ -85,10 +98,12 @@ export function teardownHermeticEnv(): void {
  * Get current hermetic state snapshot (for provenance ExternalParameters).
  */
 export function getHermeticState(): HermeticEnvState {
+  const blockedReqs = getBlockedRequests();
   return {
     clock: getFrozenClockState(),
     locale: getFrozenLocaleState(),
     rng: getRNGState(),
+    network: blockedReqs !== undefined ? { blocked: true, blockedRequests: blockedReqs.length } : null,
   };
 }
 
