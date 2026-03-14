@@ -14,6 +14,8 @@ import {
   INVARIANT_REGISTRY,
   INVARIANT_REGISTRY_SCHEMA_VERSION,
   type InvariantDefinition,
+  InvariantClass,
+  InvariantScope,
   EnforcementMode,
 } from '../config/invariant-registry-schema.js';
 import {
@@ -196,17 +198,34 @@ export function resolveGateMode(
 
 /**
  * Get all invariants that apply to a given change class.
- * Returns invariants whose scope matches the change's affected areas.
+ * Hard invariants always apply. Advisory/heuristic invariants
+ * are filtered to those whose scope aligns with the required lanes.
  */
 export function getApplicableInvariants(
   bundle: PolicyBundle,
   changeClass: ChangeClass
 ): InvariantDefinition[] {
-  // All hard invariants always apply
-  // Advisory invariants apply based on change class lanes
   const matrix = bundle.changeClassMatrix.definitions[changeClass];
   if (!matrix) return bundle.invariants.definitions;
 
-  // For now, return all invariants — lane filtering happens at gate evaluation
-  return [...bundle.invariants.definitions];
+  const requiredLaneIds = new Set(matrix.requiredLanes);
+
+  return bundle.invariants.definitions.filter(inv => {
+    // Hard semantic and structural invariants always apply
+    if (inv.class === InvariantClass.HARD_SEMANTIC || inv.class === InvariantClass.STRUCTURAL) {
+      return true;
+    }
+    // Soft semantic / heuristic invariants apply only when their
+    // governance scope maps to a required lane for this change class.
+    // Scope→lane mapping: task/milestone→C2, project→C1/C2, global→always
+    if (inv.scope === InvariantScope.GLOBAL) return true;
+    if (inv.scope === InvariantScope.TASK || inv.scope === InvariantScope.MILESTONE) {
+      return requiredLaneIds.has('C2' as unknown as typeof matrix.requiredLanes[number]);
+    }
+    if (inv.scope === InvariantScope.PROJECT) {
+      return requiredLaneIds.has('C1' as unknown as typeof matrix.requiredLanes[number])
+          || requiredLaneIds.has('C2' as unknown as typeof matrix.requiredLanes[number]);
+    }
+    return true; // unknown scope = include (fail-closed)
+  });
 }

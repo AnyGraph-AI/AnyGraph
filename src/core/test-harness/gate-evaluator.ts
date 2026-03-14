@@ -182,7 +182,7 @@ export function evaluateGate(
   for (const invariant of applicableInvariants) {
     const checkResult = input.invariantResults.find(r => r.invariantId === invariant.invariantId);
     const mode = resolveGateMode(policy, invariant.invariantId, input.projectId);
-    const passed = checkResult?.passed ?? true; // unknown invariants pass by default
+    const passed = checkResult?.passed ?? false; // fail-closed: unknown invariants block by default
 
     let action: DecisionLogEntry['action'];
     let reason: string;
