@@ -21,6 +21,24 @@ export { freezeLocale, restoreLocale, getFrozenLocaleState, requireFrozenLocale 
 export { seedRNG, restoreRNG, getRNGState, requireSeededRNG } from './seeded-rng.js';
 export { blockNetwork, unblockNetwork, getBlockedRequests, requireNetworkBlocked, type NetworkGuardConfig } from './network-guard.js';
 export {
+  takeGraphSnapshot,
+  computeSnapshotDigest,
+  compareDigests,
+  assertDeterministic,
+  type GraphSnapshot,
+  type SnapshotDigest,
+} from './snapshot-digest.js';
+export {
+  createReplayPacket,
+  setupReplay,
+  replayFromPacket,
+  saveReplayPacket,
+  loadReplayPacket,
+  verifyReplayDigest,
+  type ReplayPacket,
+  type ReplayContext,
+} from './replay.js';
+export {
   createEphemeralGraph,
   codeGraphFixture,
   planGraphFixture,
