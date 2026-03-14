@@ -571,7 +571,7 @@ export class TypeScriptParser {
           const tsSpecifier = moduleSpecifier.replace(/\.js$/, '.ts');
           const resolvedDir = path.dirname(sourceFile.getFilePath());
           const candidatePath = path.resolve(resolvedDir, tsSpecifier);
-          targetSourceFile = this.project.getSourceFile(candidatePath) ?? null;
+          targetSourceFile = this.project.getSourceFile(candidatePath) ?? undefined;
         }
 
         if (targetSourceFile) {
@@ -757,7 +757,7 @@ export class TypeScriptParser {
           const tsSpecifier = moduleSpecifier.replace(/\.js$/, '.ts');
           const resolvedDir = path.dirname(sourceFile.getFilePath());
           const candidatePath = path.resolve(resolvedDir, tsSpecifier);
-          targetSourceFile = this.project.getSourceFile(candidatePath) ?? null;
+          targetSourceFile = this.project.getSourceFile(candidatePath) ?? undefined;
         }
 
         if (targetSourceFile) {

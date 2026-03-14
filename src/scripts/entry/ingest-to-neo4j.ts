@@ -132,7 +132,7 @@ async function main() {
       RETURN n.coreType AS type, count(*) AS cnt ORDER BY cnt DESC
     `, { projectId: PROJECT_ID });
     console.log('Node types:');
-    for (const r of nodeCheck) {
+    for (const r of nodeCheck.records) {
       console.log(`  ${r.get('type')}: ${r.get('cnt').toNumber()}`);
     }
 
@@ -141,7 +141,7 @@ async function main() {
       RETURN type(r) AS type, count(*) AS cnt ORDER BY cnt DESC
     `);
     console.log('Edge types:');
-    for (const r of edgeCheck) {
+    for (const r of edgeCheck.records) {
       console.log(`  ${r.get('type')}: ${r.get('cnt').toNumber()}`);
     }
 
@@ -157,7 +157,7 @@ async function main() {
              collect(DISTINCT caller.name) AS directCallers,
              collect(DISTINCT sf.name) AS importingFiles
     `);
-    for (const r of blast) {
+    for (const r of blast.records) {
       console.log(`  Target: ${r.get('target')} in ${r.get('file')}`);
       console.log(`  Direct callers: ${JSON.stringify(r.get('directCallers'))}`);
       console.log(`  Importing files: ${JSON.stringify(r.get('importingFiles'))}`);
@@ -171,7 +171,7 @@ async function main() {
       ORDER BY command
       LIMIT 20
     `);
-    for (const r of cmds) {
+    for (const r of cmds.records) {
       console.log(`  /${r.get('command')} → ${r.get('handler')}`);
     }
 
@@ -183,7 +183,7 @@ async function main() {
       ORDER BY callerCount DESC
       LIMIT 10
     `);
-    for (const r of hotFns) {
+    for (const r of hotFns.records) {
       const file = (r.get('file') as string)?.split('/').pop();
       console.log(`  ${r.get('name')} (${file}): ${r.get('callerCount').toNumber()} callers`);
     }

@@ -95,7 +95,7 @@ async function main() {
     // Sample some call targets
     console.log('  Sample targets (first 20):');
     for (const call of createBotCalls.slice(0, 20)) {
-      console.log(`    → ${call.endNodeId} ${call.properties?.callContext ? JSON.stringify(call.properties.callContext) : ''}`);
+      console.log(`    → ${call.endNodeId} ${(call.properties as any)?.callContext ? JSON.stringify((call.properties as any).callContext) : ''}`);
     }
   } else {
     console.log('\n⚠️ createBot not found in parsed nodes!');
