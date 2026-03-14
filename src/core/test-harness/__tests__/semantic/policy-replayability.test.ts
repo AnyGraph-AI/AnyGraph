@@ -217,7 +217,12 @@ await test('advisory invariant failure → ADVISORY_WARN (not FAIL)', () => {
   // Fail an advisory-only invariant
   results.find(r => r.invariantId === 'suspicious_evidence_density')!.passed = false;
   results.find(r => r.invariantId === 'suspicious_evidence_density')!.violationCount = 1;
-  const input = makeInput({ invariantResults: results });
+  // Use STATUS_INVARIANT_CONFIDENCE change class so C2 lane is required
+  // (HEURISTIC+TASK invariants are only applicable when C2 is in scope)
+  const input = makeInput({
+    invariantResults: results,
+    changedFiles: ['src/scripts/verify/verify-commit-audit-invariants.ts'],
+  });
   const { packet, log } = evaluateGate(policy, input, EVAL_CONFIG);
   assert.equal(packet.decision, GateDecision.ADVISORY_WARN);
   assert.ok(log.entries.some(e => e.invariantId === 'suspicious_evidence_density' && e.action === 'warn'));
@@ -299,13 +304,16 @@ await test('verifyReplayConsistency fails when decision differs', () => {
 
 await test('decision log has correct structure and references', () => {
   const policy = assemblePolicyBundle();
-  const input = makeInput();
+  // Use STATUS_INVARIANT_CONFIDENCE to include all invariant scopes (C1+C2)
+  const input = makeInput({
+    changedFiles: ['src/scripts/verify/verify-commit-audit-invariants.ts'],
+  });
   const { packet, log } = evaluateGate(policy, input, EVAL_CONFIG);
   
   // Log ID should be referenced from packet
   assert.equal(packet.decisionLogRef, log.logId);
   
-  // Log should have entries for all invariants
+  // Log should have entries for all 10 invariants (C2 in scope → all applicable)
   assert.ok(log.entries.length >= 10, `expected >=10 entries, got ${log.entries.length}`);
   
   // Each entry should have required fields
