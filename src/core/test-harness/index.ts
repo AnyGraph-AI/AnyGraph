@@ -92,6 +92,57 @@ export {
   type MutationResult,
 } from './metamorphic.js';
 export {
+  PRESERVING_MUTATIONS,
+  BREAKING_MUTATIONS,
+  DYNAMIC_QUERY_EQUIVALENCES,
+  reduceBreakingMutation,
+  type BreakingMutation,
+  type MutationCounterexample,
+} from './mutation-library.js';
+export {
+  runEvalCase,
+  runEvalSet,
+  evaluatePromotion,
+  DEFAULT_HAZARD_THRESHOLDS,
+  NL_TO_CYPHER_CANARY,
+  NL_TO_CYPHER_ADVERSARIAL,
+  type EvalCase,
+  type EvalResult,
+  type EvalSetResult,
+  type EvalSetTier,
+  type AIHazardCategory,
+  type HazardThreshold,
+  type PromotionDecision,
+} from './ai-tevv.js';
+export {
+  captureProvenance,
+  verifyProvenanceEnvelope,
+  verifyArtifactDigest,
+  checkProvenanceRequirement,
+  DEFAULT_PROVENANCE_POLICY,
+  type ProvenanceEnvelope,
+  type ProvenanceSubject,
+  type ProvenanceBuilder,
+  type ProvenancePolicy,
+  type RequiredSurface,
+} from './provenance-hardening.js';
+export {
+  checkConfidenceRegression,
+  analyzeCompletenessTrend,
+  computeOverrideEntropy,
+  analyzePolicyEffectiveness,
+  DEFAULT_REGRESSION_BUDGET,
+  type ConfidenceSnapshot,
+  type EvidenceCompletenessSnapshot,
+  type OverrideEvent,
+  type PolicyEffectivenessSnapshot,
+  type RegressionBudgetConfig,
+  type RegressionCheckResult,
+  type CompletenessTrend,
+  type OverrideEntropyResult,
+  type PolicyEffectivenessTrend,
+} from './confidence-analytics.js';
+export {
   FlakeTracker,
   DEFAULT_FLAKE_CONFIG,
   type FlakeGovernanceConfig,
