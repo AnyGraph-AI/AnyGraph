@@ -388,10 +388,13 @@ export class SoftwareGovernancePack implements GroundTruthPack {
        MATCH (t:Task) WHERE t.id = $taskId OR t.name = $taskId
        MATCH (sf:SourceFile)
        WHERE any(word IN split(toLower(t.name), ' ')
-                 WHERE size(word) > 5 AND toLower(sf.name) CONTAINS word)
+                 WHERE size(word) > 8
+                 AND NOT word IN ['implement', 'integrate', 'refactor', 'verification', 'configure', 'establish']
+                 AND toLower(sf.name) CONTAINS word)
        RETURN t.name AS taskName, t.id AS tid,
               sf.filePath AS filePath, 0.3 AS confidence,
-              'keyword_match' AS source`,
+              'keyword_match' AS source
+       LIMIT 10`,
       { taskId },
     );
 
