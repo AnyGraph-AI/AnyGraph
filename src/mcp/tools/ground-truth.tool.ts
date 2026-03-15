@@ -103,6 +103,27 @@ function formatOutput(output: GroundTruthOutput): string {
     lines.push(`Evidence: ${v.withEvidence}/${v.total} done tasks (${v.pct}%)`);
   }
 
+  // GTH-9: Contradictions
+  if (panel1.contradictions && panel1.contradictions.length > 0) {
+    lines.push('');
+    lines.push('── Contradictions (current milestone) ──');
+    for (const obs of panel1.contradictions) {
+      const v = obs.value as any;
+      lines.push(`  ⚡ ${v.statement} — contra: ${v.contradiction}`);
+    }
+  }
+
+  // GTH-9: Open Hypotheses
+  if (panel1.openHypotheses && panel1.openHypotheses.length > 0) {
+    lines.push('');
+    lines.push('── Open Hypotheses (current milestone) ──');
+    for (const obs of panel1.openHypotheses) {
+      const v = obs.value as any;
+      const sev = v.severity === 'critical' ? '🔴' : v.severity === 'warning' ? '🟡' : 'ℹ️';
+      lines.push(`  ${sev} [${v.domain}] ${v.name}`);
+    }
+  }
+
   // Panel 1B
   lines.push('');
   lines.push('── Panel 1B: Integrity ──');

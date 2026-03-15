@@ -419,6 +419,95 @@ export class SoftwareGovernancePack implements GroundTruthPack {
     }));
   }
 
+  // ─── GTH-9: Claim Layer Integration ─────────────────────────────
+
+  async queryClaimChainForTask(taskId: string, projectId?: string): Promise<Observation[]> {
+    // Traverse: Task -[:HAS_CODE_EVIDENCE]-> SourceFile <-[:ANCHORS]- Evidence -[:SUPPORTED_BY|CONTRADICTED_BY]- Claim
+    const rows = await this.neo4j.run(
+      `MATCH (t:Task) WHERE t.id = $taskId OR t.name = $taskId
+       MATCH (t)-[:HAS_CODE_EVIDENCE]->(sf:SourceFile)
+       MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)-[:ANCHORS]->(sf)
+       RETURN DISTINCT c.id AS claimId, c.statement AS statement,
+              c.confidence AS confidence, c.claimType AS claimType,
+              collect(DISTINCT sf.name) AS evidenceFiles`,
+      { taskId, projectId: projectId ?? null },
+    );
+
+    return rows.map(r => obs(
+      {
+        claimId: r.claimId,
+        statement: r.statement,
+        confidence: Number(r.confidence),
+        claimType: r.claimType,
+        evidenceFiles: r.evidenceFiles,
+      },
+      'ClaimChain',
+    ));
+  }
+
+  async queryContradictionsForMilestone(milestone: string, projectId?: string): Promise<Observation[]> {
+    const projectFilter = projectId ? `AND t.projectId = $projectId` : '';
+    const rows = await this.neo4j.run(
+      `MATCH (t:Task)-[:PART_OF]->(m:Milestone)
+       WHERE m.name = $milestone ${projectFilter}
+       MATCH (t)-[:HAS_CODE_EVIDENCE]->(sf:SourceFile)
+       MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)-[:ANCHORS]->(sf)
+       MATCH (c)-[:CONTRADICTED_BY]->(contra:Evidence)
+       RETURN DISTINCT c.id AS claimId, c.statement AS statement,
+              c.confidence AS confidence,
+              contra.description AS contradictionDesc,
+              contra.source AS contradictionSource`,
+      { milestone, projectId: projectId ?? null },
+    );
+
+    return rows.map(r => obs(
+      {
+        claimId: r.claimId,
+        statement: r.statement,
+        confidence: Number(r.confidence),
+        contradiction: r.contradictionDesc,
+        contradictionSource: r.contradictionSource,
+      },
+      'Contradiction',
+    ));
+  }
+
+  async queryOpenHypothesesForMilestone(milestone: string, projectId?: string): Promise<Observation[]> {
+    const projectFilter = projectId ? `AND t.projectId = $projectId` : '';
+
+    // Get hypotheses linked to tasks in this milestone, plus integrity hypotheses
+    const rows = await this.neo4j.run(
+      `// Task-linked hypotheses for this milestone
+       OPTIONAL MATCH (t:Task)-[:PART_OF]->(m:Milestone)
+       WHERE m.name = $milestone ${projectFilter}
+       OPTIONAL MATCH (h:Hypothesis {status: 'open'})
+       WHERE h.sourceNodeId = t.id
+       WITH collect(DISTINCT h) AS taskHyps
+       // Integrity hypotheses (global, not milestone-scoped)
+       OPTIONAL MATCH (ih:Hypothesis {status: 'open', domain: 'integrity'})
+       WITH taskHyps + collect(DISTINCT ih) AS allHyps
+       UNWIND allHyps AS hyp
+       WHERE hyp IS NOT NULL
+       RETURN DISTINCT hyp.id AS hypId, hyp.name AS name,
+              hyp.confidence AS confidence, hyp.domain AS domain,
+              hyp.generatedFrom AS generatedFrom,
+              hyp.severity AS severity`,
+      { milestone, projectId: projectId ?? null },
+    );
+
+    return rows.map(r => obs(
+      {
+        hypothesisId: r.hypId,
+        name: r.name,
+        confidence: Number(r.confidence ?? 0),
+        domain: r.domain,
+        generatedFrom: r.generatedFrom,
+        severity: r.severity ?? 'info',
+      },
+      'Hypothesis',
+    ));
+  }
+
   async close(): Promise<void> {
     await this.neo4j.close();
   }

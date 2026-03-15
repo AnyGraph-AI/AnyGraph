@@ -13,6 +13,8 @@
 import { Neo4jService } from '../../storage/neo4j/neo4j.service.js';
 import type { GroundTruthPack } from './pack-interface.js';
 import { computeDelta } from './delta.js';
+import { IntegrityPersistence } from './integrity-persistence.js';
+import { IntegrityHypothesisGenerator } from './integrity-hypothesis-generator.js';
 import type {
   CheckTier,
   IntegrityFinding,
@@ -287,6 +289,29 @@ export class GroundTruthRuntime {
       candidateModifies: rawPanel3.candidateModifies,
     });
 
+    // GTH-7/8: Persist findings + generate hypotheses (fire-and-forget, non-blocking)
+    const allFindings = [...panel1.integrity.core, ...panel1.integrity.domain];
+    this.persistAndGenerateHypotheses(allFindings, options.projectId).catch(() => {
+      // Non-fatal — persistence failure doesn't block the hook
+    });
+
+    // GTH-9: Enrich Panel 1 with claim chain, contradictions, and hypotheses for milestone scope
+    if (options.currentTaskId && panel2.currentMilestone) {
+      try {
+        const [claimChain, contradictions, openHypotheses] = await Promise.all([
+          this.pack.queryClaimChainForTask(options.currentTaskId, options.projectId),
+          this.pack.queryContradictionsForMilestone(panel2.currentMilestone, options.projectId),
+          this.pack.queryOpenHypothesesForMilestone(panel2.currentMilestone, options.projectId),
+        ]);
+        // Append to relevant claims (claim chain) and add new sections
+        panel1.relevantClaims.push(...claimChain);
+        panel1.contradictions = contradictions;
+        panel1.openHypotheses = openHypotheses;
+      } catch {
+        // Non-fatal — claim integration failure doesn't block the hook
+      }
+    }
+
     return {
       panel1,
       panel2,
@@ -298,6 +323,20 @@ export class GroundTruthRuntime {
         durationMs: Date.now() - startMs,
       },
     };
+  }
+
+  /**
+   * GTH-7/8: Persist integrity findings and generate hypotheses from persistent discrepancies.
+   */
+  private async persistAndGenerateHypotheses(
+    findings: IntegrityFinding[],
+    projectId: string,
+  ): Promise<void> {
+    const persistence = new IntegrityPersistence(this.neo4j);
+    await persistence.persistFindings(findings, projectId);
+
+    const generator = new IntegrityHypothesisGenerator(this.neo4j);
+    await generator.generateFromDiscrepancies();
   }
 
   // ─── Panel 1: Graph State ───────────────────────────────────────

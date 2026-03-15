@@ -5,4 +5,6 @@ export * from './delta.js';
 export * from './session-bookmark.js';
 export * from './warn-enforcement.js';
 export * from './observed-events.js';
+export * from './integrity-persistence.js';
+export * from './integrity-hypothesis-generator.js';
 export { SoftwareGovernancePack } from './packs/software.js';

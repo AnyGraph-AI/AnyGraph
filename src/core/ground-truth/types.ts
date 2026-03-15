@@ -157,6 +157,10 @@ export interface Panel1Output {
   governanceHealth: Observation[];
   evidenceCoverage: Observation[];
   relevantClaims: Observation[];
+  /** GTH-9: Claim chain contradictions for current milestone scope */
+  contradictions?: Observation[];
+  /** GTH-9: Open hypotheses for current milestone scope */
+  openHypotheses?: Observation[];
   /** Panel 1B: Integrity report */
   integrity: IntegrityReport;
 }

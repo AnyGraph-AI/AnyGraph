@@ -86,6 +86,26 @@ export interface GroundTruthPack {
    */
   queryCandidateModifies(taskId: string, projectId?: string): Promise<CandidateEdge[]>;
 
+  // ─── GTH-9: Claim Layer Integration ─────────────────────────────
+
+  /**
+   * Traverse claim chain path from a task's evidence to downstream claims.
+   * Returns claims structurally relevant to the current task scope.
+   */
+  queryClaimChainForTask(taskId: string, projectId?: string): Promise<Observation[]>;
+
+  /**
+   * Surface contradictions relevant to the current milestone scope.
+   * Returns claims with CONTRADICTED_BY edges in the milestone's task set.
+   */
+  queryContradictionsForMilestone(milestone: string, projectId?: string): Promise<Observation[]>;
+
+  /**
+   * Surface open hypotheses relevant to the current milestone scope.
+   * Includes both integrity-generated and gap-generated hypotheses.
+   */
+  queryOpenHypothesesForMilestone(milestone: string, projectId?: string): Promise<Observation[]>;
+
   /** Optional cleanup — close underlying connections */
   close?(): Promise<void>;
 }

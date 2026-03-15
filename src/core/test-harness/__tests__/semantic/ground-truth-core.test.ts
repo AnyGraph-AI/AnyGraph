@@ -37,6 +37,9 @@ function createMockPack(): GroundTruthPack {
       makeObservation({ withEvidence: 82, total: 297, pct: 27.6 }, 'HAS_CODE_EVIDENCE', 'exact'),
     ]),
     queryRelevantClaims: vi.fn().mockResolvedValue([]),
+    queryClaimChainForTask: vi.fn().mockResolvedValue([]),
+    queryContradictionsForMilestone: vi.fn().mockResolvedValue([]),
+    queryOpenHypothesesForMilestone: vi.fn().mockResolvedValue([]),
     queryIntegritySurfaces: vi.fn().mockResolvedValue([
       makeFinding('test_coverage', 'coverage', 'domain', 'warning', 72.4, 0, false),
     ]),
