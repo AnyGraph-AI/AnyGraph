@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "projectId": "proj_c0d3e9a1f200",
+  "repoRoot": "/home/jonathan/.openclaw/workspace/codegraph",
+  "codeownersPath": ".github/CODEOWNERS",
+  "codeownersEntries": 1,
+  "ownershipScopeCount": 1,
+  "parityOk": true,
+  "staleDays": 45,
+  "criticalFilesChecked": 140,
+  "unownedCriticalCount": 0,
+  "staleCriticalCount": 0,
+  "violationsCreated": 0,
+  "unownedCritical": [],
+  "staleCritical": []
+}

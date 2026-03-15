@@ -1,0 +1,204 @@
+{
+  "ok": true,
+  "projectId": "proj_c0d3e9a1f200",
+  "scopeId": "proof-scope:proj_c0d3e9a1f200:v1",
+  "selectors": [
+    "GM-",
+    "DL-",
+    "HY-14",
+    "HY-15",
+    "HY-16",
+    "HY-17",
+    "HY-18",
+    "AIH-15",
+    "AIH-16",
+    "AIH-17",
+    "AIH-18",
+    "AIH-19"
+  ],
+  "doneTaskCount": 59,
+  "doneWithoutEvidenceCount": 44,
+  "coverageRows": [
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneFamily": "DL",
+      "totalDone": 22,
+      "withEvidence": 2,
+      "doneWithoutEvidence": 20,
+      "proofCoverage": 0.09090909090909091
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneFamily": "GM",
+      "totalDone": 37,
+      "withEvidence": 13,
+      "doneWithoutEvidence": 24,
+      "proofCoverage": 0.35135135135135137
+    }
+  ],
+  "snapshotId": "hygiene-metric:proj_c0d3e9a1f200:proof:1773541338631",
+  "sampleViolations": [
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-1",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:c83598068e13025b",
+      "taskName": "Align Milestone 2 status with child-task truth model (no `planned` milestone with all critical children `done` unless explicitly deferred lane)",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-1",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:8f1b21e89269f375",
+      "taskName": "Reclassify over-claimed document tasks from `done` to `partial/planned` when canonical document witnesses are missing",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-1",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:16143838aaa22d63",
+      "taskName": "Split document-adapter completion semantics into explicit lanes: `schema/plumbing complete` vs `canonical materialization complete`",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-2",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:ad080dc24aada0cd",
+      "taskName": "Capture baseline query snapshot pack for before/after comparability (`DocumentWitness` count, claim-to-witness support count, document-project count)",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-2",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:2cb813db60e5a1b3",
+      "taskName": "Persist witness classes for canonical lane (`DocumentCollection`, `DocumentNode`, paragraph/entity equivalents) with stable identity fields",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-2",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:5392e218c5fb8bc2",
+      "taskName": "Materialize canonical document-layer graph witnesses under proper project taxonomy (`Project.projectType='document'`)",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-2",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:5dea57c0b74576d6",
+      "taskName": "Define canonical witness identity/upsert rule: `witnessId = sha256(normalizedContent)`; `sourcePath` metadata-only unless policy requires source-distinct witnesses",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-2",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:e945c86d899b4ce7",
+      "taskName": "Define canonical witness node shape `DocumentWitness` with fields: `sourceType`, `sourcePath`, `contentHash`, `extractionTimestamp`",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-5",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:dcf2ad0c164b73ea",
+      "taskName": "Promote invariant from advisory to fail-closed after DL-2 witness materialization proves stable",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-5",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:63a394fb981e00ea",
+      "taskName": "Add invariant exception policy only for explicitly marked IR-shadow tasks with expiry + ticket reference",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-5",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:3df89fa7b2a95fbb",
+      "taskName": "Add machine-checkable invariant (advisory mode first): any `done` document-materialization task requires (a) at least one `Project.projectType='document'` and (b) canonical document witness nodes present",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-3",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:6b36f962fa65c340",
+      "taskName": "Add project identity contract check: document ingestion outputs must not register as `projectType='code'`",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-3",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:16f48fae9aa0fea0",
+      "taskName": "Add migration/reclassification procedure for IR-only document outputs to canonical document project or mark explicitly as shadow lane",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-3",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:684ae9634842668e",
+      "taskName": "Audit and resolve document-like nodes currently stored under non-document derived project namespaces",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-4",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:94869150bddfb72f",
+      "taskName": "Fail claim generation for `document complete` assertions when support grade is below `runtime_materialized`",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-4",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:5cb3765da1d3c15e",
+      "taskName": "Add claim support grading for document completion (`plan_only`, `code_only`, `runtime_materialized`)",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-4",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:cd890d2e1e764092",
+      "taskName": "Require document-completion `task_completion` claims to include runtime/materialized witnesses (plan checkbox evidence alone is insufficient)",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-6",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:4b68b03574cfad22",
+      "taskName": "Surface wording status in verification status dashboard outputs",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-6",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:0d389421b9b60d11",
+      "taskName": "Add forbidden wording rule: block \"document layer complete\" phrasing when canonical witness invariant is red",
+      "evidenceEdgeCount": 0
+    },
+    {
+      "planProjectId": "plan_codegraph",
+      "milestoneCode": "DL-6",
+      "milestoneFamily": "DL",
+      "taskId": "plan_codegraph:Task:98395e8440d5ae54",
+      "taskName": "Add pitch-safe wording contract: allowed claim = \"document adapter plumbing + IR ingestion proven\" until DL-2 witness criteria pass",
+      "evidenceEdgeCount": 0
+    }
+  ],
+  "advisoryMode": true,
+  "enforce": false
+}

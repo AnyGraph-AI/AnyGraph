@@ -3,17 +3,13 @@
  *
  * Tests Socket.prototype.connect interception.
  */
-
+import { describe, it, expect, afterEach } from 'vitest';
 import * as net from 'node:net';
 import {
   blockNetwork,
   unblockNetwork,
   getBlockedRequests,
 } from '../network-guard.js';
-
-function assert(condition: boolean, msg: string): void {
-  if (!condition) throw new Error(`FAIL: ${msg}`);
-}
 
 /** Helper: try connecting and check if guard blocked it */
 function tryConnect(host: string, port: number): Promise<{ guardBlocked: boolean }> {
@@ -34,7 +30,6 @@ function tryConnect(host: string, port: number): Promise<{ guardBlocked: boolean
       resolve({ guardBlocked: false });
     });
 
-    // Timeout for unresolvable hosts
     sock.setTimeout(500, () => {
       sock.destroy();
       resolve({ guardBlocked });
@@ -44,85 +39,59 @@ function tryConnect(host: string, port: number): Promise<{ guardBlocked: boolean
   });
 }
 
-async function runTests(): Promise<void> {
-  let passed = 0;
-  let failed = 0;
+describe('Network Guard', () => {
+  afterEach(() => {
+    unblockNetwork();
+  });
 
-  const tests: [string, () => Promise<void>][] = [
-    ['blocks external connections', async () => {
-      blockNetwork();
-      const result = await tryConnect('example.com', 80);
-      assert(result.guardBlocked, 'should have blocked example.com:80');
-      unblockNetwork();
-    }],
+  it('blocks external connections', async () => {
+    blockNetwork();
+    const result = await tryConnect('example.com', 80);
+    expect(result.guardBlocked).toBe(true);
+  });
 
-    ['allows localhost Neo4j bolt (7687)', async () => {
-      blockNetwork();
-      const result = await tryConnect('localhost', 7687);
-      assert(!result.guardBlocked, 'should NOT block localhost:7687');
-      unblockNetwork();
-    }],
+  it('allows localhost Neo4j bolt (7687)', async () => {
+    blockNetwork();
+    const result = await tryConnect('localhost', 7687);
+    expect(result.guardBlocked).toBe(false);
+  });
 
-    ['allows 127.0.0.1 Neo4j HTTP (7474)', async () => {
-      blockNetwork();
-      const result = await tryConnect('127.0.0.1', 7474);
-      assert(!result.guardBlocked, 'should NOT block 127.0.0.1:7474');
-      unblockNetwork();
-    }],
+  it('allows 127.0.0.1 Neo4j HTTP (7474)', async () => {
+    blockNetwork();
+    const result = await tryConnect('127.0.0.1', 7474);
+    expect(result.guardBlocked).toBe(false);
+  });
 
-    ['blocks localhost on non-whitelisted port', async () => {
-      blockNetwork();
-      const result = await tryConnect('localhost', 3000);
-      assert(result.guardBlocked, 'should block localhost:3000');
-      unblockNetwork();
-    }],
+  it('blocks localhost on non-whitelisted port', async () => {
+    blockNetwork();
+    const result = await tryConnect('localhost', 3000);
+    expect(result.guardBlocked).toBe(true);
+  });
 
-    ['records blocked attempts', async () => {
-      blockNetwork();
-      await tryConnect('evil.com', 443);
-      await tryConnect('bad.org', 80);
-      const blocked = getBlockedRequests();
-      assert(blocked.length === 2, `expected 2 blocked, got ${blocked.length}`);
-      assert(blocked[0].host === 'evil.com', `wrong host[0]: ${blocked[0].host}`);
-      assert(blocked[1].host === 'bad.org', `wrong host[1]: ${blocked[1].host}`);
-      unblockNetwork();
-    }],
+  it('records blocked attempts', async () => {
+    blockNetwork();
+    await tryConnect('evil.com', 443);
+    await tryConnect('bad.org', 80);
+    const blocked = getBlockedRequests();
+    expect(blocked).toHaveLength(2);
+    expect(blocked[0].host).toBe('evil.com');
+    expect(blocked[1].host).toBe('bad.org');
+  });
 
-    ['unblock restores connections', async () => {
-      blockNetwork();
-      unblockNetwork();
-      const result = await tryConnect('localhost', 3000);
-      assert(!result.guardBlocked, 'should not guard after unblock');
-    }],
+  it('unblock restores connections', async () => {
+    blockNetwork();
+    unblockNetwork();
+    const result = await tryConnect('localhost', 3000);
+    expect(result.guardBlocked).toBe(false);
+  });
 
-    ['custom allowed hosts/ports', async () => {
-      blockNetwork({ allowedHosts: ['localhost'], allowedPorts: [9999] });
+  it('custom allowed hosts/ports', async () => {
+    blockNetwork({ allowedHosts: ['localhost'], allowedPorts: [9999] });
 
-      // Allowed
-      const r1 = await tryConnect('localhost', 9999);
-      assert(!r1.guardBlocked, 'should allow custom port');
+    const r1 = await tryConnect('localhost', 9999);
+    expect(r1.guardBlocked).toBe(false);
 
-      // Not allowed
-      const r2 = await tryConnect('localhost', 7687);
-      assert(r2.guardBlocked, 'should block non-whitelisted port');
-
-      unblockNetwork();
-    }],
-  ];
-
-  for (const [name, fn] of tests) {
-    try {
-      await fn();
-      passed++;
-      console.log(`  ✅ ${name}`);
-    } catch (e) {
-      failed++;
-      console.error(`  ❌ ${name}: ${(e as Error).message}`);
-    }
-  }
-
-  console.log(`\n${passed}/${passed + failed} passed`);
-  if (failed > 0) process.exit(1);
-}
-
-runTests();
+    const r2 = await tryConnect('localhost', 7687);
+    expect(r2.guardBlocked).toBe(true);
+  });
+});
