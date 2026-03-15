@@ -12,6 +12,7 @@
 
 import { Neo4jService } from '../../storage/neo4j/neo4j.service.js';
 import type { GroundTruthPack } from './pack-interface.js';
+import { computeDelta } from './delta.js';
 import type {
   CheckTier,
   IntegrityFinding,
@@ -269,11 +270,19 @@ export class GroundTruthRuntime {
     const depth = options.depth ?? 'fast';
     const planProjectId = options.planProjectId ?? this.derivePlanProjectId(options.projectId);
 
-    const [panel1, panel2, panel3] = await Promise.all([
+    const [panel1, panel2, rawPanel3] = await Promise.all([
       this.runPanel1(options.projectId, planProjectId, depth, options.currentTaskId, options.filesTouched),
       this.runPanel2(options.agentId, options.projectId),
       this.runPanel3(options.currentTaskId, options.filesTouched),
     ]);
+
+    // Compute deltas using the delta engine (GTH-3)
+    const panel3 = computeDelta({
+      panel1,
+      panel2,
+      transitiveImpact: rawPanel3.transitiveImpact,
+      candidateModifies: rawPanel3.candidateModifies,
+    });
 
     return {
       panel1,

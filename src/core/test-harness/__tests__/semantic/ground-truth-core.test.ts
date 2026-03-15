@@ -218,15 +218,17 @@ describe('GTH-1: Core Runtime + Pack Interface', () => {
       expect(output.panel2.sessionBookmark).toBeNull();
     });
 
-    it('Panel 3 returns empty deltas when no task/files', async () => {
+    it('Panel 3 returns deltas computed from graph/agent state', async () => {
       const output = await runtime.run({
         projectId: 'proj_test',
         depth: 'fast',
       });
 
-      expect(output.panel3.deltas).toEqual([]);
+      // Deltas are now computed by the delta engine (GTH-3)
+      // Even with no task/files, derived deltas may appear (e.g., evidence coverage)
       expect(output.panel3.transitiveImpact).toEqual([]);
       expect(output.panel3.candidateModifies).toEqual([]);
+      expect(Array.isArray(output.panel3.deltas)).toBe(true);
     });
 
     it('calls pack methods with correct arguments', async () => {

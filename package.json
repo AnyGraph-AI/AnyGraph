@@ -122,7 +122,8 @@
     "governance:metric:def:verify": "node --loader ts-node/esm src/utils/verify-governance-metric-definition-lineage.ts",
     "done-check:strict:smoke": "STRICT_SCOPED_DEPENDS_ON=true DOCUMENT_WITNESS_ENFORCE=false GOVERNANCE_METRICS_ENFORCE=false STALE_CHECK_SLA_MINUTES=10000 npm run done-check && npm run verification:done-check:capture:only",
     "done-check:strict:full": "STRICT_SCOPED_DEPENDS_ON=true DOCUMENT_WITNESS_ENFORCE=true GOVERNANCE_METRICS_ENFORCE=true npm run done-check && npm run verification:done-check:capture:only",
-    "evidence:auto-link": "node --loader ts-node/esm src/utils/evidence-auto-linker.ts"
+    "evidence:auto-link": "node --loader ts-node/esm src/utils/evidence-auto-linker.ts",
+    "ground-truth": "npx tsx src/core/ground-truth/cli.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.15.1",
