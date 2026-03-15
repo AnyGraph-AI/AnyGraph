@@ -239,6 +239,10 @@ export const TrustViewSchema = z.object({
   normalizationMode: z.enum(['linear', 'softmax']).optional(),
   /** Damping factor used by shadow propagation (TC-3) */
   dampingFactorUsed: z.number().min(0).max(1).optional(),
+  /** Required confidence level for this entity (TC-5) */
+  requiredConfidence: z.number().min(0).max(1).optional(),
+  /** Computed confidence debt: max(0, required - effective) (TC-5) */
+  confidenceDebt: z.number().min(0).max(1).optional(),
   /** Version counter for confidence recomputation lineage */
   confidenceVersion: z.number().int().nonnegative().optional(),
   /** Hash of all inputs used to compute this confidence value */
@@ -322,6 +326,8 @@ export const VIEW_FIELD_REGISTRY: Readonly<Record<string, VerificationView>> = {
   shadowInfluenceScore: 'trust',
   normalizationMode: 'trust',
   dampingFactorUsed: 'trust',
+  requiredConfidence: 'trust',
+  confidenceDebt: 'trust',
   confidenceVersion: 'trust',
   confidenceInputsHash: 'trust',
   lastRecomputeAt: 'trust',
