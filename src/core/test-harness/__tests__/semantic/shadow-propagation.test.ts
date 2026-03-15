@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 class MockNeo4j {
   private data: Record<string, any[]> = {};
   public queries: string[] = [];
+  public paramLog: Array<{ query: string; params: any }> = [];
 
   setRunResult(querySubstring: string, result: any[]) {
     this.data[querySubstring] = result;
@@ -16,6 +17,7 @@ class MockNeo4j {
 
   async run(query: string, params?: any): Promise<any[]> {
     this.queries.push(query);
+    this.paramLog.push({ query, params });
     for (const [key, val] of Object.entries(this.data)) {
       if (query.includes(key)) return val;
     }
@@ -58,7 +60,25 @@ describe('Shadow Propagation (TC-3)', () => {
 
     const result = await runShadowPropagation(neo4j as any, 'proj_test');
     expect(result.updated).toBe(2);
-    // Shadow should be different from raw tcf due to neighbor influence
+
+    // Verify computed shadow values from the UNWIND update params
+    const unwindCall = neo4j.paramLog.find(p => p.query.includes('UNWIND $updates'));
+    expect(unwindCall).toBeDefined();
+    const updates = unwindCall!.params.updates as Array<{ id: string; shadowEffectiveConfidence: number }>;
+    expect(updates).toHaveLength(2);
+
+    const shadow1 = updates.find(u => u.id === 'run-1')!.shadowEffectiveConfidence;
+    const shadow2 = updates.find(u => u.id === 'run-2')!.shadowEffectiveConfidence;
+
+    // Hand-computed (damping=0.85, linear, maxHops=3):
+    // run-1: own=0.5, neighbor run-2 at hop 1 sees run-1 in visited at hop 2 → base 0.5
+    //   run-2 at hop 1: own=1.0, avg=0.5, shadow=1.0*0.15+0.5*0.85=0.575
+    //   run-1: avg=0.575, shadow=0.5*0.15+0.575*0.85=0.56375
+    // run-2: own=1.0, neighbor run-1 at hop 1 sees run-2 in visited at hop 2 → base 1.0
+    //   run-1 at hop 1: own=0.5, avg=1.0, shadow=0.5*0.15+1.0*0.85=0.925
+    //   run-2: avg=0.925, shadow=1.0*0.15+0.925*0.85=0.93625
+    expect(shadow1).toBeCloseTo(0.56375, 3);
+    expect(shadow2).toBeCloseTo(0.93625, 3);
   });
 
   it('never persists to effectiveConfidence field', async () => {
@@ -135,5 +155,30 @@ describe('Shadow Propagation (TC-3)', () => {
 
     const result = await runShadowPropagation(neo4j as any, 'proj_test', config);
     expect(result.updated).toBe(2);
+  });
+
+  it('filters out neighbors below minInfluence threshold', async () => {
+    const neo4j = new MockNeo4j();
+    // run-2 has tcf=0.005 (below default minInfluence=0.01)
+    neo4j.setRunResult('MATCH (r:VerificationRun', [
+      { id: 'run-1', tcf: 0.9, penalty: 1.0, prodConf: null, neighbors: ['run-2'] },
+      { id: 'run-2', tcf: 0.005, penalty: 1.0, prodConf: null, neighbors: [] },
+    ]);
+    neo4j.setRunResult('UNWIND $updates', []);
+
+    const result = await runShadowPropagation(neo4j as any, 'proj_test');
+    expect(result.updated).toBe(2);
+
+    const unwindCall = neo4j.paramLog.find(p => p.query.includes('UNWIND $updates'));
+    const updates = unwindCall!.params.updates as Array<{ id: string; shadowEffectiveConfidence: number }>;
+
+    const shadow1 = updates.find(u => u.id === 'run-1')!.shadowEffectiveConfidence;
+    // run-2's score at hop 1: own=0.005*1.0=0.005. No neighbors → returns 0.005.
+    // 0.005 < minInfluence(0.01) → filtered out → neighborCount=0 → shadow = ownScore = 0.9
+    expect(shadow1).toBeCloseTo(0.9, 3);
+
+    // run-2 itself: no neighbors → shadow = own score = 0.005
+    const shadow2 = updates.find(u => u.id === 'run-2')!.shadowEffectiveConfidence;
+    expect(shadow2).toBeCloseTo(0.005, 3);
   });
 });

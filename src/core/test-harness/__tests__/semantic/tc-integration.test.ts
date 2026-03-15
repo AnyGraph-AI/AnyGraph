@@ -5,6 +5,7 @@
  * Catches bugs that mocked tests miss (Cypher syntax, graph structure assumptions).
  */
 
+import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createEphemeralGraph, type EphemeralGraphRuntime } from '../../ephemeral-graph.js';
 import { incrementalRecompute } from '../../../verification/incremental-recompute.js';
@@ -17,7 +18,7 @@ let neo4j: Neo4jService;
 let projectId: string;
 
 beforeAll(async () => {
-  eph = await createEphemeralGraph({ testId: 'tc-int' });
+  eph = await createEphemeralGraph({ testId: `tc-int-${randomUUID().slice(0, 8)}` });
   projectId = eph.projectId;
   neo4j = new Neo4jService();
 
@@ -326,6 +327,71 @@ describe('TC-3: Shadow propagation (real Neo4j)', () => {
     expect(result.ok).toBe(true);
     expect(result.violations).toBe(0);
   });
+
+  it('multi-hop: middle node influenced by both neighbors', async () => {
+    // Create a 3-node chain: A→B→C with explicitly different TCF values
+    // (avoid relying on date-based TCF which computes ~1.0 for recent runs)
+    const now = new Date().toISOString();
+    for (const [suffix, tcf] of [['mh_a', 0.9], ['mh_b', 0.5], ['mh_c', 0.3]] as const) {
+      await neo4j.run(
+        `MERGE (r:VerificationRun {id: $id, projectId: $pid})
+         SET r.observedAt = $obs, r.validFrom = $obs,
+             r.status = 'satisfies', r.tool = 'test-mh',
+             r.artifactHash = 'sha256:mh',
+             r.timeConsistencyFactor = $tcf,
+             r.retroactivePenalty = 1.0`,
+        { id: `vr_${suffix}`, pid: projectId, obs: now, tcf },
+      );
+    }
+    await neo4j.run(
+      `MATCH (a:VerificationRun {id: 'vr_mh_a', projectId: $pid})
+       MATCH (b:VerificationRun {id: 'vr_mh_b', projectId: $pid})
+       MATCH (c:VerificationRun {id: 'vr_mh_c', projectId: $pid})
+       MERGE (a)-[:PRECEDES]->(b)
+       MERGE (b)-[:PRECEDES]->(c)`,
+      { pid: projectId },
+    );
+
+    // Run shadow propagation
+    await runShadowPropagation(neo4j, projectId);
+
+    const rows = await neo4j.run(
+      `MATCH (r:VerificationRun {projectId: $pid})
+       WHERE r.id STARTS WITH 'vr_mh_'
+       RETURN r.id AS id, r.timeConsistencyFactor AS tcf,
+              r.shadowEffectiveConfidence AS shadow
+       ORDER BY r.id`,
+      { pid: projectId },
+    );
+
+    expect(rows).toHaveLength(3);
+    const a = rows.find(r => r.id === 'vr_mh_a')!;
+    const b = rows.find(r => r.id === 'vr_mh_b')!;
+    const c = rows.find(r => r.id === 'vr_mh_c')!;
+
+    // All should have shadow values
+    expect(a.shadow).toBeDefined();
+    expect(b.shadow).toBeDefined();
+    expect(c.shadow).toBeDefined();
+
+    // B (middle node, tcf=0.5) has BOTH a (tcf=0.9) and c (tcf=0.3) as neighbors
+    // Shadow must differ from raw TCF — even slightly proves neighbor influence is applied
+    expect(Number(b.shadow)).not.toBe(Number(b.tcf));
+
+    // A (endpoint, tcf=0.9) — pulled down slightly by lower-TCF neighbor B
+    expect(Number(a.shadow)).toBeLessThanOrEqual(Number(a.tcf));
+
+    // C (endpoint, tcf=0.3) — pulled up by higher-TCF neighbor B
+    expect(Number(c.shadow)).toBeGreaterThan(Number(c.tcf));
+
+    // Cleanup the multi-hop nodes
+    await neo4j.run(
+      `MATCH (r:VerificationRun {projectId: $pid})
+       WHERE r.id STARTS WITH 'vr_mh_'
+       DETACH DELETE r`,
+      { pid: projectId },
+    );
+  });
 });
 
 describe('TC-Decay: decayedConfidence integration in claim engine (real Neo4j)', () => {
@@ -480,5 +546,74 @@ describe('TC-5: Confidence debt (real Neo4j)', () => {
 
     const verify = await verifyDebtFieldPresence(neo4j, projectId);
     expect(verify.ok).toBe(true);
+  });
+
+  it('debt = max(0, required - effective) for each VR', async () => {
+    // Query actual debt values and verify formula
+    const rows = await neo4j.run(
+      `MATCH (r:VerificationRun {projectId: $pid})
+       WHERE r.confidenceDebt IS NOT NULL
+       RETURN r.id AS id,
+              r.requiredConfidence AS req,
+              r.effectiveConfidence AS eff,
+              r.confidenceDebt AS debt`,
+      { pid: projectId },
+    );
+
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const req = row.req as number;
+      const eff = row.eff as number;
+      const debt = row.debt as number;
+      const expected = Math.max(0, req - eff);
+      expect(debt).toBeCloseTo(expected, 4);
+    }
+  });
+
+  it('debt is 0 when effective exceeds required', async () => {
+    // Seed a VR with high effective confidence
+    await neo4j.run(
+      `MERGE (r:VerificationRun {id: 'vr_debt_no_gap', projectId: $pid})
+       SET r.timeConsistencyFactor = 0.95, r.retroactivePenalty = 1.0,
+           r.observedAt = $obs, r.status = 'satisfies', r.tool = 'test-debt',
+           r.requiredConfidence = 0.7, r.effectiveConfidence = 0.9,
+           r.artifactHash = 'sha256:debt1'`,
+      { pid: projectId, obs: new Date().toISOString() },
+    );
+
+    await computeConfidenceDebt(neo4j, projectId);
+
+    const rows = await neo4j.run(
+      `MATCH (r:VerificationRun {id: 'vr_debt_no_gap', projectId: $pid})
+       RETURN r.confidenceDebt AS debt`,
+      { pid: projectId },
+    );
+    expect(Number(rows[0].debt)).toBe(0);
+
+    // Cleanup
+    await neo4j.run(`MATCH (r:VerificationRun {id: 'vr_debt_no_gap'}) DETACH DELETE r`);
+  });
+
+  it('debt equals gap when effective is below required', async () => {
+    await neo4j.run(
+      `MERGE (r:VerificationRun {id: 'vr_debt_has_gap', projectId: $pid})
+       SET r.timeConsistencyFactor = 0.3, r.retroactivePenalty = 1.0,
+           r.observedAt = $obs, r.status = 'violates', r.tool = 'test-debt',
+           r.requiredConfidence = 0.7, r.effectiveConfidence = 0.2,
+           r.artifactHash = 'sha256:debt2'`,
+      { pid: projectId, obs: new Date().toISOString() },
+    );
+
+    await computeConfidenceDebt(neo4j, projectId);
+
+    const rows = await neo4j.run(
+      `MATCH (r:VerificationRun {id: 'vr_debt_has_gap', projectId: $pid})
+       RETURN r.confidenceDebt AS debt`,
+      { pid: projectId },
+    );
+    expect(Number(rows[0].debt)).toBeCloseTo(0.5, 4);
+
+    // Cleanup
+    await neo4j.run(`MATCH (r:VerificationRun {id: 'vr_debt_has_gap'}) DETACH DELETE r`);
   });
 });

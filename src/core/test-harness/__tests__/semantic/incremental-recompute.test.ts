@@ -104,6 +104,28 @@ describe('Incremental Confidence Recompute (TC-2)', () => {
     expect(result.confidenceInputsHash).toHaveLength(32);
   });
 
+  it('blocks scoped recompute when candidates exceed MAX_SCOPED_CANDIDATES (500)', async () => {
+    const neo4j = new MockNeo4j();
+    // File-scope resolve returns 501 VR IDs — exceeds the 500 guard
+    const overflowIds = Array.from({ length: 501 }, (_, i) => ({ id: `run-overflow-${i}` }));
+    neo4j.setRunResult('UNWIND $paths', overflowIds);
+
+    const result = await incrementalRecompute(neo4j as any, {
+      projectId: 'proj_test',
+      scope: 'file',
+      targets: ['big-file.ts'],
+      reason: 'test_bounded_guard',
+    });
+
+    expect(result.candidateCount).toBe(501);
+    expect(result.updatedCount).toBe(0);
+    expect(result.skippedCount).toBe(501);
+    expect(result.reason).toContain('BLOCKED');
+    expect(result.reason).toContain('501');
+    expect(result.reason).toContain('500');
+    expect(result.bounded).toBe(false);
+  });
+
   it('persists provenance fields via UNWIND batch', async () => {
     const neo4j = new MockNeo4j();
     neo4j.setRunResult('MATCH (r:VerificationRun', [
