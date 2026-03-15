@@ -12,3 +12,6 @@ export * from './incremental-recompute.js';
 export * from './shadow-propagation.js';
 export * from './explainability-paths.js';
 export * from './confidence-debt.js';
+export * from './anti-gaming.js';
+export * from './calibration.js';
+export * from './promotion-policy.js';
