@@ -32,6 +32,7 @@ export async function ingestVerificationFoundation(
 
   try {
     for (const run of parsed.verificationRuns) {
+      const now = new Date().toISOString();
       await neo4j.run(
         `MERGE (n:CodeNode:VerificationRun {id: $id})
          SET n += $props,
@@ -43,7 +44,12 @@ export async function ingestVerificationFoundation(
           projectId: parsed.projectId,
           props: {
             ...run,
-            createdAt: run.createdAt ?? new Date().toISOString(),
+            createdAt: run.createdAt ?? now,
+            // TC-1: Temporal defaults — observedAt = ingestion time, validFrom = run time
+            observedAt: run.createdAt ?? now,
+            validFrom: run.createdAt ?? now,
+            validTo: null,
+            supersededAt: null,
           },
         },
       );

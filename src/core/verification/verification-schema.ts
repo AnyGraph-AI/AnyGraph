@@ -197,6 +197,16 @@ export const EvidenceViewSchema = z.object({
   lastSeenTs: z.string().datetime().optional(),
   baselineRef: z.string().optional(),
   mergeBase: z.string().optional(),
+
+  // ─── TC-1: Temporal Confidence Fields ─────────────────────────
+  /** When this evidence was observed/collected (ingestion timestamp) */
+  observedAt: z.string().datetime().optional(),
+  /** Start of the validity window for this evidence */
+  validFrom: z.string().datetime().optional(),
+  /** End of the validity window (null = still valid) */
+  validTo: z.string().datetime().nullable().optional(),
+  /** Timestamp when this evidence was superseded by newer observation */
+  supersededAt: z.string().datetime().nullable().optional(),
 });
 
 /**
@@ -217,8 +227,10 @@ export const TrustViewSchema = z.object({
   collusionFlag: z.boolean().optional(),
   /** Hard penalty factor applied during trust computation (0.0–1.0) */
   hardPenalty: z.number().min(0).max(1).optional(),
-  /** Time consistency factor for temporal trust decay */
+  /** Time consistency factor for temporal trust decay (TC-1) */
   timeConsistencyFactor: z.number().min(0).max(1).optional(),
+  /** Retroactive penalty applied when evidence is superseded or validity expires (TC-1) */
+  retroactivePenalty: z.number().min(0).max(1).optional(),
   /** Version counter for confidence recomputation lineage */
   confidenceVersion: z.number().int().nonnegative().optional(),
   /** Hash of all inputs used to compute this confidence value */
@@ -283,6 +295,11 @@ export const VIEW_FIELD_REGISTRY: Readonly<Record<string, VerificationView>> = {
   lastSeenTs: 'evidence',
   baselineRef: 'evidence',
   mergeBase: 'evidence',
+  // TC-1: Temporal fields
+  observedAt: 'evidence',
+  validFrom: 'evidence',
+  validTo: 'evidence',
+  supersededAt: 'evidence',
 
   // TrustView fields
   baseEvidenceScore: 'trust',
@@ -292,6 +309,7 @@ export const VIEW_FIELD_REGISTRY: Readonly<Record<string, VerificationView>> = {
   collusionFlag: 'trust',
   hardPenalty: 'trust',
   timeConsistencyFactor: 'trust',
+  retroactivePenalty: 'trust',
   confidenceVersion: 'trust',
   confidenceInputsHash: 'trust',
   lastRecomputeAt: 'trust',

@@ -73,7 +73,11 @@ export async function ingestRuntimeGateEvidence(
            r.artifactHash = $artifactHash,
            r.decisionHash = $decisionHash,
            r.status = CASE WHEN $ok THEN 'satisfies' ELSE 'violates' END,
-           r.updatedAt = toString(datetime())`,
+           r.updatedAt = toString(datetime()),
+           r.observedAt = coalesce(r.observedAt, $ranAt),
+           r.validFrom = coalesce(r.validFrom, $ranAt),
+           r.validTo = null,
+           r.supersededAt = null`,
       {
         projectId: input.projectId,
         runId,
@@ -202,6 +206,20 @@ export async function ingestRuntimeGateEvidence(
       );
       edgesCreated += 1;
     }
+
+    // TC-1: Create PRECEDES edge from previous run to this run (temporal ordering)
+    const precedesResult = await neo4j.run(
+      `MATCH (curr:VerificationRun {id: $runId, projectId: $projectId})
+       MATCH (prev:VerificationRun {projectId: $projectId})
+       WHERE prev.id <> $runId AND prev.ranAt IS NOT NULL
+       WITH curr, prev ORDER BY prev.ranAt DESC LIMIT 1
+       WHERE NOT (prev)-[:PRECEDES]->(curr)
+       CREATE (prev)-[p:PRECEDES]->(curr)
+       SET p.projectId = $projectId, p.createdAt = toString(datetime())
+       RETURN count(p) AS created`,
+      { projectId: input.projectId, runId },
+    );
+    if (precedesResult[0]?.created) edgesCreated += Number(precedesResult[0].created);
 
     return {
       runNodeUpserted: 1,
