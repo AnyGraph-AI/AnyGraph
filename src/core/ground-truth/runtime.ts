@@ -68,7 +68,7 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     description: 'GovernanceMetricSnapshot is current (< 4h old)',
     tier: 'fast',
     cypher: `
-      MATCH (g:GovernanceMetricSnapshot)
+      MATCH (g:GovernanceMetricSnapshot {projectId: $projectId})
       WITH g ORDER BY g.timestamp DESC LIMIT 1
       RETURN CASE
         WHEN g IS NULL THEN 1
@@ -85,7 +85,7 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     description: 'IntegritySnapshot exists and is less than 30h old',
     tier: 'fast',
     cypher: `
-      MATCH (s:IntegritySnapshot)
+      MATCH (s:IntegritySnapshot {projectId: $projectId})
       WITH s ORDER BY s.timestamp DESC LIMIT 1
       RETURN CASE
         WHEN s IS NULL THEN 1
@@ -216,7 +216,10 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
         'BECAME_TASK', 'RESOLVED_BY_COMMIT',
         'TOUCHED', 'REFERENCED', 'COMMIT_REFERENCES_TASK', 'VERIFIED_BY_RUN',
         'APPLIES_TO', 'HAS_OWNER', 'TRIGGERED_BY', 'DEFINES_TOPOLOGY',
-        'OWNS_SCOPE', 'MEASURED_BY'
+        'OWNS_SCOPE', 'MEASURED_BY',
+        'CURATED_PARALLEL', 'TARGETS_FAILURE_CLASS', 'DEFINES_CONTROL',
+        'DEFINES_FAILURE_CLASS', 'USES_SCHEMA_VERSION', 'DEFINES_PROFILE',
+        'DEFINES_PROOF_SCOPE', 'REFERENCES'
       ]
       RETURN count(r) AS cnt
     `,
@@ -350,7 +353,7 @@ export class GroundTruthRuntime {
    * Schema, referential, provenance, freshness.
    */
   private async queryCoreIntegrity(
-    _projectId: string,
+    projectId: string,
     depth: CheckTier,
   ): Promise<IntegrityFinding[]> {
     const tierOrder: Record<CheckTier, number> = { fast: 0, medium: 1, heavy: 2 };
@@ -364,7 +367,9 @@ export class GroundTruthRuntime {
 
     for (const check of eligibleChecks) {
       try {
-        const rows = await this.neo4j.run(check.cypher, check.params ?? {});
+        // Merge projectId into check params so freshness checks are scoped
+        const params = { projectId, ...(check.params ?? {}) };
+        const rows = await this.neo4j.run(check.cypher, params);
         const row = rows[0];
         const observedValue = row
           ? Number(Object.values(row)[0]?.toString() ?? '0')
