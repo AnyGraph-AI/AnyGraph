@@ -39,8 +39,9 @@ export async function emitTouched(
        ON MATCH SET t.lastSeen = $now, t.count = t.count + 1`,
       { agentId: opts.agentId, filePath, projectId: opts.projectId, now },
     );
-  } catch {
+  } catch (err) {
     // Non-fatal — observation failure must never block agent work
+    if (process.env.GTH_DEBUG) console.error('[GTH] emitTouched:', (err as Error).message ?? err);
   }
 }
 
@@ -66,8 +67,9 @@ export async function emitReferenced(
        ON MATCH SET r.lastSeen = $now, r.count = r.count + 1`,
       { agentId: opts.agentId, files: filePaths, projectId: opts.projectId, now },
     );
-  } catch {
+  } catch (err) {
     // Non-fatal
+    if (process.env.GTH_DEBUG) console.error('[GTH] emitReferenced:', (err as Error).message ?? err);
   }
 }
 
@@ -114,8 +116,9 @@ export async function emitCommitReferencesTask(
         { projectId, ref, hash: commitHash, message: commitMessage, now },
       );
       if (rows.length > 0) matched.push(String(rows[0].name));
-    } catch {
+    } catch (err) {
       // Non-fatal
+      if (process.env.GTH_DEBUG) console.error('[GTH] emitCommitReferencesTask:', (err as Error).message ?? err);
     }
   }
 
@@ -153,7 +156,8 @@ export async function emitVerifiedByRun(
         { runId, paths: affectedPaths, projectId, now },
       );
     }
-  } catch {
+  } catch (err) {
     // Non-fatal
+    if (process.env.GTH_DEBUG) console.error('[GTH] emitVerifiedByRun:', (err as Error).message ?? err);
   }
 }

@@ -249,7 +249,7 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     tier: 'heavy',
     cypher: `
       MATCH (n:CodeNode)
-      WHERE n.riskLevel IS NOT NULL AND NOT toFloat(toString(n.riskLevel)) IS NOT NULL
+      WHERE n.riskLevel IS NOT NULL AND toFloat(toString(n.riskLevel)) IS NULL
       RETURN count(n) AS cnt
     `,
     expected: 0,
@@ -294,8 +294,9 @@ export class GroundTruthRuntime {
     const allFindings = [...panel1.integrity.core, ...panel1.integrity.domain];
     try {
       await this.persistAndGenerateHypotheses(allFindings, options.projectId);
-    } catch {
+    } catch (err) {
       // Non-fatal — persistence failure doesn't block the hook output
+      if (process.env.GTH_DEBUG) console.error('[GTH] persistAndGenerateHypotheses:', (err as Error).message ?? err);
     }
 
     // GTH-9: Enrich Panel 1 with claim chain, contradictions, and hypotheses for milestone scope
@@ -310,8 +311,9 @@ export class GroundTruthRuntime {
         panel1.relevantClaims.push(...claimChain);
         panel1.contradictions = contradictions;
         panel1.openHypotheses = openHypotheses;
-      } catch {
+      } catch (err) {
         // Non-fatal — claim integration failure doesn't block the hook
+        if (process.env.GTH_DEBUG) console.error('[GTH] claimIntegration:', (err as Error).message ?? err);
       }
     }
 
@@ -492,7 +494,8 @@ export class GroundTruthRuntime {
         currentMilestone: bookmark.currentMilestone != null ? String(bookmark.currentMilestone) : null,
         sessionBookmark: bookmark,
       };
-    } catch {
+    } catch (err) {
+      if (process.env.GTH_DEBUG) console.error('[GTH] runPanel2:', (err as Error).message ?? err);
       return {
         agentId,
         status: 'IDLE',

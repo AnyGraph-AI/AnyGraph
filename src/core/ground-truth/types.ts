@@ -179,6 +179,50 @@ export interface Panel3Output {
   candidateModifies: CandidateEdge[];
 }
 
+// ─── Typed observation value shapes (replaces `as any`) ─────────
+
+export interface TaskStatusValue {
+  done?: number;
+  planned?: number;
+  total: number;
+  pct: number;
+  [key: string]: unknown;
+}
+
+export interface MilestoneValue {
+  name: string;
+  done: number;
+  total: number;
+}
+
+export interface UnblockedTaskValue {
+  milestone: string;
+  task: string;
+}
+
+export interface GovernanceHealthValue {
+  verificationRuns: number;
+  gateFailures: number;
+  interceptionRate: number;
+  invariantViolations: number;
+  ageHours: number;
+  error?: string;
+}
+
+export interface EvidenceCoverageValue {
+  withEvidence: number;
+  withoutEvidence: number;
+  total: number;
+  pct: number;
+}
+
+export interface ClaimMatchValue {
+  claimId: string;
+  statement: string;
+  confidence: number;
+  matchMethod: string;
+}
+
 export interface GroundTruthOutput {
   panel1: Panel1Output;
   panel2: Panel2Output;

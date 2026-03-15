@@ -68,6 +68,8 @@ export class IntegrityPersistence {
    * Persist all findings from a ground truth run.
    * Creates/updates definitions, creates observations, manages discrepancies.
    *
+   * Batched: ~5 Neo4j roundtrips instead of ~60 (N+1 eliminated).
+   *
    * Returns: { definitionsMerged, observationsCreated, discrepanciesOpen, discrepanciesResolved }
    */
   async persistFindings(
@@ -80,151 +82,168 @@ export class IntegrityPersistence {
     discrepanciesResolved: number;
   }> {
     const now = new Date().toISOString();
-    let definitionsMerged = 0;
-    let observationsCreated = 0;
-    let discrepanciesOpen = 0;
-    let discrepanciesResolved = 0;
+    const runTs = Date.now();
 
-    // Process all findings
-    for (const finding of findings) {
-      // 1. MERGE IntegrityFindingDefinition
-      await this.neo4j.run(
-        `MERGE (d:IntegrityFindingDefinition {id: $definitionId})
-         ON CREATE SET
-           d.surface = $surface,
-           d.surfaceClass = $surfaceClass,
-           d.severity = $severity,
-           d.description = $description,
-           d.expected = $expected,
-           d.projectId = $projectId,
-           d.createdAt = $now
-         ON MATCH SET
-           d.severity = $severity,
-           d.description = $description,
-           d.expected = $expected,
-           d.updatedAt = $now`,
-        {
-          definitionId: finding.definitionId,
-          surface: finding.surface,
-          surfaceClass: finding.surfaceClass,
-          severity: finding.severity,
-          description: finding.description,
-          expected: finding.expectedValue,
-          projectId,
+    if (findings.length === 0) {
+      return { definitionsMerged: 0, observationsCreated: 0, discrepanciesOpen: 0, discrepanciesResolved: 0 };
+    }
+
+    // Prepare all findings with unique obsIds
+    const prepared = findings.map((f, i) => ({
+      ...f,
+      obsId: `obs_${f.definitionId}_${runTs}_${i}`,
+    }));
+
+    // Step 1: Batch MERGE all definitions
+    const defs = prepared.map(f => ({
+      definitionId: f.definitionId,
+      surface: f.surface,
+      surfaceClass: f.surfaceClass,
+      severity: f.severity,
+      description: f.description,
+      expected: f.expectedValue,
+      projectId,
+      now,
+    }));
+
+    await this.neo4j.run(
+      `UNWIND $defs AS f
+       MERGE (d:IntegrityFindingDefinition {id: f.definitionId})
+       ON CREATE SET
+         d.surface = f.surface,
+         d.surfaceClass = f.surfaceClass,
+         d.severity = f.severity,
+         d.description = f.description,
+         d.expected = f.expected,
+         d.projectId = f.projectId,
+         d.createdAt = f.now
+       ON MATCH SET
+         d.severity = f.severity,
+         d.description = f.description,
+         d.expected = f.expected,
+         d.updatedAt = f.now`,
+      { defs },
+    );
+    const definitionsMerged = defs.length;
+
+    // Step 2: Batch fetch ALL previous observation values for trend computation
+    const defIds = [...new Set(prepared.map(f => f.definitionId))];
+    const trendRows = await this.neo4j.run(
+      `UNWIND $defIds AS defId
+       MATCH (d:IntegrityFindingDefinition {id: defId})-[:OBSERVED_AS]->(o:IntegrityFindingObservation)
+       WITH defId, o ORDER BY o.observedAt DESC
+       WITH defId, collect(o.observedValue)[0] AS lastVal
+       RETURN defId, lastVal`,
+      { defIds },
+    );
+    const lastValues = new Map<string, number>();
+    for (const row of trendRows) {
+      lastValues.set(String(row.defId), Number(row.lastVal));
+    }
+
+    // Compute trends in-memory
+    const computeTrend = (defId: string, currentValue: number): FindingTrend => {
+      const prev = lastValues.get(defId);
+      if (prev === undefined) return 'new';
+      if (currentValue < prev) return 'improving';
+      if (currentValue > prev) return 'degrading';
+      return 'stable';
+    };
+
+    // Step 3: Batch CREATE all observations + OBSERVED_AS edges
+    const obs = prepared.map(f => ({
+      definitionId: f.definitionId,
+      obsId: f.obsId,
+      observedAt: f.observedAt,
+      observedValue: f.observedValue,
+      expectedValue: f.expectedValue,
+      pass: f.pass,
+      tier: f.tier,
+      trend: computeTrend(f.definitionId, f.observedValue),
+    }));
+
+    await this.neo4j.run(
+      `UNWIND $obs AS o
+       MATCH (d:IntegrityFindingDefinition {id: o.definitionId})
+       CREATE (ob:IntegrityFindingObservation {
+         id: o.obsId,
+         observedAt: o.observedAt,
+         observedValue: o.observedValue,
+         expectedValue: o.expectedValue,
+         pass: o.pass,
+         source: 'ground_truth_hook',
+         tier: o.tier,
+         trend: o.trend
+       })
+       CREATE (d)-[:OBSERVED_AS]->(ob)`,
+      { obs },
+    );
+    const observationsCreated = obs.length;
+
+    // Step 4: Batch MERGE all failing discrepancies + PRODUCED edges
+    const failing = prepared
+      .filter(f => !f.pass)
+      .map(f => {
+        const trend = computeTrend(f.definitionId, f.observedValue);
+        return {
+          obsId: f.obsId,
+          discId: `disc_${f.definitionId}`,
+          discType: classifyDiscrepancy(f),
+          defId: f.definitionId,
+          description: f.description,
           now,
-        },
-      );
-      definitionsMerged++;
-
-      // 2. CREATE IntegrityFindingObservation + link to definition
-      const obsId = `obs_${finding.definitionId}_${Date.now()}`;
-      const trend = await this.computeTrend(finding.definitionId, finding.observedValue);
-
-      await this.neo4j.run(
-        `MATCH (d:IntegrityFindingDefinition {id: $definitionId})
-         CREATE (o:IntegrityFindingObservation {
-           id: $obsId,
-           observedAt: $observedAt,
-           observedValue: $observedValue,
-           expectedValue: $expectedValue,
-           pass: $pass,
-           source: 'ground_truth_hook',
-           tier: $tier,
-           trend: $trend
-         })
-         CREATE (d)-[:OBSERVED_AS]->(o)`,
-        {
-          definitionId: finding.definitionId,
-          obsId,
-          observedAt: finding.observedAt,
-          observedValue: finding.observedValue,
-          expectedValue: finding.expectedValue,
-          pass: finding.pass,
-          tier: finding.tier,
+          currentValue: f.observedValue,
+          expectedValue: f.expectedValue,
           trend,
-        },
+        };
+      });
+
+    let discrepanciesOpen = 0;
+    if (failing.length > 0) {
+      await this.neo4j.run(
+        `UNWIND $failing AS f
+         MATCH (o:IntegrityFindingObservation {id: f.obsId})
+         MERGE (disc:Discrepancy {id: f.discId})
+         ON CREATE SET
+           disc.type = f.discType,
+           disc.findingDefinitionId = f.defId,
+           disc.description = f.description,
+           disc.firstObservedAt = f.now,
+           disc.lastObservedAt = f.now,
+           disc.currentValue = f.currentValue,
+           disc.expectedValue = f.expectedValue,
+           disc.trend = f.trend,
+           disc.runsSinceDetected = 1,
+           disc.status = 'open'
+         ON MATCH SET
+           disc.lastObservedAt = f.now,
+           disc.currentValue = f.currentValue,
+           disc.trend = f.trend,
+           disc.runsSinceDetected = disc.runsSinceDetected + 1,
+           disc.status = 'open'
+         CREATE (o)-[:PRODUCED]->(disc)`,
+        { failing },
       );
-      observationsCreated++;
+      discrepanciesOpen = failing.length;
+    }
 
-      // 3. Manage Discrepancy nodes
-      if (!finding.pass) {
-        // Failing: create or update Discrepancy
-        const discType = classifyDiscrepancy(finding);
-        const discId = `disc_${finding.definitionId}`;
-
-        await this.neo4j.run(
-          `MATCH (o:IntegrityFindingObservation {id: $obsId})
-           MERGE (disc:Discrepancy {id: $discId})
-           ON CREATE SET
-             disc.type = $discType,
-             disc.findingDefinitionId = $defId,
-             disc.description = $description,
-             disc.firstObservedAt = $now,
-             disc.lastObservedAt = $now,
-             disc.currentValue = $currentValue,
-             disc.expectedValue = $expectedValue,
-             disc.trend = $trend,
-             disc.runsSinceDetected = 1,
-             disc.status = 'open'
-           ON MATCH SET
-             disc.lastObservedAt = $now,
-             disc.currentValue = $currentValue,
-             disc.trend = $trend,
-             disc.runsSinceDetected = disc.runsSinceDetected + 1,
-             disc.status = 'open'
-           CREATE (o)-[:PRODUCED]->(disc)`,
-          {
-            obsId,
-            discId,
-            discType,
-            defId: finding.definitionId,
-            description: finding.description,
-            now,
-            currentValue: finding.observedValue,
-            expectedValue: finding.expectedValue,
-            trend,
-          },
-        );
-        discrepanciesOpen++;
-      } else {
-        // Passing: resolve any existing open Discrepancy
-        const resolved = await this.neo4j.run(
-          `MATCH (disc:Discrepancy {
-             findingDefinitionId: $defId,
-             status: 'open'
-           })
-           SET disc.status = 'resolved',
-               disc.resolvedAt = $now
-           RETURN count(disc) AS cnt`,
-          { defId: finding.definitionId, now },
-        );
-        if (resolved.length > 0 && Number(resolved[0].cnt) > 0) {
-          discrepanciesResolved += Number(resolved[0].cnt);
-        }
+    // Step 5: Batch resolve all passing discrepancies
+    const passingDefIds = prepared.filter(f => f.pass).map(f => f.definitionId);
+    let discrepanciesResolved = 0;
+    if (passingDefIds.length > 0) {
+      const resolved = await this.neo4j.run(
+        `UNWIND $passingDefIds AS defId
+         MATCH (disc:Discrepancy {findingDefinitionId: defId, status: 'open'})
+         SET disc.status = 'resolved', disc.resolvedAt = $now
+         RETURN count(disc) AS cnt`,
+        { passingDefIds, now },
+      );
+      if (resolved.length > 0) {
+        discrepanciesResolved = Number(resolved[0].cnt);
       }
     }
 
     return { definitionsMerged, observationsCreated, discrepanciesOpen, discrepanciesResolved };
-  }
-
-  /**
-   * Compute trend by comparing current value against last observation.
-   */
-  private async computeTrend(definitionId: string, currentValue: number): Promise<FindingTrend> {
-    const rows = await this.neo4j.run(
-      `MATCH (d:IntegrityFindingDefinition {id: $defId})-[:OBSERVED_AS]->(o:IntegrityFindingObservation)
-       RETURN o.observedValue AS val
-       ORDER BY o.observedAt DESC
-       LIMIT 1`,
-      { defId: definitionId },
-    );
-
-    if (rows.length === 0) return 'new';
-
-    const previousValue = Number(rows[0].val);
-    if (currentValue < previousValue) return 'improving';
-    if (currentValue > previousValue) return 'degrading';
-    return 'stable';
   }
 
   /**

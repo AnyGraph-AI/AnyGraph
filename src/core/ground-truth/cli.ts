@@ -10,7 +10,16 @@ import { Neo4jService } from '../../storage/neo4j/neo4j.service.js';
 import { GroundTruthRuntime } from './runtime.js';
 import { SoftwareGovernancePack } from './packs/software.js';
 import { generateRecoveryAppendix } from './delta.js';
-import type { CheckTier, GroundTruthOutput, IntegrityFinding } from './types.js';
+import type {
+  CheckTier,
+  GroundTruthOutput,
+  IntegrityFinding,
+  TaskStatusValue,
+  MilestoneValue,
+  UnblockedTaskValue,
+  GovernanceHealthValue,
+  EvidenceCoverageValue,
+} from './types.js';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -46,16 +55,16 @@ function printOutput(output: GroundTruthOutput): void {
   console.log('\n── Panel 1A: Graph State ──────────────────────────────\n');
 
   for (const obs of panel1.planStatus) {
-    const v = obs.value as any;
     if (obs.source === 'Task') {
+      const v = obs.value as TaskStatusValue;
       console.log(`  Plan: ${v.done ?? '?'}/${v.total ?? '?'} done (${v.pct ?? '?'}%)`);
     } else if (obs.source === 'Milestone') {
-      const milestones = v as any[];
-      const done = milestones.filter((m: any) => m.done === m.total);
-      const remaining = milestones.filter((m: any) => m.done < m.total);
+      const milestones = obs.value as MilestoneValue[];
+      const done = milestones.filter((m) => m.done === m.total);
+      const remaining = milestones.filter((m) => m.done < m.total);
       console.log(`  Milestones: ${done.length} done, ${remaining.length} remaining`);
     } else if (obs.source === 'DEPENDS_ON') {
-      const tasks = v as any[];
+      const tasks = obs.value as UnblockedTaskValue[];
       console.log(`  Unblocked tasks: ${tasks.length}`);
       for (const t of tasks.slice(0, 5)) {
         console.log(`    [${t.milestone}] ${t.task}`);
@@ -65,7 +74,7 @@ function printOutput(output: GroundTruthOutput): void {
   }
 
   for (const obs of panel1.governanceHealth) {
-    const v = obs.value as any;
+    const v = obs.value as GovernanceHealthValue;
     const icon = obs.freshnessState === 'fresh' ? '✅' : '⚠️';
     if (v.error) {
       console.log(`  Governance: ${icon} ${v.error}`);
@@ -75,7 +84,7 @@ function printOutput(output: GroundTruthOutput): void {
   }
 
   for (const obs of panel1.evidenceCoverage) {
-    const v = obs.value as any;
+    const v = obs.value as EvidenceCoverageValue;
     console.log(`  Evidence: ${v.withEvidence}/${v.total} done tasks have structural proof (${v.pct}%)`);
   }
 

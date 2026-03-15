@@ -8,6 +8,7 @@ dotenv.config();
 
 export class Neo4jService {
   private driver: Driver;
+  private closed = false;
 
   constructor() {
     this.driver = this.createDriver();
@@ -84,10 +85,13 @@ export class Neo4jService {
   }
 
   /**
-   * Close the Neo4j driver connection.
+   * Close the Neo4j driver connection (idempotent).
+   * Safe to call multiple times — second+ calls are no-ops.
    * Should be called when the service is no longer needed to release resources.
    */
   public async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
     if (this.driver) {
       await this.driver.close();
     }

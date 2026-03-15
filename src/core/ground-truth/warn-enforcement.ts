@@ -82,8 +82,9 @@ export async function checkBookmarkWarnings(
         });
       }
     }
-  } catch {
+  } catch (err) {
     // Non-fatal — if Neo4j is down or schema doesn't exist yet, don't block
+    if (process.env.GTH_DEBUG) console.error('[GTH] checkBookmarkWarnings:', (err as Error).message ?? err);
   }
 
   return warnings;

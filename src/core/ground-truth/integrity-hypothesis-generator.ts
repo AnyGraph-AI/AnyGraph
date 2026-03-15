@@ -80,50 +80,53 @@ export class IntegrityHypothesisGenerator {
       },
     );
 
-    const generated: GeneratedHypothesis[] = [];
+    if (rows.length === 0) return [];
 
-    for (const row of rows) {
+    // Build hypotheses array in-memory
+    const hypotheses = rows.map(row => {
       const discId = String(row.discId);
       const hypId = `hyp_integrity_${discId}`;
       const name = `Graph integrity: ${row.description} (${row.runs} consecutive failures, current=${row.currentValue})`;
-
-      await this.neo4j.run(
-        `MATCH (disc:Discrepancy {id: $discId})
-         MERGE (h:Hypothesis {id: $hypId})
-         ON CREATE SET
-           h.name = $name,
-           h.confidence = 0.0,
-           h.status = 'open',
-           h.domain = 'integrity',
-           h.generatedFrom = 'integrity_discrepancy',
-           h.sourceNodeId = $discId,
-           h.discrepancyType = $discType,
-           h.severity = $severity,
-           h.created = $now
-         ON MATCH SET
-           h.updated = $now,
-           h.name = $name
-         MERGE (disc)-[:GENERATED_HYPOTHESIS]->(h)`,
-        {
-          discId,
-          hypId,
-          name,
-          discType: String(row.discType),
-          severity: String(row.severity),
-          now,
-        },
-      );
-
-      generated.push({
-        id: hypId,
-        discrepancyId: discId,
+      return {
+        discId,
+        hypId,
         name,
-        type: String(row.discType),
-        runsSinceDetected: Number(row.runs),
-      });
-    }
+        discType: String(row.discType),
+        severity: String(row.severity),
+        now,
+        runs: Number(row.runs),
+      };
+    });
 
-    return generated;
+    // Single batched UNWIND instead of N roundtrips
+    await this.neo4j.run(
+      `UNWIND $hypotheses AS h
+       MATCH (disc:Discrepancy {id: h.discId})
+       MERGE (hyp:Hypothesis {id: h.hypId})
+       ON CREATE SET
+         hyp.name = h.name,
+         hyp.confidence = 0.0,
+         hyp.status = 'open',
+         hyp.domain = 'integrity',
+         hyp.generatedFrom = 'integrity_discrepancy',
+         hyp.sourceNodeId = h.discId,
+         hyp.discrepancyType = h.discType,
+         hyp.severity = h.severity,
+         hyp.created = h.now
+       ON MATCH SET
+         hyp.updated = h.now,
+         hyp.name = h.name
+       MERGE (disc)-[:GENERATED_HYPOTHESIS]->(hyp)`,
+      { hypotheses },
+    );
+
+    return hypotheses.map(h => ({
+      id: h.hypId,
+      discrepancyId: h.discId,
+      name: h.name,
+      type: h.discType,
+      runsSinceDetected: h.runs,
+    }));
   }
 
   /**

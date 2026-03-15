@@ -19,6 +19,10 @@ import type {
   Panel3Output,
   TransitiveImpactClaim,
   CandidateEdge,
+  UnblockedTaskValue,
+  EvidenceCoverageValue,
+  GovernanceHealthValue,
+  ClaimMatchValue,
 } from './types.js';
 
 export interface DeltaInput {
@@ -62,10 +66,10 @@ function computeExactDeltas(input: DeltaInput, deltas: DeltaItem[]): void {
   // Task status mismatch: agent claims a task that's already done
   if (panel2.currentTaskId) {
     // Source-based lookup — order-independent (🟡-2)
-    const unblockedObs = panel1.planStatus.find(o => o.source === 'DEPENDS_ON')?.value as any[];
+    const unblockedObs = panel1.planStatus.find(o => o.source === 'DEPENDS_ON')?.value as UnblockedTaskValue[] | undefined;
     if (unblockedObs) {
       const taskInUnblocked = unblockedObs.some(
-        (u: any) => u.task === panel2.currentTaskId,
+        (u: UnblockedTaskValue) => u.task === panel2.currentTaskId,
       );
       if (!taskInUnblocked && panel2.status === 'in_progress') {
         deltas.push({
@@ -110,7 +114,7 @@ function computeDerivedDeltas(input: DeltaInput, deltas: DeltaItem[]): void {
   const { panel1, panel2 } = input;
 
   // Evidence coverage gap — source-based lookup (🟡-2)
-  const evObs = panel1.evidenceCoverage.find(o => o.source === 'HAS_CODE_EVIDENCE')?.value as any;
+  const evObs = panel1.evidenceCoverage.find(o => o.source === 'HAS_CODE_EVIDENCE')?.value as EvidenceCoverageValue | undefined;
   if (evObs && evObs.pct < 50) {
     deltas.push({
       description: `Evidence coverage at ${evObs.pct}% (${evObs.withEvidence}/${evObs.total} done tasks have structural proof)`,
@@ -123,9 +127,9 @@ function computeDerivedDeltas(input: DeltaInput, deltas: DeltaItem[]): void {
   // Governance staleness
   const govObs = panel1.governanceHealth[0];
   if (govObs?.freshnessState === 'stale') {
-    const govValue = govObs.value as any;
+    const govValue = govObs.value as GovernanceHealthValue | undefined;
     deltas.push({
-      description: `Governance data is stale (${govValue.ageHours ?? '?'}h old)`,
+      description: `Governance data is stale (${govValue?.ageHours ?? '?'}h old)`,
       tier: 'derived',
       panel: 'graph',
       severity: 'warning',
@@ -174,7 +178,7 @@ function computePredictedDeltas(input: DeltaInput, deltas: DeltaItem[]): void {
   // Relevant claims from Panel 1A
   if (input.panel1.relevantClaims.length > 0) {
     const keywordOnly = input.panel1.relevantClaims.filter(
-      c => (c.value as any)?.matchMethod === 'keyword',
+      c => (c.value as ClaimMatchValue | undefined)?.matchMethod === 'keyword',
     );
     if (keywordOnly.length > 0) {
       deltas.push({

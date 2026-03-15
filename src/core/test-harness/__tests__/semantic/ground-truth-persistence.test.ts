@@ -49,16 +49,16 @@ describe('IntegrityPersistence (GTH-7)', () => {
     expect(result.discrepanciesOpen).toBe(1);
     expect(result.discrepanciesResolved).toBe(0);
 
-    // 4 calls: MERGE definition, computeTrend, CREATE observation, MERGE discrepancy
+    // Batched: 4 calls — MERGE defs, fetch trends, CREATE observations, MERGE discrepancies
     expect(neo4j.run).toHaveBeenCalledTimes(4);
   });
 
   it('resolves discrepancies when findings pass', async () => {
     neo4j.run
-      .mockResolvedValueOnce([])   // MERGE definition
-      .mockResolvedValueOnce([])   // computeTrend
-      .mockResolvedValueOnce([])   // CREATE observation
-      .mockResolvedValueOnce([{ cnt: 1 }]); // resolve discrepancy
+      .mockResolvedValueOnce([])             // Step 1: batch MERGE definitions
+      .mockResolvedValueOnce([])             // Step 2: batch fetch trends
+      .mockResolvedValueOnce([])             // Step 3: batch CREATE observations
+      .mockResolvedValueOnce([{ cnt: 1 }]);  // Step 5: batch resolve passing discrepancies
 
     const finding = makeFinding({ pass: true, observedValue: 0 });
     const result = await persistence.persistFindings([finding], 'proj_test');
@@ -69,17 +69,18 @@ describe('IntegrityPersistence (GTH-7)', () => {
 
   it('computes trend from previous observation', async () => {
     neo4j.run
-      .mockResolvedValueOnce([])               // MERGE definition
-      .mockResolvedValueOnce([{ val: 10 }])    // computeTrend — previous was 10
-      .mockResolvedValueOnce([])               // CREATE observation
-      .mockResolvedValueOnce([]);              // MERGE discrepancy
+      .mockResolvedValueOnce([])                       // Step 1: batch MERGE definitions
+      .mockResolvedValueOnce([{ defId: 'test_check', lastVal: 10 }])  // Step 2: batch fetch trends — previous was 10
+      .mockResolvedValueOnce([])                       // Step 3: batch CREATE observations
+      .mockResolvedValueOnce([]);                      // Step 4: batch MERGE discrepancies
 
     const finding = makeFinding({ observedValue: 5 }); // down from 10 = improving
     await persistence.persistFindings([finding], 'proj_test');
 
-    // The observation CREATE should include trend='improving'
+    // Step 3 (CREATE observations) is the 3rd call — obs params include trend
     const obsCall = neo4j.run.mock.calls[2];
-    expect(obsCall[1].trend).toBe('improving');
+    const obsParams = obsCall[1].obs as Array<{ trend: string }>;
+    expect(obsParams[0].trend).toBe('improving');
   });
 
   it('classifies discrepancy type from surface', async () => {
@@ -95,9 +96,10 @@ describe('IntegrityPersistence (GTH-7)', () => {
       const n = createMockNeo4j();
       const p = new IntegrityPersistence(n);
       await p.persistFindings([makeFinding({ surface, pass: false })], 'proj_test');
-      // The discrepancy MERGE call (4th) should have the right type
+      // Step 4 (MERGE discrepancies) is the 4th call — failing params include discType
       const discCall = n.run.mock.calls[3];
-      expect(discCall[1].discType).toBe(expectedType);
+      const failingParams = discCall[1].failing as Array<{ discType: string }>;
+      expect(failingParams[0].discType).toBe(expectedType);
     }
   });
 
@@ -128,6 +130,28 @@ describe('IntegrityPersistence (GTH-7)', () => {
     expect(discs).toHaveLength(1);
     expect(discs[0].type).toBe('StructuralViolation');
   });
+
+  it('returns early for empty findings', async () => {
+    const result = await persistence.persistFindings([], 'proj_test');
+    expect(result.definitionsMerged).toBe(0);
+    expect(neo4j.run).not.toHaveBeenCalled();
+  });
+
+  it('generates unique obsIds within a batch', async () => {
+    const findings = [
+      makeFinding({ definitionId: 'check_a' }),
+      makeFinding({ definitionId: 'check_b' }),
+      makeFinding({ definitionId: 'check_a' }), // same defId, different index
+    ];
+
+    await persistence.persistFindings(findings, 'proj_test');
+
+    // Step 3 (CREATE observations) — all obsIds should be unique
+    const obsCall = neo4j.run.mock.calls[2];
+    const obsParams = obsCall[1].obs as Array<{ obsId: string }>;
+    const ids = obsParams.map(o => o.obsId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });
 
 describe('IntegrityHypothesisGenerator (GTH-8)', () => {
@@ -149,7 +173,7 @@ describe('IntegrityHypothesisGenerator (GTH-8)', () => {
         currentValue: 5,
         severity: 'warning',
       }])
-      .mockResolvedValueOnce([]); // MERGE hypothesis
+      .mockResolvedValueOnce([]); // batched MERGE hypotheses
 
     const results = await generator.generateFromDiscrepancies();
     expect(results).toHaveLength(1);
