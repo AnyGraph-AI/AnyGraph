@@ -363,48 +363,47 @@ export class GroundTruthRuntime {
       c => tierOrder[c.tier] <= maxTier,
     );
 
-    const findings: IntegrityFinding[] = [];
+    // Run all checks in parallel (ℹ️-2) — each has independent error handling
+    const findings = await Promise.all(
+      eligibleChecks.map(async (check): Promise<IntegrityFinding> => {
+        try {
+          const params = { projectId, ...(check.params ?? {}) };
+          const rows = await this.neo4j.run(check.cypher, params);
+          const row = rows[0];
+          const observedValue = row
+            ? Number(Object.values(row)[0]?.toString() ?? '0')
+            : 0;
 
-    for (const check of eligibleChecks) {
-      try {
-        // Merge projectId into check params so freshness checks are scoped
-        const params = { projectId, ...(check.params ?? {}) };
-        const rows = await this.neo4j.run(check.cypher, params);
-        const row = rows[0];
-        const observedValue = row
-          ? Number(Object.values(row)[0]?.toString() ?? '0')
-          : 0;
-
-        findings.push({
-          definitionId: check.id,
-          surface: check.surface,
-          surfaceClass: 'core',
-          severity: check.severity,
-          description: check.description,
-          observedValue,
-          expectedValue: check.expected,
-          pass: observedValue === check.expected,
-          trend: 'new', // Will be computed from historical observations in GTH-7
-          tier: check.tier,
-          observedAt: new Date().toISOString(),
-        });
-      } catch (err) {
-        // Check execution failure = critical finding
-        findings.push({
-          definitionId: check.id,
-          surface: check.surface,
-          surfaceClass: 'core',
-          severity: 'critical',
-          description: `CHECK FAILED TO EXECUTE: ${check.description} — ${(err as Error).message}`,
-          observedValue: -1,
-          expectedValue: check.expected,
-          pass: false,
-          trend: 'new',
-          tier: check.tier,
-          observedAt: new Date().toISOString(),
-        });
-      }
-    }
+          return {
+            definitionId: check.id,
+            surface: check.surface,
+            surfaceClass: 'core',
+            severity: check.severity,
+            description: check.description,
+            observedValue,
+            expectedValue: check.expected,
+            pass: observedValue === check.expected,
+            trend: 'new', // Will be computed from historical observations in GTH-7
+            tier: check.tier,
+            observedAt: new Date().toISOString(),
+          };
+        } catch (err) {
+          return {
+            definitionId: check.id,
+            surface: check.surface,
+            surfaceClass: 'core',
+            severity: 'critical',
+            description: `CHECK FAILED TO EXECUTE: ${check.description} — ${(err as Error).message}`,
+            observedValue: -1,
+            expectedValue: check.expected,
+            pass: false,
+            trend: 'new',
+            tier: check.tier,
+            observedAt: new Date().toISOString(),
+          };
+        }
+      }),
+    );
 
     return findings;
   }

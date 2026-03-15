@@ -215,114 +215,115 @@ export class SoftwareGovernancePack implements GroundTruthPack {
   // ─── Panel 1B: Domain Integrity Surfaces ────────────────────────
 
   async queryIntegritySurfaces(projectId: string): Promise<IntegrityFinding[]> {
-    const findings: IntegrityFinding[] = [];
     const now = new Date().toISOString();
 
-    // Coverage: evidence gap
-    try {
-      const evRows = await this.neo4j.run(
+    // Run all 4 domain checks in parallel (ℹ️-3) — each has independent error handling
+    const results = await Promise.allSettled([
+      // Coverage: evidence gap
+      this.neo4j.run(
         `MATCH (t:Task {status: 'done', projectId: $projectId})
          OPTIONAL MATCH (t)-[:HAS_CODE_EVIDENCE]->(sf)
          WITH count(t) AS total, sum(CASE WHEN sf IS NOT NULL THEN 1 ELSE 0 END) AS withEv
          RETURN total, withEv, total - withEv AS gap,
                 CASE WHEN total > 0 THEN round(toFloat(total - withEv) / total * 1000) / 10 ELSE 0 END AS gapPct`,
         { projectId },
-      );
-      if (evRows.length > 0) {
-        const r = evRows[0];
-        findings.push({
-          definitionId: 'evidence_gap',
-          surface: 'coverage',
-          surfaceClass: 'domain',
-          severity: Number(r.gapPct) > 50 ? 'warning' : 'info',
-          description: `${r.gap} done tasks lack HAS_CODE_EVIDENCE edges (${r.gapPct}% gap)`,
-          observedValue: Number(r.gap),
-          expectedValue: 0,
-          pass: Number(r.gap) === 0,
-          trend: 'new',
-          tier: 'medium',
-          observedAt: now,
-        });
-      }
-    } catch { /* non-fatal */ }
-
-    // Coverage: open hypotheses (cross-project intentionally — hypotheses are global reasoning artifacts)
-    try {
-      const hypRows = await this.neo4j.run(
+      ),
+      // Coverage: open hypotheses (cross-project intentionally — hypotheses are global reasoning artifacts)
+      this.neo4j.run(
         `MATCH (h:Hypothesis {status: 'open'})
          RETURN count(h) AS cnt`,
         {},
-      );
-      if (hypRows.length > 0) {
-        const cnt = Number(hypRows[0].cnt);
-        findings.push({
-          definitionId: 'open_hypotheses',
-          surface: 'coverage',
-          surfaceClass: 'domain',
-          severity: cnt > 100 ? 'warning' : 'info',
-          description: `${cnt} open hypotheses unresolved`,
-          observedValue: cnt,
-          expectedValue: 0,
-          pass: cnt === 0,
-          trend: 'new',
-          tier: 'medium',
-          observedAt: now,
-        });
-      }
-    } catch { /* non-fatal */ }
-
-    // Semantic: contested claims (cross-project intentionally — claims span domains)
-    try {
-      const contestedRows = await this.neo4j.run(
+      ),
+      // Semantic: contested claims (cross-project intentionally — claims span domains)
+      this.neo4j.run(
         `MATCH (c:Claim)
          WHERE (c)-[:CONTRADICTED_BY]->()
          RETURN count(c) AS cnt`,
         {},
-      );
-      if (contestedRows.length > 0) {
-        const cnt = Number(contestedRows[0].cnt);
-        findings.push({
-          definitionId: 'contested_claims',
-          surface: 'semantic',
-          surfaceClass: 'domain',
-          severity: cnt > 20 ? 'warning' : 'info',
-          description: `${cnt} claims have contradicting evidence`,
-          observedValue: cnt,
-          expectedValue: 0,
-          pass: cnt === 0,
-          trend: 'new',
-          tier: 'heavy',
-          observedAt: now,
-        });
-      }
-    } catch { /* non-fatal */ }
-
-    // Governance: gate failure trend
-    try {
-      const gateRows = await this.neo4j.run(
+      ),
+      // Governance: gate failure trend
+      this.neo4j.run(
         `MATCH (g:GovernanceMetricSnapshot {projectId: $projectId})
          WITH g ORDER BY g.timestamp DESC LIMIT 5
          RETURN sum(toInteger(g.gateFailures)) AS totalFailures,
                 count(g) AS snapshots`,
         { projectId },
-      );
-      if (gateRows.length > 0) {
-        const failures = Number(gateRows[0].totalFailures);
-        findings.push({
-          definitionId: 'gate_failure_trend',
-          surface: 'governance',
-          surfaceClass: 'domain',
-          severity: failures > 0 ? 'warning' : 'info',
-          description: `${failures} gate failures in last 5 governance snapshots`,
-          observedValue: failures,
-          expectedValue: 0,
-          pass: failures === 0,
-          trend: 'new',
-          tier: 'medium',
-          observedAt: now,
-        });
-      }
-    } catch { /* non-fatal */ }
+      ),
+    ]);
+
+    const findings: IntegrityFinding[] = [];
+
+    // Evidence gap
+    if (results[0].status === 'fulfilled' && results[0].value.length > 0) {
+      const r = results[0].value[0];
+      findings.push({
+        definitionId: 'evidence_gap',
+        surface: 'coverage',
+        surfaceClass: 'domain',
+        severity: Number(r.gapPct) > 50 ? 'warning' : 'info',
+        description: `${r.gap} done tasks lack HAS_CODE_EVIDENCE edges (${r.gapPct}% gap)`,
+        observedValue: Number(r.gap),
+        expectedValue: 0,
+        pass: Number(r.gap) === 0,
+        trend: 'new',
+        tier: 'medium',
+        observedAt: now,
+      });
+    }
+
+    // Open hypotheses
+    if (results[1].status === 'fulfilled' && results[1].value.length > 0) {
+      const cnt = Number(results[1].value[0].cnt);
+      findings.push({
+        definitionId: 'open_hypotheses',
+        surface: 'coverage',
+        surfaceClass: 'domain',
+        severity: cnt > 100 ? 'warning' : 'info',
+        description: `${cnt} open hypotheses unresolved`,
+        observedValue: cnt,
+        expectedValue: 0,
+        pass: cnt === 0,
+        trend: 'new',
+        tier: 'medium',
+        observedAt: now,
+      });
+    }
+
+    // Contested claims
+    if (results[2].status === 'fulfilled' && results[2].value.length > 0) {
+      const cnt = Number(results[2].value[0].cnt);
+      findings.push({
+        definitionId: 'contested_claims',
+        surface: 'semantic',
+        surfaceClass: 'domain',
+        severity: cnt > 20 ? 'warning' : 'info',
+        description: `${cnt} claims have contradicting evidence`,
+        observedValue: cnt,
+        expectedValue: 0,
+        pass: cnt === 0,
+        trend: 'new',
+        tier: 'heavy',
+        observedAt: now,
+      });
+    }
+
+    // Gate failure trend
+    if (results[3].status === 'fulfilled' && results[3].value.length > 0) {
+      const failures = Number(results[3].value[0].totalFailures);
+      findings.push({
+        definitionId: 'gate_failure_trend',
+        surface: 'governance',
+        surfaceClass: 'domain',
+        severity: failures > 0 ? 'warning' : 'info',
+        description: `${failures} gate failures in last 5 governance snapshots`,
+        observedValue: failures,
+        expectedValue: 0,
+        pass: failures === 0,
+        trend: 'new',
+        tier: 'medium',
+        observedAt: now,
+      });
+    }
 
     return findings;
   }

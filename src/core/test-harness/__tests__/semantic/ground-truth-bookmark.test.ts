@@ -59,11 +59,11 @@ describe('GTH-4: SessionBookmark Manager', () => {
 
   describe('claimTask', () => {
     it('detects task-already-done conflict (hard stop)', async () => {
-      // detectConflicts: task is done
+      // Single-transaction: MERGE returns empty when task is done (WHERE doneTask IS NULL fails)
       neo4j.run
-        .mockResolvedValueOnce([{ name: 'Task X' }])   // done check
-        .mockResolvedValueOnce([])                       // claimed check
-        .mockResolvedValueOnce([]);                      // getActiveBookmark
+        .mockResolvedValueOnce([])                       // MERGE returned nothing (task was done)
+        .mockResolvedValueOnce([])                       // duplicate claim check
+        .mockResolvedValueOnce([]);                      // getBookmark
 
       const result = await mgr.claimTask({
         agentId: 'watson',
@@ -79,11 +79,9 @@ describe('GTH-4: SessionBookmark Manager', () => {
     });
 
     it('detects duplicate claim (advisory)', async () => {
-      // detectConflicts: no done, but claimed by other agent
       neo4j.run
-        .mockResolvedValueOnce([])                           // done check
-        .mockResolvedValueOnce([{ agent: 'codex-worker' }])  // claimed check
-        .mockResolvedValueOnce([])                           // MERGE bookmark
+        .mockResolvedValueOnce([{ b: {} }])                  // MERGE succeeded
+        .mockResolvedValueOnce([{ agent: 'codex-worker' }])  // duplicate claim check
         .mockResolvedValueOnce([]);                          // getBookmark
 
       const result = await mgr.claimTask({
@@ -102,10 +100,9 @@ describe('GTH-4: SessionBookmark Manager', () => {
 
     it('creates bookmark on clean claim', async () => {
       neo4j.run
-        .mockResolvedValueOnce([])   // done check
-        .mockResolvedValueOnce([])   // claimed check
-        .mockResolvedValueOnce([])   // MERGE
-        .mockResolvedValueOnce([{    // getBookmark
+        .mockResolvedValueOnce([{ b: {} }])  // MERGE succeeded
+        .mockResolvedValueOnce([])            // duplicate claim check
+        .mockResolvedValueOnce([{             // getBookmark
           b: {
             id: 'bm_watson_1',
             agentId: 'watson',

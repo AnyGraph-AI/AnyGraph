@@ -96,23 +96,17 @@ export class SessionBookmarkManager {
   // ─── Lifecycle ──────────────────────────────────────────────────
 
   async claimTask(opts: ClaimTaskOptions): Promise<{ bookmark: SessionBookmark; conflicts: MultiAgentConflict[] }> {
-    const conflicts = await this.detectConflicts(opts.taskId, opts.agentId, opts.projectId);
-
-    // Hard stop: task already done
-    const hardStop = conflicts.find(c => c.severity === 'hard_stop');
-    if (hardStop) {
-      const existing = await this.getActiveBookmark(opts.agentId);
-      return {
-        bookmark: existing ?? this.createDefaultBookmark(opts.agentId, opts.projectId),
-        conflicts,
-      };
-    }
-
     const now = new Date().toISOString();
     const bookmarkId = `bm_${opts.agentId}_${Date.now()}`;
 
-    await this.neo4j.run(
-      `MERGE (b:SessionBookmark {agentId: $agentId, projectId: $projectId})
+    // ℹ️-4: Single transaction — fold done check into MERGE to eliminate TOCTOU race.
+    // If task is done, the MATCH fails and MERGE never runs.
+    const claimRows = await this.neo4j.run(
+      `OPTIONAL MATCH (t:Task {projectId: $projectId})
+       WHERE (t.id = $taskId OR t.name = $taskId) AND t.status = 'done'
+       WITH t AS doneTask
+       WHERE doneTask IS NULL
+       MERGE (b:SessionBookmark {agentId: $agentId, projectId: $projectId})
        ON CREATE SET
          b.id = $bookmarkId,
          b.status = 'claimed',
@@ -150,6 +144,34 @@ export class SessionBookmarkManager {
         now,
       },
     );
+
+    const conflicts: MultiAgentConflict[] = [];
+
+    // If MERGE didn't run (claimRows empty), task was done
+    if (claimRows.length === 0) {
+      conflicts.push({
+        type: 'task_already_done',
+        severity: 'hard_stop',
+        message: `Task "${opts.taskId}" is already done in the graph`,
+      });
+    }
+
+    // Advisory: check for duplicate claims (separate query — advisory only)
+    const claimedRows = await this.neo4j.run(
+      `MATCH (b:SessionBookmark)
+       WHERE b.currentTaskId = $taskId AND b.agentId <> $agentId
+             AND b.status IN ['claimed', 'in_progress', 'completing']
+       RETURN b.agentId AS agent`,
+      { taskId: opts.taskId, agentId: opts.agentId },
+    );
+    if (claimedRows.length > 0) {
+      conflicts.push({
+        type: 'duplicate_claim',
+        severity: 'advisory',
+        message: `Task "${opts.taskId}" is already claimed by agent "${claimedRows[0].agent}"`,
+        conflictingAgent: String(claimedRows[0].agent),
+      });
+    }
 
     const bookmark = await this.getBookmark(opts.agentId, opts.projectId);
     return {
@@ -250,7 +272,7 @@ export class SessionBookmarkManager {
   // ─── Garbage Collection ─────────────────────────────────────────
 
   async gc(agentId: string): Promise<number> {
-    // Keep last 20 idle/completed bookmarks, delete older
+    // Keep last 20 idle bookmarks (completed tasks return to idle), delete older
     const result = await this.neo4j.run(
       `MATCH (b:SessionBookmark {agentId: $agentId, status: 'idle'})
        WITH b ORDER BY b.updatedAt DESC
