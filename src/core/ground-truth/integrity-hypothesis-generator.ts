@@ -81,7 +81,15 @@ export class IntegrityHypothesisGenerator {
       },
     );
 
-    if (rows.length === 0) return [];
+    // Always refresh existing hypothesis names/values from current discrepancy data
+    await this.refreshExistingHypotheses(projectId);
+
+    // Always resolve hypotheses for resolved discrepancies
+    await this.resolveStaleHypotheses(projectId);
+
+    if (rows.length === 0) {
+      return [];
+    }
 
     // Build hypotheses array in-memory (A5: projectId in hypId and ON CREATE SET)
     const projPrefix = projectId ?? 'global';
@@ -131,6 +139,44 @@ export class IntegrityHypothesisGenerator {
       type: h.discType,
       runsSinceDetected: h.runs,
     }));
+  }
+
+  /**
+   * Refresh names/values on existing hypotheses from current discrepancy data.
+   * Prevents stale counts (e.g. "current=1406" when actual is 0).
+   */
+  async refreshExistingHypotheses(projectId?: string): Promise<number> {
+    const result = await this.neo4j.run(
+      `MATCH (disc:Discrepancy {status: 'open'})-[:GENERATED_HYPOTHESIS]->(h:Hypothesis {status: 'open', domain: 'integrity'})
+       WHERE $projectId IS NULL OR h.projectId = $projectId
+       WITH disc, h,
+            'Graph integrity: ' + disc.description + ' (' + toString(disc.runsSinceDetected) + ' consecutive failures, current=' + toString(disc.currentValue) + ')' AS freshName
+       WHERE h.name <> freshName
+       SET h.name = freshName,
+           h.updated = toString(datetime())
+       RETURN count(h) AS refreshed`,
+      { projectId: projectId ?? null },
+    );
+    return Number(result[0]?.refreshed ?? 0);
+  }
+
+  /**
+   * Close hypotheses whose underlying discrepancy is now resolved.
+   * Prevents stale hypotheses from lingering after fixes.
+   */
+  async resolveStaleHypotheses(projectId?: string): Promise<number> {
+    const result = await this.neo4j.run(
+      `MATCH (disc:Discrepancy)-[:GENERATED_HYPOTHESIS]->(h:Hypothesis)
+       WHERE h.status = 'open' AND h.domain = 'integrity'
+         AND disc.status = 'resolved'
+         AND ($projectId IS NULL OR h.projectId = $projectId)
+       SET h.status = 'resolved',
+           h.resolvedAt = toString(datetime()),
+           h.resolvedReason = 'discrepancy ' + disc.id + ' resolved (currentValue=' + toString(disc.currentValue) + ')'
+       RETURN count(h) AS resolved`,
+      { projectId: projectId ?? null },
+    );
+    return Number(result[0]?.resolved ?? 0);
   }
 
   /**

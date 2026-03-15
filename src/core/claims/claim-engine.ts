@@ -796,6 +796,7 @@ export class ClaimEngine {
   async recomputeConfidence(): Promise<number> {
     const session = this.driver.session();
     try {
+      // Phase 1: Evidence-weight confidence from SUPPORTED_BY / CONTRADICTED_BY
       const result = await session.run(
         `MATCH (c:Claim)
          OPTIONAL MATCH (c)-[s:SUPPORTED_BY]->(se:Evidence)
@@ -809,6 +810,13 @@ export class ClaimEngine {
            CASE
              WHEN supportScore + contradictScore = 0 THEN c.confidence
              ELSE toFloat(supportScore) / (supportScore + contradictScore + 0.001)
+           END AS evidenceConfidence
+         // Phase 2: Apply temporal decay — if decayedConfidence is set and lower, use it
+         WITH c, evidenceConfidence,
+           CASE
+             WHEN c.decayedConfidence IS NOT NULL AND c.decayedConfidence < evidenceConfidence
+             THEN c.decayedConfidence
+             ELSE evidenceConfidence
            END AS newConfidence
          SET c.confidence = CASE
            WHEN newConfidence > 1.0 THEN 1.0

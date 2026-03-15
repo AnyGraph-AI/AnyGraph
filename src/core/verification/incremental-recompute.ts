@@ -66,8 +66,6 @@ async function resolveRunIds(
          RETURN DISTINCT r.id AS id
          UNION
          UNWIND $paths AS path
-         MATCH (sf:SourceFile {projectId: $projectId})
-         WHERE sf.filePath ENDS WITH path
          MATCH (r:VerificationRun {projectId: $projectId})-[:CAPTURED_COMMIT]->(cs:CommitSnapshot)
          WHERE cs.diffPaths IS NOT NULL AND any(dp IN cs.diffPaths WHERE dp ENDS WITH path)
          RETURN DISTINCT r.id AS id`,

@@ -141,6 +141,66 @@ describe('TC-2: File-scoped recompute (real Neo4j)', () => {
   });
 });
 
+describe('TC-2b: File-scoped recompute via CAPTURED_COMMIT + diffPaths', () => {
+  it('diffPaths-based clause scopes correctly (no cross-join)', async () => {
+    // Create a CommitSnapshot with diffPaths linked to vr_tc_int_1
+    await neo4j.run(
+      `MATCH (r:VerificationRun {id: 'vr_tc_int_1', projectId: $pid})
+       MERGE (cs:CommitSnapshot {id: 'cs_tc_int_1', projectId: $pid})
+       SET cs.diffPaths = ['/test/bar.ts', '/test/baz.ts']
+       MERGE (r)-[:CAPTURED_COMMIT]->(cs)`,
+      { pid: projectId },
+    );
+
+    // Clear all TCF so we can see what gets updated
+    await neo4j.run(
+      `MATCH (r:VerificationRun {projectId: $pid})
+       REMOVE r.timeConsistencyFactor, r.confidenceVersion`,
+      { pid: projectId },
+    );
+
+    const result = await incrementalRecompute(neo4j, {
+      projectId,
+      scope: 'file',
+      targets: ['bar.ts'],
+      reason: 'test_diffpaths_scope',
+    });
+
+    // Should only update vr_tc_int_1 (the one linked via CAPTURED_COMMIT→diffPaths)
+    expect(result.candidateCount).toBe(1);
+    expect(result.updatedCount).toBe(1);
+
+    const rows = await neo4j.run(
+      `MATCH (r:VerificationRun {projectId: $pid})
+       WHERE r.timeConsistencyFactor IS NOT NULL
+       RETURN r.id AS id`,
+      { pid: projectId },
+    );
+    expect(rows.length).toBe(1);
+    expect(rows[0].id).toBe('vr_tc_int_1');
+  });
+
+  it('does NOT return unrelated VRs when diffPaths match exists', async () => {
+    // Query for a file NOT in any diffPaths
+    await neo4j.run(
+      `MATCH (r:VerificationRun {projectId: $pid})
+       REMOVE r.timeConsistencyFactor, r.confidenceVersion`,
+      { pid: projectId },
+    );
+
+    const result = await incrementalRecompute(neo4j, {
+      projectId,
+      scope: 'file',
+      targets: ['nonexistent-file.ts'],
+      reason: 'test_no_match',
+    });
+
+    // Should find 0 candidates — no VERIFIED_BY_RUN and no diffPaths match
+    expect(result.candidateCount).toBe(0);
+    expect(result.updatedCount).toBe(0);
+  });
+});
+
 describe('TC-3: Shadow propagation (real Neo4j)', () => {
   it('propagates shadow confidence via PRECEDES edges', async () => {
     // Re-stamp all TCFs first
