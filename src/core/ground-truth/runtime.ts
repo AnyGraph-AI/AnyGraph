@@ -106,10 +106,8 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     description: 'TypeScript nodes without CodeNode label (GRC-4)',
     tier: 'medium',
     cypher: `
-      MATCH (n)
-      WHERE "TypeScript" IN labels(n)
-        AND NOT "CodeNode" IN labels(n)
-        AND NOT "IRNode" IN labels(n)
+      MATCH (n:TypeScript)
+      WHERE NOT n:CodeNode AND NOT n:IRNode
       RETURN count(n) AS cnt
     `,
     expected: 0,
@@ -140,10 +138,8 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     description: 'SourceFile nodes use correct label pattern (CodeNode:SourceFile:TypeScript, not bare SourceFile)',
     tier: 'medium',
     cypher: `
-      MATCH (n)
-      WHERE "SourceFile" IN labels(n)
-        AND NOT "CodeNode" IN labels(n)
-        AND NOT "IRNode" IN labels(n)
+      MATCH (n:SourceFile)
+      WHERE NOT n:CodeNode AND NOT n:IRNode
         AND n.projectId IS NOT NULL
       RETURN count(n) AS cnt
     `,
@@ -199,8 +195,8 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     description: 'Edges with unknown relationship types',
     tier: 'heavy',
     cypher: `
-      MATCH ()-[r]->()
-      WHERE NOT type(r) IN [
+      CALL db.relationshipTypes() YIELD relationshipType
+      WHERE NOT relationshipType IN [
         'CALLS', 'CONTAINS', 'IMPORTS', 'RESOLVES_TO', 'REGISTERED_BY',
         'READS_STATE', 'WRITES_STATE', 'POSSIBLE_CALL', 'OWNED_BY',
         'BELONGS_TO_LAYER', 'HAS_PARAMETER', 'HAS_MEMBER', 'EXTENDS',
@@ -224,7 +220,7 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
         'DEFINES_FAILURE_CLASS', 'USES_SCHEMA_VERSION', 'DEFINES_PROFILE',
         'DEFINES_PROOF_SCOPE', 'REFERENCES'
       ]
-      RETURN count(r) AS cnt
+      RETURN count(relationshipType) AS cnt
     `,
     expected: 0,
   },
