@@ -47,7 +47,7 @@ export interface GroundTruthOptions {
  */
 interface CoreIntegrityCheck {
   id: string;
-  surface: 'schema' | 'referential' | 'provenance' | 'freshness';
+  surface: 'schema' | 'referential' | 'provenance' | 'freshness' | 'trust';
   severity: 'critical' | 'warning' | 'info';
   description: string;
   tier: CheckTier;
@@ -249,6 +249,24 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
       MATCH (n:CodeNode)
       WHERE n.riskLevel IS NOT NULL AND toFloat(toString(n.riskLevel)) IS NULL
       RETURN count(n) AS cnt
+    `,
+    expected: 0,
+  },
+
+  // TC-3: Shadow isolation guardrail
+  {
+    id: 'shadow_isolation',
+    surface: 'trust',
+    severity: 'critical',
+    description: 'Shadow confidence leaked into production effectiveConfidence (TC-3)',
+    tier: 'medium',
+    cypher: `
+      MATCH (r:VerificationRun {projectId: $projectId})
+      WHERE r.shadowEffectiveConfidence IS NOT NULL
+        AND r.effectiveConfidence IS NOT NULL
+        AND r.shadowEffectiveConfidence = r.effectiveConfidence
+        AND r.effectiveConfidence <> 1.0
+      RETURN count(r) AS cnt
     `,
     expected: 0,
   },

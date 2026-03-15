@@ -296,7 +296,7 @@ describe('GTH-1: Core Runtime + Pack Interface', () => {
 
       for (const finding of report.core) {
         expect(finding.definitionId).toBeTruthy();
-        expect(['schema', 'referential', 'provenance', 'freshness']).toContain(finding.surface);
+        expect(['schema', 'referential', 'provenance', 'freshness', 'trust']).toContain(finding.surface);
         expect(finding.surfaceClass).toBe('core');
         expect(['critical', 'warning', 'info']).toContain(finding.severity);
         expect(typeof finding.observedValue).toBe('number');

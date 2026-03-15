@@ -9,3 +9,4 @@ export * from './runtime-trace-schema.js';
 export * from './view-enforcement.js';
 export * from './temporal-confidence.js';
 export * from './incremental-recompute.js';
+export * from './shadow-propagation.js';

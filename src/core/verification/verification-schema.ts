@@ -231,6 +231,14 @@ export const TrustViewSchema = z.object({
   timeConsistencyFactor: z.number().min(0).max(1).optional(),
   /** Retroactive penalty applied when evidence is superseded or validity expires (TC-1) */
   retroactivePenalty: z.number().min(0).max(1).optional(),
+  /** Shadow confidence from propagation engine — NEVER overwrites effectiveConfidence (TC-3) */
+  shadowEffectiveConfidence: z.number().min(0).max(1).optional(),
+  /** Influence score from shadow propagation (TC-3) */
+  shadowInfluenceScore: z.number().min(0).max(1).optional(),
+  /** Normalization mode used by shadow propagation (TC-3) */
+  normalizationMode: z.enum(['linear', 'softmax']).optional(),
+  /** Damping factor used by shadow propagation (TC-3) */
+  dampingFactorUsed: z.number().min(0).max(1).optional(),
   /** Version counter for confidence recomputation lineage */
   confidenceVersion: z.number().int().nonnegative().optional(),
   /** Hash of all inputs used to compute this confidence value */
@@ -310,6 +318,10 @@ export const VIEW_FIELD_REGISTRY: Readonly<Record<string, VerificationView>> = {
   hardPenalty: 'trust',
   timeConsistencyFactor: 'trust',
   retroactivePenalty: 'trust',
+  shadowEffectiveConfidence: 'trust',
+  shadowInfluenceScore: 'trust',
+  normalizationMode: 'trust',
+  dampingFactorUsed: 'trust',
   confidenceVersion: 'trust',
   confidenceInputsHash: 'trust',
   lastRecomputeAt: 'trust',

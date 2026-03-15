@@ -40,6 +40,7 @@ export type IntegritySurface =
   | 'referential'
   | 'provenance'
   | 'freshness'
+  | 'trust'
   // Domain-specific surfaces (varies by pack)
   | 'coverage'
   | 'semantic'
