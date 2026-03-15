@@ -6,3 +6,4 @@ export * from './exception-enforcement.js';
 export * from './advisory-gate.js';
 export * from './runtime-evidence-ingest.js';
 export * from './runtime-trace-schema.js';
+export * from './view-enforcement.js';
