@@ -4,6 +4,17 @@
 import { describe, it, expect } from 'vitest';
 import { discoverExplainabilityPaths, queryExplainabilityPaths, verifyExplainabilityCoverage } from '../../../verification/explainability-paths.js';
 
+/**
+ * ⚠️ MOCK FRAGILITY WARNING
+ * This mock uses substring-based query matching. Tests may pass even if:
+ * - Cypher variable names change (e.g., r → run)
+ * - WHERE clause logic inverts (IS NULL → IS NOT NULL)
+ * - Query structure changes but keywords remain
+ * - Return shape differs from real Neo4j
+ *
+ * For production-grade validation, see tc-integration.test.ts (real Neo4j).
+ * Fragility analysis: audits/tc_test_audit_agent5a_mock.md
+ */
 class MockNeo4j {
   private data: Record<string, any[]> = {};
   public queries: string[] = [];
@@ -73,6 +84,26 @@ describe('Explainability Paths (TC-4)', () => {
 
     const result = await discoverExplainabilityPaths(neo4j as any, 'proj_test');
     expect(result.pathsCreated).toBe(0);
+  });
+
+  it('creates paths from contradiction evidence', async () => {
+    const neo4j = new MockNeo4j();
+    neo4j.setRunResult('SUPPORTED_BY', []);
+    neo4j.setRunResult('CONTRADICTED_BY', [
+      { claimId: 'c1', evidenceId: 'e1', terminalId: null, weight: 0.8, direction: 'contradiction' },
+      { claimId: 'c1', evidenceId: 'e2', terminalId: 't2', weight: 0.6, direction: 'contradiction' },
+    ]);
+    neo4j.setRunResult('MERGE (ip:InfluencePath', []);
+    neo4j.setRunResult('count(c)', [{ cnt: 2 }]);
+
+    const result = await discoverExplainabilityPaths(neo4j as any, 'proj_test');
+    expect(result.pathsCreated).toBe(2);
+    expect(result.claimsWithPaths).toBe(1);
+
+    // Verify the MERGE query was issued with contradiction direction
+    const mergeQuery = neo4j.queries.find(q => q.includes('MERGE (ip:InfluencePath'));
+    expect(mergeQuery).toBeDefined();
+    expect(mergeQuery).toContain('EXPLAINS_CONTRADICTION');
   });
 
   it('produces stable pathHash for same hops', async () => {

@@ -4,6 +4,17 @@
 import { describe, it, expect } from 'vitest';
 import { generateDebtDashboard, verifyDebtFieldPresence, type DebtConfig } from '../../../verification/confidence-debt.js';
 
+/**
+ * ⚠️ MOCK FRAGILITY WARNING
+ * This mock uses substring-based query matching. Tests may pass even if:
+ * - Cypher variable names change (e.g., r → run)
+ * - WHERE clause logic inverts (IS NULL → IS NOT NULL)
+ * - Query structure changes but keywords remain
+ * - Return shape differs from real Neo4j
+ *
+ * For production-grade validation, see tc-integration.test.ts (real Neo4j).
+ * Fragility analysis: audits/tc_test_audit_agent5a_mock.md
+ */
 class MockNeo4j {
   private data: Record<string, any[]> = {};
   public queries: string[] = [];

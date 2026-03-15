@@ -11,6 +11,8 @@ import { createEphemeralGraph, type EphemeralGraphRuntime } from '../../ephemera
 import { incrementalRecompute } from '../../../verification/incremental-recompute.js';
 import { runShadowPropagation, verifyShadowIsolation } from '../../../verification/shadow-propagation.js';
 import { computeConfidenceDebt, verifyDebtFieldPresence } from '../../../verification/confidence-debt.js';
+import { persistPromotionDecision, evaluatePromotion } from '../../../verification/promotion-policy.js';
+import { enforceSourceFamilyCaps } from '../../../verification/anti-gaming.js';
 import { Neo4jService } from '../../../../storage/neo4j/neo4j.service.js';
 
 let eph: EphemeralGraphRuntime;
@@ -615,5 +617,115 @@ describe('TC-5: Confidence debt (real Neo4j)', () => {
 
     // Cleanup
     await neo4j.run(`MATCH (r:VerificationRun {id: 'vr_debt_has_gap'}) DETACH DELETE r`);
+  });
+});
+
+describe('TC-8: persistPromotionDecision (real Neo4j)', () => {
+  it('creates PromotionDecision node and copies shadow→production when promoted', async () => {
+    // Seed VR with shadow > effective
+    await neo4j.run(
+      `MERGE (r:VerificationRun {id: 'vr_promo_test', projectId: $pid})
+       SET r.shadowEffectiveConfidence = 0.85, r.effectiveConfidence = 0.5,
+           r.observedAt = $obs, r.status = 'satisfies', r.tool = 'test-promo',
+           r.timeConsistencyFactor = 0.9, r.artifactHash = 'sha256:promo1'`,
+      { pid: projectId, obs: new Date().toISOString() },
+    );
+
+    const decision = evaluatePromotion({
+      projectId,
+      brierProd: 0.1,
+      brierShadow: 0.08,
+      governancePass: true,
+      antiGamingPass: true,
+      calibrationPass: true,
+    }, { mode: 'enforced', enableEnforcement: true });
+
+    await persistPromotionDecision(neo4j, decision);
+
+    // Check PromotionDecision node created
+    const decisionRows = await neo4j.run(
+      `MATCH (d:PromotionDecision {projectId: $pid})
+       RETURN d.promoted AS promoted, d.decisionHash AS hash, d.mode AS mode`,
+      { pid: projectId },
+    );
+    expect(decisionRows.length).toBeGreaterThan(0);
+    expect(decisionRows[0].promoted).toBe(true);
+    expect(decisionRows[0].hash).toHaveLength(32);
+    expect(decisionRows[0].mode).toBe('enforced');
+
+    // Check VR got shadow→production copy
+    const vrRows = await neo4j.run(
+      `MATCH (r:VerificationRun {id: 'vr_promo_test', projectId: $pid})
+       RETURN r.effectiveConfidence AS eff, r.promotionDecisionHash AS pdh`,
+      { pid: projectId },
+    );
+    expect(Number(vrRows[0].eff)).toBe(0.85); // shadow copied to production
+    expect(vrRows[0].pdh).toHaveLength(32);
+
+    // Cleanup
+    await neo4j.run(`MATCH (n) WHERE n.id = 'vr_promo_test' OR (n:PromotionDecision AND n.projectId = $pid) DETACH DELETE n`, { pid: projectId });
+  });
+
+  it('does NOT copy shadow→production when not promoted', async () => {
+    await neo4j.run(
+      `MERGE (r:VerificationRun {id: 'vr_promo_nogo', projectId: $pid})
+       SET r.shadowEffectiveConfidence = 0.85, r.effectiveConfidence = 0.5,
+           r.observedAt = $obs, r.status = 'satisfies', r.tool = 'test-promo',
+           r.timeConsistencyFactor = 0.9, r.artifactHash = 'sha256:promo2'`,
+      { pid: projectId, obs: new Date().toISOString() },
+    );
+
+    const decision = evaluatePromotion({
+      projectId,
+      brierProd: 0.1,
+      brierShadow: 0.08,
+      governancePass: true,
+      antiGamingPass: true,
+      calibrationPass: false, // blocked
+    }, { mode: 'enforced', enableEnforcement: true });
+
+    await persistPromotionDecision(neo4j, decision);
+
+    // effectiveConfidence should remain unchanged
+    const vrRows = await neo4j.run(
+      `MATCH (r:VerificationRun {id: 'vr_promo_nogo', projectId: $pid})
+       RETURN r.effectiveConfidence AS eff`,
+      { pid: projectId },
+    );
+    expect(Number(vrRows[0].eff)).toBe(0.5); // unchanged
+
+    // Cleanup
+    await neo4j.run(`MATCH (n) WHERE n.id = 'vr_promo_nogo' OR (n:PromotionDecision AND n.projectId = $pid) DETACH DELETE n`, { pid: projectId });
+  });
+});
+
+describe('TC-6: Collusion detection time-window (real Neo4j)', () => {
+  it('detects collusion when VRs have ranAt within 60 seconds', async () => {
+    const now = new Date();
+    const t1 = now.toISOString();
+    const t2 = new Date(now.getTime() + 30000).toISOString(); // 30s later (within window)
+    const t3 = new Date(now.getTime() + 120000).toISOString(); // 2min later (outside window)
+
+    // Seed 3 VRs: 2 within 60s, 1 outside
+    await neo4j.run(
+      `CREATE (r1:VerificationRun {id: 'vr_collusion_1', projectId: $pid, tool: 'test-tool', status: 'satisfies', ranAt: $t1, observedAt: $t1, artifactHash: 'sha256:col1'})
+       CREATE (r2:VerificationRun {id: 'vr_collusion_2', projectId: $pid, tool: 'test-tool', status: 'satisfies', ranAt: $t2, observedAt: $t2, artifactHash: 'sha256:col2'})
+       CREATE (r3:VerificationRun {id: 'vr_collusion_3', projectId: $pid, tool: 'test-tool', status: 'satisfies', ranAt: $t3, observedAt: $t3, artifactHash: 'sha256:col3'})`,
+      { pid: projectId, t1, t2, t3 },
+    );
+
+    const result = await enforceSourceFamilyCaps(neo4j, projectId);
+
+    // r1+r2 are within 60s, same tool, same status → collusion suspect pair
+    // r1+r3 and r2+r3 are >60s apart → not suspects
+    expect(result.collusionSuspects).toBeGreaterThanOrEqual(1);
+
+    // Cleanup
+    await neo4j.run(
+      `MATCH (r:VerificationRun {projectId: $pid})
+       WHERE r.id STARTS WITH 'vr_collusion_'
+       DETACH DELETE r`,
+      { pid: projectId },
+    );
   });
 });
