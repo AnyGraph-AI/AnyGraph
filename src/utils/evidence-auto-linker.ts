@@ -42,15 +42,10 @@ async function main(): Promise<void> {
     }
 
     // 2. Get all code project SourceFiles and named declarations
-    // Map plan project IDs to code project IDs
+    // Map plan project IDs to code project IDs (dynamic discovery)
     const projectMapping = await neo4j.run(`
-      MATCH (pp {projectId: 'plan_codegraph'})-[:TARGETS]->(cp:Project)
-      RETURN pp.projectId AS planId, cp.projectId AS codeId
-      UNION
-      MATCH (pp {projectId: 'plan_godspeed'})-[:TARGETS]->(cp:Project)
-      RETURN pp.projectId AS planId, cp.projectId AS codeId
-      UNION
-      MATCH (pp {projectId: 'plan_bible_graph'})-[:TARGETS]->(cp:Project)
+      MATCH (pp)-[:TARGETS]->(cp:Project)
+      WHERE pp.projectId STARTS WITH 'plan_'
       RETURN pp.projectId AS planId, cp.projectId AS codeId
     `);
 

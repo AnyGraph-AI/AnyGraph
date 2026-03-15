@@ -38,11 +38,6 @@ interface ProjectInfo {
 
 // Known project paths (fallback when Project nodes don't have path)
 const KNOWN_PROJECTS: Record<string, { path: string; tsconfig?: string; kind: 'code' | 'document' }> = {
-  proj_60d5feed0001: {
-    path: '/mnt/c/Users/ddfff/Downloads/Bots/GodSpeed/',
-    tsconfig: '/mnt/c/Users/ddfff/Downloads/Bots/GodSpeed/tsconfig.json',
-    kind: 'code',
-  },
   proj_c0d3e9a1f200: {
     path: '/home/jonathan/.openclaw/workspace/codegraph/',
     tsconfig: '/home/jonathan/.openclaw/workspace/codegraph/tsconfig.json',
