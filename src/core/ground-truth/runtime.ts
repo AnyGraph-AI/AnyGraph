@@ -125,7 +125,8 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
       WHERE n.projectId IS NULL
         AND NOT any(l IN labels(n) WHERE l IN [
           'Person', 'CanonicalEntity', 'Evidence', 'Claim', 'Hypothesis',
-          'Author', 'ArchitectureLayer', 'IntegritySnapshot', 'MetricResult'
+          'Author', 'ArchitectureLayer', 'IntegritySnapshot', 'MetricResult',
+          'IntegrityFindingObservation', 'Discrepancy'
         ])
         AND NOT "IRNode" IN labels(n)
       RETURN count(n) AS cnt

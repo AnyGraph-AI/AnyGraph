@@ -172,6 +172,8 @@ export const VALIDATION_QUERIES: Array<{
         AND NOT n:GovernanceMetricDef
         AND NOT n:GovernanceAttributionLink
         AND NOT n:IntegritySnapshot
+        AND NOT n:IntegrityFindingObservation
+        AND NOT n:Discrepancy
         AND NOT n:Person
         AND NOT n:CanonicalEntity
         AND NOT n:Evidence
