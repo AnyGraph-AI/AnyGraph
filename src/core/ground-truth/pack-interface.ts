@@ -58,7 +58,7 @@ export interface GroundTruthPack {
    * keyword CONTAINS as fallback.
    * Source: Claim, Evidence, Hypothesis nodes.
    */
-  queryRelevantClaims(taskId: string, filesTouched: string[]): Promise<Observation[]>;
+  queryRelevantClaims(taskId: string, filesTouched: string[], projectId?: string): Promise<Observation[]>;
 
   // ─── Panel 1B: domain-specific integrity surfaces ───────────────
   // coverage, semantic, governance — varies by pack
@@ -77,7 +77,7 @@ export interface GroundTruthPack {
    * Structural matching via SUPPORTED_BY→ANCHORS→SourceFile first,
    * keyword CONTAINS fallback.
    */
-  queryTransitiveImpact(filesTouched: string[]): Promise<TransitiveImpactClaim[]>;
+  queryTransitiveImpact(filesTouched: string[], projectId?: string): Promise<TransitiveImpactClaim[]>;
 
   /**
    * Query predicted MODIFIES edges for a task.

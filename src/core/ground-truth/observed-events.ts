@@ -84,7 +84,7 @@ export async function emitCommitReferencesTask(
   // Extract task/milestone references from commit message
   const patterns = [
     /\b(GTH-\d+|RF-\d+|TC-\d+|N\d+|X\d+|L\d+|DF)\b/gi,
-    /\(([^)]+)\)/g, // parenthesized content
+    /\(([A-Z]+-\d+(?:\/\d+)?)\)/g, // parenthesized task refs only (e.g., (RF-2), (GTH-1/3))
   ];
 
   const refs = new Set<string>();

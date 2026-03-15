@@ -166,18 +166,23 @@ export class SoftwareGovernancePack implements GroundTruthPack {
   async queryRelevantClaims(
     taskId: string,
     filesTouched: string[],
+    projectId?: string,
   ): Promise<Observation[]> {
     if (filesTouched.length === 0) return [];
 
     // Structural matching first: SUPPORTED_BY → ANCHORS → SourceFile
+    // F4: Scoped to SourceFile label + projectId to avoid full graph scan
+    const sfFilter = projectId
+      ? 'MATCH (sf:SourceFile {projectId: $projectId}) WHERE sf.filePath ENDS WITH filePath OR sf.name = filePath'
+      : 'MATCH (sf:SourceFile) WHERE sf.filePath ENDS WITH filePath OR sf.name = filePath';
     const structuralRows = await this.neo4j.run(
       `UNWIND $files AS filePath
-       MATCH (sf) WHERE sf.filePath ENDS WITH filePath OR sf.name = filePath
+       ${sfFilter}
        OPTIONAL MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)-[:ANCHORS]->(sf)
        WHERE c IS NOT NULL
        RETURN DISTINCT c.id AS claimId, c.statement AS statement,
               c.confidence AS confidence, 'structural' AS matchMethod`,
-      { files: filesTouched },
+      { files: filesTouched, projectId: projectId ?? null },
     );
 
     // Keyword fallback for files without structural matches
@@ -242,7 +247,7 @@ export class SoftwareGovernancePack implements GroundTruthPack {
       }
     } catch { /* non-fatal */ }
 
-    // Coverage: open hypotheses
+    // Coverage: open hypotheses (cross-project intentionally — hypotheses are global reasoning artifacts)
     try {
       const hypRows = await this.neo4j.run(
         `MATCH (h:Hypothesis {status: 'open'})
@@ -267,7 +272,7 @@ export class SoftwareGovernancePack implements GroundTruthPack {
       }
     } catch { /* non-fatal */ }
 
-    // Semantic: contested claims
+    // Semantic: contested claims (cross-project intentionally — claims span domains)
     try {
       const contestedRows = await this.neo4j.run(
         `MATCH (c:Claim)
@@ -325,18 +330,22 @@ export class SoftwareGovernancePack implements GroundTruthPack {
 
   // ─── Panel 3: Transitive Impact ─────────────────────────────────
 
-  async queryTransitiveImpact(filesTouched: string[]): Promise<TransitiveImpactClaim[]> {
+  async queryTransitiveImpact(filesTouched: string[], projectId?: string): Promise<TransitiveImpactClaim[]> {
     if (filesTouched.length === 0) return [];
 
     // Structural matching: claims linked to files via SUPPORTED_BY → ANCHORS
+    // F4: Scoped to SourceFile label + projectId to avoid full graph scan
+    const sfFilter = projectId
+      ? 'MATCH (sf:SourceFile {projectId: $projectId}) WHERE sf.filePath ENDS WITH filePath OR sf.name = filePath'
+      : 'MATCH (sf:SourceFile) WHERE sf.filePath ENDS WITH filePath OR sf.name = filePath';
     const rows = await this.neo4j.run(
       `UNWIND $files AS filePath
-       MATCH (sf) WHERE sf.filePath ENDS WITH filePath OR sf.name = filePath
+       ${sfFilter}
        OPTIONAL MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)-[:ANCHORS]->(sf)
        WHERE c IS NOT NULL AND c.claimType = 'transitive_impact'
        RETURN DISTINCT c.id AS claimId, c.statement AS statement,
               c.confidence AS confidence, collect(DISTINCT sf.filePath) AS files`,
-      { files: filesTouched },
+      { files: filesTouched, projectId: projectId ?? null },
     );
 
     const results: TransitiveImpactClaim[] = rows

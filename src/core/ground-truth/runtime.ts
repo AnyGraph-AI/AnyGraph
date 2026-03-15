@@ -273,7 +273,7 @@ export class GroundTruthRuntime {
     const [panel1, panel2, rawPanel3] = await Promise.all([
       this.runPanel1(options.projectId, planProjectId, depth, options.currentTaskId, options.filesTouched),
       this.runPanel2(options.agentId, options.projectId),
-      this.runPanel3(options.currentTaskId, options.filesTouched),
+      this.runPanel3(options.currentTaskId, options.filesTouched, options.projectId),
     ]);
 
     // Compute deltas using the delta engine (GTH-3)
@@ -312,7 +312,7 @@ export class GroundTruthRuntime {
         this.pack.queryGovernanceHealth(projectId),
         this.pack.queryEvidenceCoverage(planProjectId),
         currentTaskId
-          ? this.pack.queryRelevantClaims(currentTaskId, filesTouched ?? [])
+          ? this.pack.queryRelevantClaims(currentTaskId, filesTouched ?? [], projectId)
           : Promise.resolve([]),
         this.panel1B(projectId, depth),
       ]);
@@ -462,10 +462,11 @@ export class GroundTruthRuntime {
   private async runPanel3(
     currentTaskId?: string,
     filesTouched?: string[],
+    projectId?: string,
   ): Promise<Panel3Output> {
     const [transitiveImpact, candidateModifies] = await Promise.all([
       filesTouched?.length
-        ? this.pack.queryTransitiveImpact(filesTouched)
+        ? this.pack.queryTransitiveImpact(filesTouched, projectId)
         : Promise.resolve([]),
       currentTaskId
         ? this.pack.queryCandidateModifies(currentTaskId)

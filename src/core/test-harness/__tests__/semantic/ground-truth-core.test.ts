@@ -243,7 +243,7 @@ describe('GTH-1: Core Runtime + Pack Interface', () => {
       expect(pack.queryPlanStatus).toHaveBeenCalledWith('plan_test');
       expect(pack.queryGovernanceHealth).toHaveBeenCalledWith('proj_test');
       expect(pack.queryEvidenceCoverage).toHaveBeenCalledWith('plan_test');
-      expect(pack.queryRelevantClaims).toHaveBeenCalledWith('task_42', ['src/foo.ts']);
+      expect(pack.queryRelevantClaims).toHaveBeenCalledWith('task_42', ['src/foo.ts'], 'proj_test');
     });
   });
 

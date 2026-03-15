@@ -6,6 +6,7 @@
  *   npm run ground-truth -- --project proj_c0d3e9a1f200 --depth full
  */
 
+import { Neo4jService } from '../../storage/neo4j/neo4j.service.js';
 import { GroundTruthRuntime } from './runtime.js';
 import { SoftwareGovernancePack } from './packs/software.js';
 import { generateRecoveryAppendix } from './delta.js';
@@ -20,15 +21,16 @@ async function main() {
   const depthArg = depthIdx >= 0 ? args[depthIdx + 1] : 'medium';
   const depth: CheckTier = depthArg === 'full' ? 'heavy' : (depthArg as CheckTier);
 
-  const pack = new SoftwareGovernancePack();
-  const runtime = new GroundTruthRuntime(pack);
+  // F2: Share single Neo4jService across pack + runtime (no triple connection)
+  const neo4j = new Neo4jService();
+  const pack = new SoftwareGovernancePack(neo4j);
+  const runtime = new GroundTruthRuntime(pack, neo4j);
 
   try {
     const output = await runtime.run({ projectId, depth });
     printOutput(output);
   } finally {
-    await runtime.close();
-    await pack.close();
+    await neo4j.close();
   }
 }
 
