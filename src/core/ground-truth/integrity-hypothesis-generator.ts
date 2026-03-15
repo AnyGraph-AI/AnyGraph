@@ -11,6 +11,7 @@
  *       → enters self-audit getDriftItems() + applyVerdict()
  *
  * Default threshold: N=5 (configurable).
+ * All MERGE keys include projectId for multi-project safety (A5-A6).
  */
 
 import { Neo4jService } from '../../storage/neo4j/neo4j.service.js';
@@ -50,20 +51,19 @@ export class IntegrityHypothesisGenerator {
    * Scan open Discrepancies at or above the threshold. For each one that
    * doesn't already have a linked Hypothesis, create one.
    *
+   * @param projectId — scope to a specific project (A5). If omitted, scans globally.
    * Returns the list of newly generated hypotheses.
    */
-  async generateFromDiscrepancies(): Promise<GeneratedHypothesis[]> {
+  async generateFromDiscrepancies(projectId?: string): Promise<GeneratedHypothesis[]> {
     const now = new Date().toISOString();
 
-    // Find open discrepancies at threshold that have no hypothesis yet
+    // Find open discrepancies at threshold that have no hypothesis yet (E3: MATCH instead of OPTIONAL MATCH)
     const rows = await this.neo4j.run(
       `MATCH (disc:Discrepancy {status: 'open'})
        WHERE disc.runsSinceDetected >= $threshold
-       // Filter by severity of the parent definition
-       OPTIONAL MATCH (d:IntegrityFindingDefinition {id: disc.findingDefinitionId})
+         AND ($projectId IS NULL OR disc.projectId = $projectId)
+       MATCH (d:IntegrityFindingDefinition {id: disc.findingDefinitionId})
        WHERE d.severity IN $severities
-       WITH disc, d
-       WHERE d IS NOT NULL
        // Check no existing hypothesis link
        OPTIONAL MATCH (disc)-[:GENERATED_HYPOTHESIS]->(existing:Hypothesis)
        WITH disc, d, existing
@@ -77,15 +77,17 @@ export class IntegrityHypothesisGenerator {
       {
         threshold: this.config.threshold,
         severities: this.config.severityFilter,
+        projectId: projectId ?? null,
       },
     );
 
     if (rows.length === 0) return [];
 
-    // Build hypotheses array in-memory
+    // Build hypotheses array in-memory (A5: projectId in hypId and ON CREATE SET)
+    const projPrefix = projectId ?? 'global';
     const hypotheses = rows.map(row => {
       const discId = String(row.discId);
-      const hypId = `hyp_integrity_${discId}`;
+      const hypId = `hyp_integrity_${projPrefix}_${discId}`;
       const name = `Graph integrity: ${row.description} (${row.runs} consecutive failures, current=${row.currentValue})`;
       return {
         discId,
@@ -95,6 +97,7 @@ export class IntegrityHypothesisGenerator {
         severity: String(row.severity),
         now,
         runs: Number(row.runs),
+        projectId: projectId ?? null,
       };
     });
 
@@ -112,6 +115,7 @@ export class IntegrityHypothesisGenerator {
          hyp.sourceNodeId = h.discId,
          hyp.discrepancyType = h.discType,
          hyp.severity = h.severity,
+         hyp.projectId = h.projectId,
          hyp.created = h.now
        ON MATCH SET
          hyp.updated = h.now,
@@ -132,18 +136,21 @@ export class IntegrityHypothesisGenerator {
   /**
    * Get all integrity hypotheses that are still open.
    * These are candidates for the self-audit pipeline's getDriftItems().
+   *
+   * @param projectId — scope to a specific project (A6). If omitted, returns all.
    */
-  async getOpenIntegrityHypotheses(): Promise<GeneratedHypothesis[]> {
+  async getOpenIntegrityHypotheses(projectId?: string): Promise<GeneratedHypothesis[]> {
     const rows = await this.neo4j.run(
       `MATCH (disc:Discrepancy)-[:GENERATED_HYPOTHESIS]->(h:Hypothesis)
        WHERE h.status = 'open' AND h.domain = 'integrity'
+         AND ($projectId IS NULL OR h.projectId = $projectId)
        RETURN h.id AS id,
               disc.id AS discId,
               h.name AS name,
               disc.type AS type,
               disc.runsSinceDetected AS runs
        ORDER BY disc.runsSinceDetected DESC`,
-      {},
+      { projectId: projectId ?? null },
     );
 
     return rows.map(r => ({

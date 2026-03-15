@@ -341,7 +341,7 @@ export class GroundTruthRuntime {
     await persistence.persistFindings(findings, projectId);
 
     const generator = new IntegrityHypothesisGenerator(this.neo4j);
-    await generator.generateFromDiscrepancies();
+    await generator.generateFromDiscrepancies(projectId);
   }
 
   // ─── Panel 1: Graph State ───────────────────────────────────────

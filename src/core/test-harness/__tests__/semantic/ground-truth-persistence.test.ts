@@ -175,9 +175,9 @@ describe('IntegrityHypothesisGenerator (GTH-8)', () => {
       }])
       .mockResolvedValueOnce([]); // batched MERGE hypotheses
 
-    const results = await generator.generateFromDiscrepancies();
+    const results = await generator.generateFromDiscrepancies('proj_test');
     expect(results).toHaveLength(1);
-    expect(results[0].id).toBe('hyp_integrity_disc_test_check');
+    expect(results[0].id).toBe('hyp_integrity_proj_test_disc_test_check');
     expect(results[0].runsSinceDetected).toBe(7);
   });
 

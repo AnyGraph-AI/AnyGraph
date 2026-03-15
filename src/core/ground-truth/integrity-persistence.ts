@@ -6,7 +6,7 @@
  * resolution trail edges.
  *
  * Node lifecycle:
- *   IntegrityFindingDefinition (stable, MERGE by id)
+ *   IntegrityFindingDefinition (stable, MERGE by id+projectId)
  *     -[:OBSERVED_AS]-> IntegrityFindingObservation (temporal, one per run)
  *       -[:PRODUCED]-> Discrepancy (created when observation fails)
  *
@@ -14,6 +14,8 @@
  *   (Discrepancy)-[:GENERATED_HYPOTHESIS]->(Hypothesis)
  *   (Hypothesis)-[:BECAME_TASK]->(Task)
  *   (Task)-[:RESOLVED_BY_COMMIT]->(commitSnapshot)
+ *
+ * All MERGE keys include projectId to prevent cross-project corruption (A1-A4).
  */
 
 import { Neo4jService } from '../../storage/neo4j/neo4j.service.js';
@@ -37,6 +39,7 @@ export interface DiscrepancyNode {
   runsSinceDetected: number;
   status: 'open' | 'resolved';
   resolvedAt: string | null;
+  projectId?: string;
 }
 
 /** Map finding surface → discrepancy type */
@@ -69,6 +72,7 @@ export class IntegrityPersistence {
    * Creates/updates definitions, creates observations, manages discrepancies.
    *
    * Batched: ~5 Neo4j roundtrips instead of ~60 (N+1 eliminated).
+   * All MERGE keys include projectId for multi-project safety (A1-A4).
    *
    * Returns: { definitionsMerged, observationsCreated, discrepanciesOpen, discrepanciesResolved }
    */
@@ -94,7 +98,7 @@ export class IntegrityPersistence {
       obsId: `obs_${f.definitionId}_${runTs}_${i}`,
     }));
 
-    // Step 1: Batch MERGE all definitions
+    // Step 1: Batch MERGE all definitions (A1: projectId in MERGE key)
     const defs = prepared.map(f => ({
       definitionId: f.definitionId,
       surface: f.surface,
@@ -108,14 +112,13 @@ export class IntegrityPersistence {
 
     await this.neo4j.run(
       `UNWIND $defs AS f
-       MERGE (d:IntegrityFindingDefinition {id: f.definitionId})
+       MERGE (d:IntegrityFindingDefinition {id: f.definitionId, projectId: f.projectId})
        ON CREATE SET
          d.surface = f.surface,
          d.surfaceClass = f.surfaceClass,
          d.severity = f.severity,
          d.description = f.description,
          d.expected = f.expected,
-         d.projectId = f.projectId,
          d.createdAt = f.now
        ON MATCH SET
          d.severity = f.severity,
@@ -126,15 +129,15 @@ export class IntegrityPersistence {
     );
     const definitionsMerged = defs.length;
 
-    // Step 2: Batch fetch ALL previous observation values for trend computation
+    // Step 2: Batch fetch ALL previous observation values for trend computation (B4: head() instead of collect()[0])
     const defIds = [...new Set(prepared.map(f => f.definitionId))];
     const trendRows = await this.neo4j.run(
       `UNWIND $defIds AS defId
-       MATCH (d:IntegrityFindingDefinition {id: defId})-[:OBSERVED_AS]->(o:IntegrityFindingObservation)
+       MATCH (d:IntegrityFindingDefinition {id: defId, projectId: $projectId})-[:OBSERVED_AS]->(o:IntegrityFindingObservation)
        WITH defId, o ORDER BY o.observedAt DESC
-       WITH defId, collect(o.observedValue)[0] AS lastVal
+       WITH defId, head(collect(o.observedValue)) AS lastVal
        RETURN defId, lastVal`,
-      { defIds },
+      { defIds, projectId },
     );
     const lastValues = new Map<string, number>();
     for (const row of trendRows) {
@@ -150,7 +153,7 @@ export class IntegrityPersistence {
       return 'stable';
     };
 
-    // Step 3: Batch CREATE all observations + OBSERVED_AS edges
+    // Step 3: Batch CREATE all observations + OBSERVED_AS edges (A2: projectId on observations)
     const obs = prepared.map(f => ({
       definitionId: f.definitionId,
       obsId: f.obsId,
@@ -160,11 +163,12 @@ export class IntegrityPersistence {
       pass: f.pass,
       tier: f.tier,
       trend: computeTrend(f.definitionId, f.observedValue),
+      projectId,
     }));
 
     await this.neo4j.run(
       `UNWIND $obs AS o
-       MATCH (d:IntegrityFindingDefinition {id: o.definitionId})
+       MATCH (d:IntegrityFindingDefinition {id: o.definitionId, projectId: o.projectId})
        CREATE (ob:IntegrityFindingObservation {
          id: o.obsId,
          observedAt: o.observedAt,
@@ -173,21 +177,22 @@ export class IntegrityPersistence {
          pass: o.pass,
          source: 'ground_truth_hook',
          tier: o.tier,
-         trend: o.trend
+         trend: o.trend,
+         projectId: o.projectId
        })
        CREATE (d)-[:OBSERVED_AS]->(ob)`,
       { obs },
     );
     const observationsCreated = obs.length;
 
-    // Step 4: Batch MERGE all failing discrepancies + PRODUCED edges
+    // Step 4: Batch MERGE all failing discrepancies + PRODUCED edges (A3: projectId in MERGE key + discId)
     const failing = prepared
       .filter(f => !f.pass)
       .map(f => {
         const trend = computeTrend(f.definitionId, f.observedValue);
         return {
           obsId: f.obsId,
-          discId: `disc_${f.definitionId}`,
+          discId: `disc_${projectId}_${f.definitionId}`,
           discType: classifyDiscrepancy(f),
           defId: f.definitionId,
           description: f.description,
@@ -195,6 +200,7 @@ export class IntegrityPersistence {
           currentValue: f.observedValue,
           expectedValue: f.expectedValue,
           trend,
+          projectId,
         };
       });
 
@@ -203,7 +209,7 @@ export class IntegrityPersistence {
       await this.neo4j.run(
         `UNWIND $failing AS f
          MATCH (o:IntegrityFindingObservation {id: f.obsId})
-         MERGE (disc:Discrepancy {id: f.discId})
+         MERGE (disc:Discrepancy {id: f.discId, projectId: f.projectId})
          ON CREATE SET
            disc.type = f.discType,
            disc.findingDefinitionId = f.defId,
@@ -227,16 +233,17 @@ export class IntegrityPersistence {
       discrepanciesOpen = failing.length;
     }
 
-    // Step 5: Batch resolve all passing discrepancies
+    // Step 5: Batch resolve all passing discrepancies (A4: projectId filter)
     const passingDefIds = prepared.filter(f => f.pass).map(f => f.definitionId);
     let discrepanciesResolved = 0;
     if (passingDefIds.length > 0) {
       const resolved = await this.neo4j.run(
         `UNWIND $passingDefIds AS defId
          MATCH (disc:Discrepancy {findingDefinitionId: defId, status: 'open'})
+         WHERE disc.projectId = $projectId
          SET disc.status = 'resolved', disc.resolvedAt = $now
          RETURN count(disc) AS cnt`,
-        { passingDefIds, now },
+        { passingDefIds, now, projectId },
       );
       if (resolved.length > 0) {
         discrepanciesResolved = Number(resolved[0].cnt);
@@ -252,16 +259,18 @@ export class IntegrityPersistence {
   async getOpenDiscrepancies(opts?: {
     type?: DiscrepancyType;
     minRuns?: number;
+    projectId?: string;
   }): Promise<DiscrepancyNode[]> {
     const typeFilter = opts?.type ? `AND disc.type = $type` : '';
     const runsFilter = opts?.minRuns ? `AND disc.runsSinceDetected >= $minRuns` : '';
+    const projectFilter = opts?.projectId ? `AND disc.projectId = $projectId` : '';
 
     const rows = await this.neo4j.run(
       `MATCH (disc:Discrepancy {status: 'open'})
-       WHERE true ${typeFilter} ${runsFilter}
+       WHERE true ${typeFilter} ${runsFilter} ${projectFilter}
        RETURN properties(disc) AS props
        ORDER BY disc.runsSinceDetected DESC`,
-      { type: opts?.type ?? null, minRuns: opts?.minRuns ?? null },
+      { type: opts?.type ?? null, minRuns: opts?.minRuns ?? null, projectId: opts?.projectId ?? null },
     );
 
     return rows.map(r => r.props as DiscrepancyNode);

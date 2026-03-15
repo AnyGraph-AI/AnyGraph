@@ -31,7 +31,7 @@ export async function emitTouched(
   const now = opts.timestamp ?? new Date().toISOString();
   try {
     await neo4j.run(
-      `MATCH (b:SessionBookmark {agentId: $agentId})
+      `MATCH (b:SessionBookmark {agentId: $agentId, projectId: $projectId})
        WHERE b.status IN ['claimed', 'in_progress', 'completing']
        MATCH (sf:SourceFile) WHERE sf.filePath ENDS WITH $filePath AND sf.projectId = $projectId
        MERGE (b)-[t:TOUCHED]->(sf)
@@ -59,7 +59,7 @@ export async function emitReferenced(
   try {
     await neo4j.run(
       `UNWIND $files AS fp
-       MATCH (b:SessionBookmark {agentId: $agentId})
+       MATCH (b:SessionBookmark {agentId: $agentId, projectId: $projectId})
        WHERE b.status IN ['claimed', 'in_progress', 'completing']
        MATCH (sf:SourceFile) WHERE sf.filePath ENDS WITH fp AND sf.projectId = $projectId
        MERGE (b)-[r:REFERENCED]->(sf)
@@ -139,8 +139,8 @@ export async function emitVerifiedByRun(
   try {
     // Create or update the run node
     await neo4j.run(
-      `MERGE (r:VerificationRun {id: $runId})
-       ON CREATE SET r.timestamp = $now, r.verdict = $verdict, r.projectId = $projectId
+      `MERGE (r:VerificationRun {id: $runId, projectId: $projectId})
+       ON CREATE SET r.timestamp = $now, r.verdict = $verdict
        ON MATCH SET r.timestamp = $now, r.verdict = $verdict`,
       { runId, now, verdict, projectId },
     );
