@@ -26,6 +26,7 @@ const inputSchema = z.object({
   projectId: z.string().describe('Project ID, name, or path'),
   functionName: z.string().describe('Name of the function/method to check'),
   filePath: z.string().optional().describe('File path to disambiguate if multiple functions share the name'),
+  agentId: z.string().optional().describe('Agent ID for SessionBookmark tracking (default: watson-main)'),
 });
 
 export const createPreEditCheckTool = (server: McpServer): void => {
@@ -148,12 +149,13 @@ export const createPreEditCheckTool = (server: McpServer): void => {
         }
 
         // GTH-5: Bookmark warnings (non-blocking)
-        const bookmarkWarnings = await checkBookmarkWarnings(neo4jService);
+        const effectiveAgentId = args.agentId ?? 'watson-main';
+        const bookmarkWarnings = await checkBookmarkWarnings(neo4jService, effectiveAgentId);
 
         // GTH-6: Emit TOUCHED edge (non-blocking, fire-and-forget)
         if (node.filePath) {
           emitTouched(neo4jService, String(node.filePath), {
-            agentId: 'watson-main',
+            agentId: effectiveAgentId,
             projectId,
           }).catch(() => {}); // never block on observation failure
         }

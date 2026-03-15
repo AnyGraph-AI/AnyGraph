@@ -384,8 +384,11 @@ export class SoftwareGovernancePack implements GroundTruthPack {
 
   // ─── Panel 3: Candidate MODIFIES ────────────────────────────────
 
-  async queryCandidateModifies(taskId: string): Promise<CandidateEdge[]> {
+  async queryCandidateModifies(taskId: string, projectId?: string): Promise<CandidateEdge[]> {
     // Look for existing CANDIDATE_MODIFIES or keyword matches from task description
+    const sfMatch = projectId
+      ? 'MATCH (sf:SourceFile {projectId: $projectId})'
+      : 'MATCH (sf:SourceFile)';
     const rows = await this.neo4j.run(
       `MATCH (t:Task) WHERE t.id = $taskId OR t.name = $taskId
        OPTIONAL MATCH (t)-[cm:CANDIDATE_MODIFIES]->(sf)
@@ -395,7 +398,7 @@ export class SoftwareGovernancePack implements GroundTruthPack {
               'task_description' AS source
        UNION ALL
        MATCH (t:Task) WHERE t.id = $taskId OR t.name = $taskId
-       MATCH (sf:SourceFile)
+       ${sfMatch}
        WHERE any(word IN split(toLower(t.name), ' ')
                  WHERE size(word) > 8
                  AND NOT word IN ['implement', 'integrate', 'refactor', 'verification', 'configure', 'establish']
@@ -404,7 +407,7 @@ export class SoftwareGovernancePack implements GroundTruthPack {
               sf.filePath AS filePath, 0.3 AS confidence,
               'keyword_match' AS source
        LIMIT 10`,
-      { taskId },
+      { taskId, projectId: projectId ?? null },
     );
 
     return rows.map(r => ({

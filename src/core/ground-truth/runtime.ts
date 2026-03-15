@@ -474,7 +474,7 @@ export class GroundTruthRuntime {
         ? this.pack.queryTransitiveImpact(filesTouched, projectId)
         : Promise.resolve([]),
       currentTaskId
-        ? this.pack.queryCandidateModifies(currentTaskId)
+        ? this.pack.queryCandidateModifies(currentTaskId, projectId)
         : Promise.resolve([]),
     ]);
 

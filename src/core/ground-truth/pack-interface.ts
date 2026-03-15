@@ -84,5 +84,5 @@ export interface GroundTruthPack {
    * These are CANDIDATE_MODIFIES (non-authoritative, from task descriptions).
    * Observed edges (TOUCHED) are separate from predicted scope.
    */
-  queryCandidateModifies(taskId: string): Promise<CandidateEdge[]>;
+  queryCandidateModifies(taskId: string, projectId?: string): Promise<CandidateEdge[]>;
 }

@@ -31,6 +31,7 @@ const inputSchema = z.object({
   projectId: z.string().describe('Project ID, name, or path'),
   filePath: z.string().describe('Absolute path to the file being modified'),
   modifiedContent: z.string().describe('Full content of the modified file'),
+  agentId: z.string().optional().describe('Agent ID for SessionBookmark tracking (default: watson-main)'),
 });
 
 export const createSimulateEditTool = (server: McpServer): void => {
@@ -194,7 +195,8 @@ export const createSimulateEditTool = (server: McpServer): void => {
         const icon = { SAFE: '✅', CAUTION: '⚠️', DANGEROUS: '🔶', CRITICAL: '🔴' }[changeScope] || '❓';
 
         // 6. Format output (with GTH-5 bookmark warnings)
-        const bookmarkWarnings = await checkBookmarkWarnings(neo4jService);
+        const effectiveAgentId = args.agentId ?? 'watson-main';
+        const bookmarkWarnings = await checkBookmarkWarnings(neo4jService, effectiveAgentId);
         const lines: string[] = [];
 
         if (bookmarkWarnings.length > 0) {
