@@ -258,10 +258,14 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
 export class GroundTruthRuntime {
   private neo4j: Neo4jService;
   private pack: GroundTruthPack;
+  private persistence: IntegrityPersistence;
+  private hypothesisGen: IntegrityHypothesisGenerator;
 
   constructor(pack: GroundTruthPack, neo4j?: Neo4jService) {
     this.pack = pack;
     this.neo4j = neo4j ?? new Neo4jService();
+    this.persistence = new IntegrityPersistence(this.neo4j);
+    this.hypothesisGen = new IntegrityHypothesisGenerator(this.neo4j);
   }
 
   /**
@@ -333,11 +337,8 @@ export class GroundTruthRuntime {
     findings: IntegrityFinding[],
     projectId: string,
   ): Promise<void> {
-    const persistence = new IntegrityPersistence(this.neo4j);
-    await persistence.persistFindings(findings, projectId);
-
-    const generator = new IntegrityHypothesisGenerator(this.neo4j);
-    await generator.generateFromDiscrepancies(projectId);
+    await this.persistence.persistFindings(findings, projectId);
+    await this.hypothesisGen.generateFromDiscrepancies(projectId);
   }
 
   // ─── Panel 1: Graph State ───────────────────────────────────────

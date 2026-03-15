@@ -291,13 +291,14 @@ export class SessionBookmarkManager {
   // ─── Garbage Collection ─────────────────────────────────────────
 
   async gc(agentId: string): Promise<number> {
-    // Keep last 20 idle bookmarks (completed tasks return to idle), delete older
+    // Keep last 20 idle bookmarks PER PROJECT, delete older (E6: prevents cross-project over-pruning)
     const result = await this.neo4j.run(
       `MATCH (b:SessionBookmark {agentId: $agentId, status: 'idle'})
-       WITH b ORDER BY b.updatedAt DESC
-       SKIP 20
-       DETACH DELETE b
-       RETURN count(b) AS deleted`,
+       WITH b.projectId AS pid, b ORDER BY b.updatedAt DESC
+       WITH pid, collect(b) AS bookmarks
+       UNWIND bookmarks[20..] AS old
+       DETACH DELETE old
+       RETURN count(old) AS deleted`,
       { agentId },
     );
     return Number(result[0]?.deleted ?? 0);

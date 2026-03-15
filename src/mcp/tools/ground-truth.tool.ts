@@ -14,7 +14,15 @@ import { SoftwareGovernancePack } from '../../core/ground-truth/packs/software.j
 import { generateRecoveryAppendix } from '../../core/ground-truth/delta.js';
 import { TOOL_NAMES, TOOL_METADATA } from '../constants.js';
 import { createErrorResponse, createSuccessResponse } from '../utils.js';
-import type { CheckTier, GroundTruthOutput } from '../../core/ground-truth/types.js';
+import type {
+  CheckTier,
+  GroundTruthOutput,
+  TaskStatusValue,
+  MilestoneValue,
+  UnblockedTaskValue,
+  GovernanceHealthValue,
+  EvidenceCoverageValue,
+} from '../../core/ground-truth/types.js';
 
 const inputSchema = z.object({
   projectId: z.string().describe('Project ID (e.g., proj_c0d3e9a1f200)'),
@@ -70,16 +78,16 @@ function formatOutput(output: GroundTruthOutput): string {
   // Panel 1A
   lines.push('── Panel 1A: Graph State ──');
   for (const obs of panel1.planStatus) {
-    const v = obs.value as any;
     if (obs.source === 'Task') {
+      const v = obs.value as TaskStatusValue;
       lines.push(`Plan: ${v.done ?? '?'}/${v.total ?? '?'} done (${v.pct ?? '?'}%)`);
     } else if (obs.source === 'Milestone') {
-      const milestones = v as any[];
-      const done = milestones.filter((m: any) => m.done === m.total);
-      const remaining = milestones.filter((m: any) => m.done < m.total);
+      const milestones = obs.value as MilestoneValue[];
+      const done = milestones.filter((m) => m.done === m.total);
+      const remaining = milestones.filter((m) => m.done < m.total);
       lines.push(`Milestones: ${done.length} done, ${remaining.length} remaining`);
     } else if (obs.source === 'DEPENDS_ON') {
-      const tasks = v as any[];
+      const tasks = obs.value as UnblockedTaskValue[];
       lines.push(`Unblocked: ${tasks.length} tasks`);
       for (const t of tasks.slice(0, 5)) {
         lines.push(`  [${t.milestone}] ${t.task}`);
@@ -89,7 +97,7 @@ function formatOutput(output: GroundTruthOutput): string {
   }
 
   for (const obs of panel1.governanceHealth) {
-    const v = obs.value as any;
+    const v = obs.value as GovernanceHealthValue;
     const icon = obs.freshnessState === 'fresh' ? '✅' : '⚠️';
     if (v.error) {
       lines.push(`Governance: ${icon} ${v.error}`);
@@ -99,7 +107,7 @@ function formatOutput(output: GroundTruthOutput): string {
   }
 
   for (const obs of panel1.evidenceCoverage) {
-    const v = obs.value as any;
+    const v = obs.value as EvidenceCoverageValue;
     lines.push(`Evidence: ${v.withEvidence}/${v.total} done tasks (${v.pct}%)`);
   }
 
@@ -108,7 +116,7 @@ function formatOutput(output: GroundTruthOutput): string {
     lines.push('');
     lines.push('── Contradictions (current milestone) ──');
     for (const obs of panel1.contradictions) {
-      const v = obs.value as any;
+      const v = obs.value as { statement: string; contradiction: string };
       lines.push(`  ⚡ ${v.statement} — contra: ${v.contradiction}`);
     }
   }
@@ -118,7 +126,7 @@ function formatOutput(output: GroundTruthOutput): string {
     lines.push('');
     lines.push('── Open Hypotheses (current milestone) ──');
     for (const obs of panel1.openHypotheses) {
-      const v = obs.value as any;
+      const v = obs.value as { name: string; domain: string; severity: string };
       const sev = v.severity === 'critical' ? '🔴' : v.severity === 'warning' ? '🟡' : 'ℹ️';
       lines.push(`  ${sev} [${v.domain}] ${v.name}`);
     }

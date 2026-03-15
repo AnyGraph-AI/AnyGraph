@@ -74,7 +74,7 @@ export class SoftwareGovernancePack implements GroundTruthPack {
     const unblocked = await this.neo4j.run(
       `MATCH (t:Task {status: 'planned', projectId: $projectId})
        OPTIONAL MATCH (t)-[:DEPENDS_ON]->(dep:Task)
-       WITH t, collect(dep) AS deps, [d IN collect(dep) WHERE d.status <> 'done'] AS blockers
+       WITH t, [d IN collect(dep) WHERE d.status <> 'done'] AS blockers
        WHERE size(blockers) = 0
        MATCH (t)-[:PART_OF]->(m:Milestone)
        RETURN m.name AS milestone, t.name AS task`,
