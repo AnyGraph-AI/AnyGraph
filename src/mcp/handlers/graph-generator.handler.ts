@@ -204,7 +204,10 @@ export class GraphGeneratorHandler {
     for (let i = 0; i < edges.length; i += batchSize) {
       const batch = edges.slice(i, i + batchSize).map((edge) => ({
         ...edge,
-        properties: this.flattenProperties(edge.properties),
+        properties: {
+          ...this.flattenProperties(edge.properties),
+          sourceKind: edge.properties?.sourceKind ?? 'ts-morph',
+        },
       }));
 
       const result = await this.neo4jService.run(QUERIES.CREATE_RELATIONSHIP, {

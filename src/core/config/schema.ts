@@ -583,7 +583,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
         [CoreNodeType.TYPE_ALIAS]: CoreEdgeType.CONTAINS,
       },
       neo4j: {
-        labels: ['SourceFile', 'TypeScript'],
+        labels: ['CodeNode', 'SourceFile', 'TypeScript'],
         primaryLabel: 'SourceFile',
         indexed: ['name', 'filePath', 'isExported'],
         skipEmbedding: true,
@@ -639,7 +639,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
         [CoreNodeType.DECORATOR]: CoreEdgeType.DECORATED_WITH,
       },
       neo4j: {
-        labels: ['Class', 'TypeScript'],
+        labels: ['CodeNode', 'Class', 'TypeScript'],
         primaryLabel: 'Class',
         indexed: ['name', 'isExported', 'visibility'],
       },
@@ -682,7 +682,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
         [CoreNodeType.DECORATOR]: CoreEdgeType.DECORATED_WITH,
       },
       neo4j: {
-        labels: ['Method', 'TypeScript'],
+        labels: ['CodeNode', 'Method', 'TypeScript'],
         primaryLabel: 'Method',
         indexed: ['name', 'visibility'],
       },
@@ -724,7 +724,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
         [CoreNodeType.DECORATOR]: CoreEdgeType.DECORATED_WITH,
       },
       neo4j: {
-        labels: ['Property', 'TypeScript'],
+        labels: ['CodeNode', 'Property', 'TypeScript'],
         primaryLabel: 'Property',
         indexed: ['name', 'visibility'],
         skipEmbedding: true,
@@ -748,7 +748,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
         [CoreNodeType.DECORATOR]: CoreEdgeType.DECORATED_WITH,
       },
       neo4j: {
-        labels: ['Parameter', 'TypeScript'],
+        labels: ['CodeNode', 'Parameter', 'TypeScript'],
         primaryLabel: 'Parameter',
         indexed: ['name'],
         skipEmbedding: true,
@@ -770,7 +770,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
       relationships: [], // IMPORTS to SourceFile would need module resolution
       children: {},
       neo4j: {
-        labels: ['Import', 'TypeScript'],
+        labels: ['CodeNode', 'Import', 'TypeScript'],
         primaryLabel: 'Import',
         indexed: ['name'],
         skipEmbedding: true,
@@ -792,7 +792,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
       relationships: [],
       children: {},
       neo4j: {
-        labels: ['Decorator'],
+        labels: ['CodeNode', 'Decorator'],
         primaryLabel: 'Decorator',
         indexed: ['name'],
         skipEmbedding: true,
@@ -827,7 +827,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
       ],
       children: {},
       neo4j: {
-        labels: ['Interface', 'TypeScript'],
+        labels: ['CodeNode', 'Interface', 'TypeScript'],
         primaryLabel: 'Interface',
         indexed: ['name', 'isExported'],
       },
@@ -854,7 +854,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
       relationships: [],
       children: {},
       neo4j: {
-        labels: ['Enum', 'TypeScript'],
+        labels: ['CodeNode', 'Enum', 'TypeScript'],
         primaryLabel: 'Enum',
         indexed: ['name', 'isExported'],
         skipEmbedding: true,
@@ -884,7 +884,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
         [CoreNodeType.PARAMETER_DECLARATION]: CoreEdgeType.HAS_PARAMETER,
       },
       neo4j: {
-        labels: ['Function', 'TypeScript'],
+        labels: ['CodeNode', 'Function', 'TypeScript'],
         primaryLabel: 'Function',
         indexed: ['name', 'isExported'],
       },
@@ -917,7 +917,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
       relationships: [],
       children: {},
       neo4j: {
-        labels: ['Variable', 'TypeScript'],
+        labels: ['CodeNode', 'Variable', 'TypeScript'],
         primaryLabel: 'Variable',
         indexed: ['name'],
         skipEmbedding: true,
@@ -938,7 +938,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
       relationships: [],
       children: {},
       neo4j: {
-        labels: ['TypeAlias', 'TypeScript'],
+        labels: ['CodeNode', 'TypeAlias', 'TypeScript'],
         primaryLabel: 'TypeAlias',
         indexed: ['name'],
         skipEmbedding: true,
@@ -961,7 +961,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
         [CoreNodeType.PARAMETER_DECLARATION]: CoreEdgeType.HAS_PARAMETER,
       },
       neo4j: {
-        labels: ['Constructor', 'TypeScript'],
+        labels: ['CodeNode', 'Constructor', 'TypeScript'],
         primaryLabel: 'Constructor',
         indexed: ['name'],
         skipEmbedding: true,
@@ -983,7 +983,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
       relationships: [],
       children: {},
       neo4j: {
-        labels: ['Export', 'TypeScript'],
+        labels: ['CodeNode', 'Export', 'TypeScript'],
         primaryLabel: 'Export',
         indexed: ['name'],
         skipEmbedding: true,
