@@ -108,6 +108,7 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     cypher: `
       MATCH (n:TypeScript)
       WHERE NOT n:CodeNode AND NOT n:IRNode
+        AND n.projectId = $projectId
       RETURN count(n) AS cnt
     `,
     expected: 0,
@@ -140,7 +141,7 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     cypher: `
       MATCH (n:SourceFile)
       WHERE NOT n:CodeNode AND NOT n:IRNode
-        AND n.projectId IS NOT NULL
+        AND n.projectId = $projectId
       RETURN count(n) AS cnt
     `,
     expected: 0,
@@ -179,9 +180,10 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     tier: 'medium',
     cypher: `
       MATCH (t:Task)-[e:HAS_CODE_EVIDENCE]->(target)
-      WHERE NOT "SourceFile" IN labels(target)
-        AND NOT "CodeNode" IN labels(target)
-        AND NOT "Function" IN labels(target)
+      WHERE NOT target:SourceFile
+        AND NOT target:CodeNode
+        AND NOT target:Function
+        AND NOT target:IRNode
       RETURN count(e) AS cnt
     `,
     expected: 0,
