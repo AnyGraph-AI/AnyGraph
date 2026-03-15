@@ -490,29 +490,35 @@ When asked "what next?", run this loop in order:
 
 **Graph-order discipline rule:** if a proposed next step is not present as a Task node in the plan graph, add it to the appropriate plan markdown first, re-ingest plans, then execute. Do not perform off-graph follow-on work except emergency break/fix.
 
-1. **State snapshot**
+1. **Ground truth check** (on session boot, after compaction, or before new task)
+   - `ground_truth` — three-panel mirror (graph state, agent state, delta)
+   - Review Panel 3 deltas before proceeding — are you grounded or drifting?
+   - If critical findings exist, resolve before doing anything else
+
+2. **State snapshot**
    - `session_context_summary` (cold-start from graph truth)
    - `plan_status`
    - `plan_priority`
    - `self_audit` summary
 
-2. **Choose work by unblock value**
+3. **Choose work by unblock value**
    - Highest priority tasks first (downstream unblock score)
    - Prefer tasks with existing evidence for rapid closure
 
-3. **Implement with safety gate**
+4. **Implement with safety gate**
    - `pre_edit_check` before edits
    - `simulate_edit` when verdict requires it
 
-4. **Refresh graph state**
+5. **Refresh graph state**
    - Reparse / watcher refresh
    - Confirm node/edge updates visible
 
-5. **Reconcile plan truth**
+6. **Reconcile plan truth**
    - `plan_drift` + `self_audit` verdicts
    - Update checkboxes for confirmed completions
 
-6. **Close the loop**
+7. **Close the loop**
+   - Re-run `ground_truth` (verify no new deltas)
    - Re-run `plan_priority` and `plan_status`
    - Commit code + plan + docs together
 
@@ -632,3 +638,4 @@ npm run commit:audit:verify -- <baseRef> <headRef>
 - `commit_audit_status` — shows latest commit audit results from `artifacts/commit-audit/latest.json`
 - `recommendation_proof_status` — recommendation truth-health panel (`freshness`, `done_vs_proven`, `mismatch_rate`) for a plan project
 - `governance_metrics_status` — latest/trend governance observability snapshot (`verificationRuns`, `gateFailures`, `failuresResolvedBeforeCommit`, `regressionsAfterMerge`, `interceptionRate`)
+- `ground_truth` — three-panel mirror (Graph State | Agent State | Delta). Call on boot, after compaction, and before/after tasks. Shows plan status, integrity, SessionBookmark, and computed deltas with exact/derived/predicted tiers.

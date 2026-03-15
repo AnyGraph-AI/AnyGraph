@@ -51,6 +51,7 @@ export const TOOL_NAMES = {
   simulateEdit: 'simulate_edit',
   preEditCheck: 'pre_edit_check',
   swarmGraphRefresh: 'swarm_graph_refresh',
+  groundTruth: 'ground_truth',
 } as const;
 
 // Tool Metadata
@@ -506,6 +507,31 @@ export const MESSAGES = {
     summaryPrefix: '**Summary:** Executed query and found {} results.',
   },
   neo4j: {
+  [TOOL_NAMES.groundTruth]: {
+    title: 'Ground Truth Hook',
+    description: `Three-panel mirror that shows what the graph says, what the agent is doing, and the delta between them.
+
+**Panels:**
+- **Panel 1A**: Graph state — plan status, milestones, unblocked tasks, governance health, evidence coverage
+- **Panel 1B**: Integrity — schema, referential, provenance, freshness checks + domain surfaces
+- **Panel 2**: Agent state — SessionBookmark (current task, working set, governance history)
+- **Panel 3**: Delta — exact/derived/predicted discrepancies between graph and agent
+
+**When to call:**
+- On session boot (before any work)
+- After compaction (to re-ground)
+- Before starting a new task (to see what's unblocked)
+- Periodically during long work sessions
+
+Parameters:
+- projectId (required): Project ID (e.g., 'proj_c0d3e9a1f200')
+- depth (optional): Check depth — 'fast' (default), 'medium', or 'full'
+- agentId (optional): Agent ID for SessionBookmark lookup
+- currentTaskId (optional): Task being worked on
+- filesTouched (optional): Files modified in current work
+
+Returns: Three-panel formatted output with integrity findings, deltas, and recovery references.`,
+  },
     connectionTest: 'RETURN "Connected!" as message, datetime() as timestamp',
     apocTest: 'CALL apoc.help("apoc") YIELD name RETURN count(name) as apocFunctions',
     connectionSuccess: 'Neo4j connected: {} at {}\nAPOC plugin available with {} functions',
