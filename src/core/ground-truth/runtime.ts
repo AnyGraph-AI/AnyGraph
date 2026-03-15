@@ -289,11 +289,13 @@ export class GroundTruthRuntime {
       candidateModifies: rawPanel3.candidateModifies,
     });
 
-    // GTH-7/8: Persist findings + generate hypotheses (fire-and-forget, non-blocking)
+    // GTH-7/8: Persist findings + generate hypotheses (awaited so CLI doesn't close pool early)
     const allFindings = [...panel1.integrity.core, ...panel1.integrity.domain];
-    this.persistAndGenerateHypotheses(allFindings, options.projectId).catch(() => {
-      // Non-fatal — persistence failure doesn't block the hook
-    });
+    try {
+      await this.persistAndGenerateHypotheses(allFindings, options.projectId);
+    } catch {
+      // Non-fatal — persistence failure doesn't block the hook output
+    }
 
     // GTH-9: Enrich Panel 1 with claim chain, contradictions, and hypotheses for milestone scope
     if (options.currentTaskId && panel2.currentMilestone) {
