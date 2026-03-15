@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "advisoryMode": true,
+  "enforce": false,
+  "projectId": "proj_c0d3e9a1f200",
+  "exceptionCount": 0,
+  "expiredCount": 0,
+  "invalidCount": 0,
+  "debtByControl": [],
+  "sampleExpired": [],
+  "sampleInvalid": [],
+  "snapshotId": "hygiene-metric:proj_c0d3e9a1f200:exception:1773595744543"
+}
