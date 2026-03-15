@@ -70,11 +70,10 @@ export class SessionBookmarkManager {
   async getBookmark(agentId: string, projectId: string): Promise<SessionBookmark | null> {
     const rows = await this.neo4j.run(
       `MATCH (b:SessionBookmark {agentId: $agentId, projectId: $projectId})
-       WHERE b.status <> 'idle' OR b.updatedAt = (
-         SELECT max(b2.updatedAt) FROM SessionBookmark b2
-         WHERE b2.agentId = $agentId AND b2.projectId = $projectId
-       )
-       RETURN b ORDER BY b.updatedAt DESC LIMIT 1`,
+       RETURN b ORDER BY
+         CASE WHEN b.status <> 'idle' THEN 0 ELSE 1 END,
+         b.updatedAt DESC
+       LIMIT 1`,
       { agentId, projectId },
     );
 
