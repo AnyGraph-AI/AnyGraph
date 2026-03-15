@@ -252,6 +252,21 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     `,
     expected: 0,
   },
+
+  // TC-2: Confidence recompute staleness
+  {
+    id: 'recompute_staleness',
+    surface: 'freshness',
+    severity: 'warning',
+    description: 'VerificationRun nodes with observedAt but no confidence version (TC-2)',
+    tier: 'medium',
+    cypher: `
+      MATCH (r:VerificationRun {projectId: $projectId})
+      WHERE r.observedAt IS NOT NULL AND r.confidenceVersion IS NULL
+      RETURN count(r) AS cnt
+    `,
+    expected: 0,
+  },
 ];
 
 /**

@@ -18,6 +18,8 @@ import { parsePlanDirectory, ingestToNeo4j, enrichCrossDomain } from '../../../s
 import { emitPlanParserContracts } from '../../../src/core/parsers/meta/parser-contract-emitter.js';
 import { parseDocumentCollection, documentSchemaToIr } from '../../../src/core/adapters/document/document-parser.js';
 import { materializeIrDocument } from '../../../src/core/ir/ir-materializer.js';
+import { incrementalRecompute } from '../../../src/core/verification/incremental-recompute.js';
+import { Neo4jService } from '../../../src/storage/neo4j/neo4j.service.js';
 
 dotenv.config();
 
@@ -341,6 +343,25 @@ async function main() {
         console.log(
           `[${time}] ✅ ${pid}: Graph updated: ${data.data?.nodesUpdated} nodes, ${data.data?.edgesUpdated} edges (${data.data?.elapsedMs}ms)`,
         );
+        // TC-2: Scoped temporal recompute after code change
+        {
+          const changedFiles = data.data?.filesChanged as string[] | undefined;
+          if (changedFiles?.length) {
+            const svc = new Neo4jService();
+            incrementalRecompute(svc, {
+              projectId: pid,
+              scope: 'file',
+              targets: changedFiles,
+              reason: 'code_change',
+            }).then(result => {
+              if (result.updatedCount > 0) {
+                console.log(`[${time}] 🕐 ${pid}: Temporal recompute: ${result.updatedCount} updated`);
+              }
+            }).catch(err => {
+              if (process.env.GTH_DEBUG) console.error(`[code-watcher] temporal recompute error: ${err}`);
+            }).finally(() => svc.close());
+          }
+        }
         break;
       case 'incremental_parse_failed':
         console.log(`[${time}] ❌ ${pid}: Parse failed: ${data.data?.error}`);
@@ -381,6 +402,29 @@ async function main() {
 
       if (enrichResult.driftDetected.length > 0) {
         console.log(`[${time}] ⚠️  ${enrichResult.driftDetected.length} drift items detected`);
+      }
+
+      // TC-2: Scoped confidence recompute for affected plan projects
+      try {
+        const planProjectIds = results.map(r => r.projectId).filter(Boolean);
+        for (const pid of planProjectIds) {
+          const svc = new Neo4jService();
+          try {
+            const result = await incrementalRecompute(svc, {
+              projectId: pid,
+              scope: 'full',
+              fullOverride: true,
+              reason: 'plan_change',
+            });
+            if (result.updatedCount > 0) {
+              console.log(`[${time}] 🕐 ${pid}: Temporal recompute: ${result.updatedCount} updated`);
+            }
+          } finally {
+            await svc.close();
+          }
+        }
+      } catch (err) {
+        if (process.env.GTH_DEBUG) console.error(`[plan-watcher] temporal recompute error: ${err}`);
       }
     } catch (err) {
       console.error(`[plan-watcher] ❌ Parse failed: ${err}`);
