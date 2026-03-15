@@ -61,9 +61,8 @@ function computeExactDeltas(input: DeltaInput, deltas: DeltaItem[]): void {
 
   // Task status mismatch: agent claims a task that's already done
   if (panel2.currentTaskId) {
-    const planStatus = panel1.planStatus[0]?.value as any;
-    // Check if task exists in unblocked list
-    const unblockedObs = panel1.planStatus[2]?.value as any[];
+    // Source-based lookup — order-independent (🟡-2)
+    const unblockedObs = panel1.planStatus.find(o => o.source === 'DEPENDS_ON')?.value as any[];
     if (unblockedObs) {
       const taskInUnblocked = unblockedObs.some(
         (u: any) => u.task === panel2.currentTaskId,
@@ -110,8 +109,8 @@ function computeExactDeltas(input: DeltaInput, deltas: DeltaItem[]): void {
 function computeDerivedDeltas(input: DeltaInput, deltas: DeltaItem[]): void {
   const { panel1, panel2 } = input;
 
-  // Evidence coverage gap
-  const evObs = panel1.evidenceCoverage[0]?.value as any;
+  // Evidence coverage gap — source-based lookup (🟡-2)
+  const evObs = panel1.evidenceCoverage.find(o => o.source === 'HAS_CODE_EVIDENCE')?.value as any;
   if (evObs && evObs.pct < 50) {
     deltas.push({
       description: `Evidence coverage at ${evObs.pct}% (${evObs.withEvidence}/${evObs.total} done tasks have structural proof)`,

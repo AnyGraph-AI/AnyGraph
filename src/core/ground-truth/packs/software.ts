@@ -390,8 +390,8 @@ export class SoftwareGovernancePack implements GroundTruthPack {
       : 'MATCH (sf:SourceFile)';
     const rows = await this.neo4j.run(
       `MATCH (t:Task) WHERE t.id = $taskId OR t.name = $taskId
-       OPTIONAL MATCH (t)-[cm:CANDIDATE_MODIFIES]->(sf)
-       WHERE sf IS NOT NULL
+       MATCH (t)-[cm:CANDIDATE_MODIFIES]->(sf)
+       WHERE sf.projectId = $projectId
        RETURN t.name AS taskName, t.id AS tid,
               sf.filePath AS filePath, cm.confidence AS confidence,
               'task_description' AS source
