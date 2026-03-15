@@ -11,12 +11,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Six Operational Layers
 | Layer | Status | What It Does |
 |-------|--------|-------------|
-| **Code** | ✅ 3 projects | TypeScript parsing, CALLS/RESOLVES_TO, risk scoring, blast radius |
-| **Corpus** | ✅ 5 projects | Bible + Quran + Deuterocanon + Pseudepigrapha + Early Contested |
-| **Documents** | 🔲 Adapter built | Generic PDF/text ingestion pipeline (not yet populated) |
-| **Plans** | ✅ 8 projects | Task/Milestone/Sprint tracking, drift detection, cross-domain evidence |
-| **Claims** | ✅ 414 claims | Domain-agnostic assertions with evidence grades + confidence aggregation |
-| **Reasoning** | ✅ 52 hypotheses | Auto-generated from evidence gaps, cross-layer synthesis, self-audit |
+| **Code** | ✅ | TypeScript parsing, CALLS/RESOLVES_TO, risk scoring, blast radius |
+| **Plans** | ✅ 6 projects | Task/Milestone/Sprint tracking, drift detection, cross-domain evidence |
+| **Claims & Reasoning** | ✅ | Claims with evidence, hypotheses from gaps, self-audit |
+| **Ground Truth** | ✅ | Agent-graph coordination: integrity checks, delta engine, session bookmarks |
 
 ### Key Design Principles
 - **Parser → IR → Enrichment → Graph**: All parsers should output language-agnostic IR (IR layer exists but current TS parser writes Neo4j directly)
@@ -79,9 +77,8 @@ Other node types: `Project`, `IntegritySnapshot`, `MetricResult`, `Claim`, `Evid
 
 All nodes carry `projectId`. Projects coexist in one Neo4j instance. Always filter by `projectId` in queries.
 
-- **Code projects**: `proj_c0d3e9a1f200` (CodeGraph), `proj_60d5feed0001` (GodSpeed), `proj_0e32f3c187f4` (bible-graph)
-- **Plan projects**: `plan_codegraph`, `plan_godspeed`, `plan_bible_graph`, `plan_plan_graph`, + 4 more
-- **Corpus projects**: `proj_bible_kjv`, `proj_deuterocanon`, `proj_pseudepigrapha`, `proj_early_contested`, `proj_quran`
+- **Code project**: `proj_c0d3e9a1f200` (CodeGraph self-graph)
+- **Plan projects**: `plan_codegraph`, `plan_plan_graph`, `plan_runtime_graph`, `plan_governance_org`, `plan_hygiene_governance`, `plan_hygiene_ai`
 
 ### MCP Tools (39)
 

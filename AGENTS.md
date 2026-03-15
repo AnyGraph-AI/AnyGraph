@@ -79,7 +79,7 @@ Framework-specific labels (added when `.codegraph.yml` specifies a framework):
 
 **Plans & governance:** `PART_OF`, `DEPENDS_ON`, `HAS_CODE_EVIDENCE`, `TARGETS`, `NEXT_STAGE`, `READS_PLAN_FIELD`, `MUTATES_TASK_FIELD`, `EMITS_NODE_TYPE`, `EMITS_EDGE_TYPE`
 
-**Claims & corpus:** `SUPPORTED_BY`, `CONTRADICTED_BY`, `WITNESSES`, `PROVES`, `ANCHORS`, `CROSS_REFERENCES`, `MENTIONS_PERSON`, `MENTIONS`
+**Claims:** `SUPPORTED_BY`, `CONTRADICTED_BY`, `WITNESSES`, `PROVES`, `ANCHORS`
 
 **Governance provenance:** `MEASURED`, `DERIVED_FROM_PROOF`, `DERIVED_FROM_RUN`, `DERIVED_FROM_COMMIT`, `DERIVED_FROM_GATE`, `AFFECTS_COMMIT`, `CAPTURED_COMMIT`, `CAPTURED_WORKTREE`, `EMITS_GATE_DECISION`, `BASED_ON_RUN`, `GENERATED_ARTIFACT`, `USED_BY`
 
@@ -410,8 +410,6 @@ ORDER BY m.projectId
 | Plan Project | Code Project |
 |-------------|-------------|
 | `plan_codegraph` | `proj_c0d3e9a1f200` |
-| `plan_godspeed` | `proj_60d5feed0001` |
-| `plan_bible_graph` | `proj_0e32f3c187f4` |
 | `plan_plan_graph` | `proj_c0d3e9a1f200` |
 
 ---
@@ -426,12 +424,10 @@ The claim layer generates domain-agnostic assertions with evidence.
 | `edit_safety` | code | "Function X is high-risk (level Y, Z callers)" |
 | `task_completion` | plan | "Task X is complete" (with code evidence) |
 | `plan_drift` | plan | "Task X may be complete but isn't checked off" |
-| `entity_identity` | corpus | "Moses appears across 4 corpora" |
 | `cross_cutting_impact` | cross | "Editing X invalidates evidence for Y plan tasks" |
 | `bottleneck` | plan | "Sprint X is 41% complete — 23 remaining" |
 | `temporal_coupling` | code | "A and B change together (8 co-commits)" |
 | `coverage_gap` | code | "85 of 85 high-risk functions have no tests" |
-| `entity_centrality` | cross | "God: 11,194 mentions across 2 corpora" |
 
 ### Key queries
 ```cypher
@@ -582,7 +578,7 @@ npm run ir:parity
 
 Checkpoint/resume options:
 - `npm run ir:parity:resume` (resume + retry failed targets)
-- `npm run ir:parity -- --force-target=<name>` to run a single target (`codegraph|godspeed|bible-graph`)
+- `npm run ir:parity -- --force-target=<name>` to run a single target (e.g. `codegraph`)
 - `npm run ir:parity -- --fresh` to ignore prior state and start clean
 
 ### Verification Pipeline (SARIF → Scope → Gate → Runtime Truth)

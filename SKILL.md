@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A universal reasoning graph (63,000+ nodes, 415,000+ edges, 22 projects) that cross-references code, plans, documents, and corpora in Neo4j. Every declaration — functions, classes, methods, variables, imports, types — is a node. Every call, import, containment, state access, ownership, and co-change pattern is an edge. Risk scores, fan-in/fan-out, architecture layers, and author ownership are pre-computed.
+A code intelligence graph (10,000+ nodes, 14,000+ edges, 8 projects) in Neo4j. Every declaration — functions, classes, methods, variables, imports, types — is a node. Every call, import, containment, state access, ownership, and co-change pattern is an edge. Risk scores, fan-in/fan-out, architecture layers, and author ownership are pre-computed.
 
 Code nodes use **multi-label**: `CodeNode:TypeScript:Function`, `CodeNode:TypeScript:Method`, etc. The `kind` property discriminates. Plan nodes are `CodeNode:Task`, `CodeNode:Milestone`, `CodeNode:Decision`.
 
@@ -115,7 +115,7 @@ RETURN f.riskTier, round(f.riskLevel) AS risk, f.fanInCount, f.fanOutCount,
 - `contradictions`
 - `hypotheses`
 - `claim_generate`
-- `claim_chain_path` (code → plan → document/corpus chain view)
+- `claim_chain_path` (code → plan chain view)
 
 ### Governance / verification status
 - `parser_contract_status`
@@ -220,7 +220,7 @@ Code nodes use **multi-label**: `CodeNode:TypeScript:Function`, `CodeNode:TypeSc
 **Plans & governance:**
 `PART_OF`, `DEPENDS_ON`, `HAS_CODE_EVIDENCE`, `TARGETS`, `NEXT_STAGE`, `READS_PLAN_FIELD`, `MUTATES_TASK_FIELD`, `EMITS_NODE_TYPE`, `EMITS_EDGE_TYPE`
 
-**Claims & corpus:**
+**Claims:**
 `SUPPORTED_BY`, `CONTRADICTED_BY`, `WITNESSES`, `PROVES`, `ANCHORS`, `CROSS_REFERENCES`, `MENTIONS_PERSON`, `MENTIONS`
 
 **Governance provenance:**
@@ -461,7 +461,7 @@ AnythingGraph is a universal reasoning graph, not a TypeScript-only tool. Full p
 | Layer | Status | What It Does |
 |-------|--------|-------------|
 | **Code** | ✅ 3 projects | TypeScript parsing, CALLS/RESOLVES_TO, risk scoring, blast radius |
-| **Corpus** | ✅ 5 projects | Bible + Quran + Deuterocanon + Pseudepigrapha + Early Contested |
+| **Ground Truth** | ✅ | Agent-graph coordination, integrity checks, delta engine |
 | **Documents** | 🔲 Adapter built | Generic PDF/text ingestion (pipeline exists, not yet populated) |
 | **Plans** | ✅ 8 projects | Task/Milestone tracking, drift detection, cross-domain evidence |
 | **Claims** | ✅ 414 claims | Domain-agnostic assertions with evidence grades |
@@ -581,7 +581,7 @@ MCP status tools:
 
 ## Full-Capacity Playbooks
 
-### 1) Claim-Chain Workflow (code → plan → document/corpus)
+### 1) Claim-Chain Workflow (code → plan)
 1. `claim_generate` (or run `src/core/claims/claim-engine.ts`) to refresh domain claims.
 2. `claims:cross:synthesize` to materialize cross-domain `DEPENDS_ON` + contradictions.
 3. `claim_chain_path` to visualize traceable chain paths.
@@ -595,7 +595,7 @@ MCP status tools:
 ### 3) Embedding Matcher Tuning Policy
 - Baseline matcher: `plan:embedding:match -- --threshold=0.75 --limit=3` (exploration mode).
 - Quality gate: `embedding:fp:verify` and read `artifacts/embedding-matcher/fp-rate-latest.json`.
-- Production target: **FP rate < 5%**; for current corpus this is validated with stricter run (`threshold=0.84`, `topK=1`).
+- Production target: **FP rate < 5%**; validated with stricter run (`threshold=0.84`, `topK=1`).
 - Use `--apply` only after a passing benchmark for the selected threshold profile.
 
 ### 4) Live Re-Check Operations

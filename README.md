@@ -1,28 +1,25 @@
 # AnythingGraph
 
-A universal reasoning graph that cross-references code, plans, documents, and corpora in Neo4j. Parses structured knowledge into nodes and edges, generates claims, detects drift, and self-audits. AI agents query the graph before editing to see blast radius, risk, dependencies, and cross-domain consequences.
+A code intelligence graph that gives AI agents structural awareness before they edit. Parses TypeScript into Neo4j, tracks plan tasks with cross-domain evidence, detects drift, and self-audits. Agents query the graph to see blast radius, risk, dependencies, and what breaks.
 
-**The thesis:** Understanding lives in connections, not individual files. A function's risk depends on who calls it, what plan tasks reference it, what state it mutates, and how often it changes. AnythingGraph makes all of that queryable.
-
-Code parsing was the proof of concept. The architecture is the product.
+**The thesis:** Understanding lives in connections, not individual files. A function's risk depends on who calls it, what plan tasks reference it, what state it mutates, and how often it changes. AnyGraph makes all of that queryable.
 
 ## Current State
 
-- **61,000+ nodes, 428,000+ edges** across 17 projects
-- **7 operational layers**: Code, Corpus, Documents (planned), Plans, Claims, Reasoning, Ground Truth
+- **10,000+ nodes, 14,000+ edges** across 8 projects
+- **4 operational layers**: Code, Plans, Claims/Reasoning, Ground Truth
 - **40 MCP tools** for agents to query, edit, and coordinate
-- **328 hermetic tests** across 29 test suites
+- **334 hermetic tests** across 30 test suites
 - **41-step governance pipeline** (done-check) with ground truth post-gate
-- **v0.1.0** — TypeScript parser shipping, temporal confidence layer active
+- **v0.1.0** — TypeScript parser, temporal confidence, incremental recompute
 
 ### Projects in the Graph
 
 | Domain | Projects | What's In Them |
 |--------|----------|----------------|
-| **Code** | CodeGraph (self-graph), GodSpeed, Bible-graph | TypeScript AST → nodes/edges, risk scoring, blast radius |
-| **Corpus** | KJV Bible, Deuterocanon, Pseudepigrapha, Early Contested, Quran | Verse/Chapter/Book nodes, cross-references, entity resolution |
-| **Plans** | codegraph, godspeed, bible-graph, plan-graph, hygiene-governance, + 3 more | Task/Milestone/Sprint tracking, auto-completion detection |
-| **Claims** | 1,050 claims, 1,300+ evidence nodes, 494 hypotheses | Cross-layer synthesis, self-audit verdicts |
+| **Code** | CodeGraph (self-graph) | TypeScript AST → nodes/edges, risk scoring, blast radius |
+| **Plans** | codegraph, plan-graph, runtime-graph, governance-org, hygiene-governance, hygiene-ai | Task/Milestone/Sprint tracking, auto-completion detection |
+| **Claims** | Claims, evidence, hypotheses | Cross-layer synthesis, self-audit verdicts |
 
 ## Quick Start
 
@@ -106,18 +103,15 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 | `Claim` | Domain-agnostic assertion with evidence |
 | `Hypothesis` | Auto-generated investigation target |
 | `Evidence` | Supporting/contradicting evidence for claims |
-| `Verse` / `Chapter` / `Book` | Corpus text nodes |
+| `Verse` / `Chapter` / `Book` | Corpus text nodes (when corpus domain loaded) |
 | `IRNode:Entity` / `IRNode:Site` / `IRNode:Artifact` | Intermediate representation nodes |
 | `IntegrityFindingObservation` | Ground truth integrity check result |
 | `Discrepancy` | Delta between expected and observed state |
 
-### Edge Types (53)
+### Edge Types
 
 **Code structure:**
 `CALLS`, `CONTAINS`, `IMPORTS`, `RESOLVES_TO`, `HAS_PARAMETER`, `HAS_MEMBER`, `REGISTERED_BY`, `READS_STATE`, `WRITES_STATE`, `POSSIBLE_CALL`, `EXTENDS`, `IMPLEMENTS`, `ORIGINATES_IN`, `OWNED_BY`, `BELONGS_TO_LAYER`, `DECLARES`
-
-**Corpus:**
-`CROSS_REFERENCES`, `NEXT_VERSE`, `MENTIONS_PERSON`, `MENTIONS`, `CURATED_PARALLEL`, `REFERENCES`
 
 **Plans & governance:**
 `PART_OF`, `DEPENDS_ON`, `HAS_CODE_EVIDENCE`, `TARGETS`, `BLOCKS`, `NEXT_STAGE`, `READS_PLAN_FIELD`, `MUTATES_TASK_FIELD`, `EMITS_NODE_TYPE`, `EMITS_EDGE_TYPE`
@@ -235,9 +229,6 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 ### Ground Truth
 `ground-truth`, `ground-truth:post-gate`
 
-### Corpus
-`corpus:bible:hash-ingest`
-
 ### Audit
 `audit:anchor:resolve`
 
@@ -278,17 +269,14 @@ The test harness provides hermetic, deterministic testing for all governance sur
 - `fixtures/sampled/` — Sampled production data (skeleton)
 - `fixtures/stress/` — Large-scale stress fixtures (skeleton)
 
-## Six Operational Layers
+## Operational Layers
 
-| Layer | Status | Nodes | What It Does |
-|-------|--------|-------|-------------|
-| **Code** | ✅ 3 projects | ~8,500 | TypeScript parsing, CALLS/RESOLVES_TO, risk scoring, blast radius |
-| **Corpus** | ✅ 5 projects | ~45,000 | Bible + Quran + Deuterocanon + Pseudepigrapha + Early Contested |
-| **Documents** | 🔲 Adapter built | — | Generic PDF/text ingestion (pipeline exists, not yet populated) |
-| **Plans** | ✅ 8 projects | ~5,000 | Task/Milestone tracking, drift detection, cross-domain evidence |
-| **Claims** | ✅ | ~2,900 | 414 claims, 1,400+ evidence nodes, cross-layer synthesis |
-| **Reasoning** | ✅ | ~500 | 494 hypotheses from evidence gaps, self-audit |
-| **Ground Truth** | ✅ | — | Agent-graph coordination: integrity checks, delta engine, session bookmarks |
+| Layer | Status | What It Does |
+|-------|--------|-------------|
+| **Code** | ✅ | TypeScript parsing, CALLS/RESOLVES_TO, risk scoring, blast radius |
+| **Plans** | ✅ | Task/Milestone tracking, drift detection, cross-domain evidence |
+| **Claims & Reasoning** | ✅ | Claims with evidence, hypotheses from gaps, self-audit |
+| **Ground Truth** | ✅ | Agent-graph coordination: integrity checks, delta engine, session bookmarks |
 
 ## Architecture
 
@@ -297,12 +285,12 @@ codegraph/
 ├── src/
 │   ├── cli/                  # CLI (init, parse, enrich, serve, risk, analyze, status)
 │   ├── core/
-│   │   ├── parsers/          # TypeScript (ts-morph), Plan, Python (scaffold)
+│   │   ├── parsers/          # TypeScript (ts-morph), Plan
 │   │   ├── config/           # Schemas, invariants, change-class matrix, eval lineage
 │   │   ├── claims/           # Claim engine (3 domain + 5 cross-layer synthesizers)
 │   │   ├── embeddings/       # OpenAI embeddings + NL→Cypher
 │   │   ├── ir/               # Intermediate representation (v1 schema, materializer, validator)
-│   │   ├── adapters/document/ # Document parser, entity extractor, PDF extractor
+│   │   ├── adapters/document/ # Document parser (scaffold)
 │   │   ├── ground-truth/     # Ground Truth Hook: runtime, delta, packs, session bookmarks
 │   │   ├── verification/     # Advisory gate, exception enforcement, temporal confidence
 │   │   ├── test-harness/     # 20 hermetic test modules + fixtures
@@ -342,20 +330,19 @@ codegraph/
 - **MCP**: @modelcontextprotocol/sdk
 - **Embeddings**: OpenAI text-embedding-3-large (optional)
 - **NL→Cypher**: OpenAI gpt-4o (optional)
-- **Tests**: Custom hermetic harness (328 tests, 29 suites) + Vitest
+- **Tests**: Custom hermetic harness (334 tests, 30 suites) + Vitest
 - **File watching**: @parcel/watcher (native inotify)
 - **CLI**: commander
 
 ## What's Next
 
-1. **Temporal Confidence (TC-2→TC-8)**: Incremental recompute, shadow propagation, explainability paths, confidence debt, anti-gaming, calibration
-2. **Reasoning Framework (RF-2→RF-12)**: Temporal enforcement, deterministic baseline, graph invariant engine, entropy monitoring
-3. **IR layer**: Parser → IR → Enrichment → Graph (language-agnostic intermediate representation)
-4. **Python parser**: CPython ast + Pyright sidecar (scaffold exists)
-5. **Domain packs**: Formation governance, Sci-Fi, Patents, ArXiv — all implementing GroundTruthPack interface
+1. **Second language parser**: Python (CPython ast + Pyright) or Go — prove the architecture is language-agnostic
+2. **IR layer**: Parser → IR → Enrichment → Graph (decouple parsers from Neo4j)
+3. **Temporal Confidence (TC-3→TC-8)**: Shadow propagation, explainability, confidence debt — when a second domain needs it
+4. **Domain packs**: New domains implement GroundTruthPack interface and plug into the same graph
 
 Full roadmap: `plans/codegraph/MULTI_LANGUAGE_ASSESSMENT.md`
 
 ## License
 
-v0.1.0 — Forked from drewdrewH/code-graph-context v2.9.0
+v0.1.0 — Originally forked from drewdrewH/code-graph-context v2.9.0, substantially rewritten
