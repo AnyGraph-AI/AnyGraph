@@ -13,6 +13,12 @@ const EXPECTED_GLOBAL_EDGE_TYPES = new Set<string>([
   'CONTRADICTED_BY',
   'HAS_CODE_EVIDENCE',
   'BLOCKS',
+  // GTH integrity pipeline edges (cross-project by design)
+  'OBSERVED_AS',
+  'PRODUCED',
+  'GENERATED_HYPOTHESIS',
+  'BECAME_TASK',
+  'RESOLVED_BY_COMMIT',
 ]);
 
 const KNOWN_SCOPE_DEBT_EDGE_TYPES = new Set<string>([
