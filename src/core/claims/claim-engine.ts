@@ -286,15 +286,18 @@ export class ClaimEngine {
         claimCount += driftTasks.records[0].get('claims').toNumber();
       }
 
-      // 4. Generate hypotheses from gaps: planned tasks with NO evidence at all
+      // 4. Generate hypotheses from REAL evidence gaps only:
+      //    - Tasks marked DONE but lacking evidence (suspicious — claimed done with no proof)
+      //    - Tasks with contradicting evidence (evidence says incomplete)
+      //    Planned tasks with no evidence are just backlog items, not hypotheses.
       const gapHypotheses = await session.run(
-        `MATCH (t:Task {status: 'planned'})
+        `MATCH (t:Task {status: 'done'})
          WHERE (t.hasCodeEvidence IS NULL OR t.hasCodeEvidence = false) ${filterClause}
          OPTIONAL MATCH (t)-[:PART_OF]->(parent)
          WITH t, parent
          MERGE (h:Hypothesis {id: 'hyp_gap_' + t.id})
          ON CREATE SET
-           h.name = 'Task "' + t.name + '" has not been started',
+           h.name = 'Task "' + t.name + '" is marked done but has no structural evidence',
            h.confidence = 0.0,
            h.status = 'open',
            h.domain = 'plan',
