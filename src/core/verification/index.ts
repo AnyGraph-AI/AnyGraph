@@ -10,3 +10,4 @@ export * from './view-enforcement.js';
 export * from './temporal-confidence.js';
 export * from './incremental-recompute.js';
 export * from './shadow-propagation.js';
+export * from './explainability-paths.js';

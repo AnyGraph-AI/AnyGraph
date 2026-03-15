@@ -19,6 +19,9 @@ const EXPECTED_GLOBAL_EDGE_TYPES = new Set<string>([
   'GENERATED_HYPOTHESIS',
   'BECAME_TASK',
   'RESOLVED_BY_COMMIT',
+  // TC-4 explainability edges (cross-project by design)
+  'EXPLAINS_SUPPORT',
+  'EXPLAINS_CONTRADICTION',
 ]);
 
 const KNOWN_SCOPE_DEBT_EDGE_TYPES = new Set<string>([
