@@ -17,6 +17,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { Neo4jService } from '../../storage/neo4j/neo4j.service.js';
+import { checkBookmarkWarnings } from '../../core/ground-truth/warn-enforcement.js';
+import { emitTouched } from '../../core/ground-truth/observed-events.js';
 import { TOOL_NAMES, TOOL_METADATA } from '../constants.js';
 import { createErrorResponse, createSuccessResponse, debugLog, resolveProjectIdOrError } from '../utils.js';
 
@@ -145,9 +147,28 @@ export const createPreEditCheckTool = (server: McpServer): void => {
           verdictReason = `LOW risk, ${fanIn} callers. Safe to edit.`;
         }
 
+        // GTH-5: Bookmark warnings (non-blocking)
+        const bookmarkWarnings = await checkBookmarkWarnings(neo4jService);
+
+        // GTH-6: Emit TOUCHED edge (non-blocking, fire-and-forget)
+        if (node.filePath) {
+          emitTouched(neo4jService, String(node.filePath), {
+            agentId: 'watson-main',
+            projectId,
+          }).catch(() => {}); // never block on observation failure
+        }
+
         // Format output
         const lines: string[] = [];
         const icon = { SIMULATE_FIRST: '🔴', PROCEED_WITH_CAUTION: '⚠️', SAFE: '✅' }[verdict] || '❓';
+
+        // Prepend bookmark warnings if any
+        if (bookmarkWarnings.length > 0) {
+          for (const w of bookmarkWarnings) {
+            lines.push(`⚡ [${w.code}] ${w.message}`);
+          }
+          lines.push('');
+        }
 
         lines.push(`${icon} ${verdict}: ${functionName}`);
         lines.push(verdictReason);

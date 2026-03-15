@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { CORE_TYPESCRIPT_SCHEMA } from '../../core/config/schema.js';
 import { TypeScriptParser } from '../../core/parsers/typescript-parser.js';
 import { Neo4jService } from '../../storage/neo4j/neo4j.service.js';
+import { checkBookmarkWarnings } from '../../core/ground-truth/warn-enforcement.js';
 import { TOOL_NAMES, TOOL_METADATA } from '../constants.js';
 import { createErrorResponse, createSuccessResponse, debugLog, resolveProjectIdOrError } from '../utils.js';
 
@@ -192,13 +193,23 @@ export const createSimulateEditTool = (server: McpServer): void => {
 
         const icon = { SAFE: '✅', CAUTION: '⚠️', DANGEROUS: '🔶', CRITICAL: '🔴' }[changeScope] || '❓';
 
-        // 6. Format output
-        const lines: string[] = [
+        // 6. Format output (with GTH-5 bookmark warnings)
+        const bookmarkWarnings = await checkBookmarkWarnings(neo4jService);
+        const lines: string[] = [];
+
+        if (bookmarkWarnings.length > 0) {
+          for (const w of bookmarkWarnings) {
+            lines.push(`⚡ [${w.code}] ${w.message}`);
+          }
+          lines.push('');
+        }
+
+        lines.push(
           `${icon} EDIT SIMULATION: ${changeScope}`,
           `${reason}`,
           `File: ${filePath}`,
           '',
-        ];
+        );
 
         if (nodesAdded.length > 0) {
           lines.push(`ADDED (${nodesAdded.length}):`);
