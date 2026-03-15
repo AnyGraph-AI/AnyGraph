@@ -101,6 +101,15 @@ function printOutput(output: GroundTruthOutput, verbose: boolean): void {
     console.log(`  Evidence: ${v.withEvidence}/${v.total} done tasks have structural proof (${v.pct}%)`);
   }
 
+  // TC bridge: temporal confidence health
+  if (panel1.temporalConfidence && panel1.temporalConfidence.length > 0) {
+    for (const obs of panel1.temporalConfidence) {
+      const v = obs.value as Record<string, unknown>;
+      const icon = v.severity === 'warning' ? '⚠️' : '🕐';
+      console.log(`  TC: ${icon} ${v.label}`);
+    }
+  }
+
   // GTH-9: Contradictions
   if (panel1.contradictions && panel1.contradictions.length > 0) {
     console.log('');

@@ -138,8 +138,11 @@ export async function emitVerifiedByRun(
     // Create or update the run node
     await neo4j.run(
       `MERGE (r:VerificationRun {id: $runId, projectId: $projectId})
-       ON CREATE SET r.timestamp = $now, r.verdict = $verdict
-       ON MATCH SET r.timestamp = $now, r.verdict = $verdict`,
+       ON CREATE SET r.timestamp = $now, r.verdict = $verdict,
+                     r.observedAt = $now, r.validFrom = $now
+       ON MATCH SET r.timestamp = $now, r.verdict = $verdict,
+                    r.observedAt = coalesce(r.observedAt, $now),
+                    r.validFrom = coalesce(r.validFrom, $now)`,
       { runId, now, verdict, projectId },
     );
 

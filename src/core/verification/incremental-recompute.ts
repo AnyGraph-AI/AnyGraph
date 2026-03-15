@@ -62,8 +62,14 @@ async function resolveRunIds(
         `UNWIND $paths AS path
          MATCH (sf:SourceFile {projectId: $projectId})
          WHERE sf.filePath ENDS WITH path
-         MATCH (r:VerificationRun {projectId: $projectId})-[:CAPTURED_COMMIT]->(:CommitSnapshot)
-         WHERE r.observedAt IS NOT NULL
+         MATCH (sf)-[:VERIFIED_BY_RUN]->(r:VerificationRun {projectId: $projectId})
+         RETURN DISTINCT r.id AS id
+         UNION
+         UNWIND $paths AS path
+         MATCH (sf:SourceFile {projectId: $projectId})
+         WHERE sf.filePath ENDS WITH path
+         MATCH (r:VerificationRun {projectId: $projectId})-[:CAPTURED_COMMIT]->(cs:CommitSnapshot)
+         WHERE cs.diffPaths IS NOT NULL AND any(dp IN cs.diffPaths WHERE dp ENDS WITH path)
          RETURN DISTINCT r.id AS id`,
         { projectId: req.projectId, paths: req.targets },
       );
@@ -75,9 +81,8 @@ async function resolveRunIds(
       const rows = await neo4j.run(
         `UNWIND $taskIds AS taskId
          MATCH (t:Task {id: taskId, projectId: $projectId})
-         MATCH (t)-[:HAS_CODE_EVIDENCE]->(sf:SourceFile {projectId: $projectId})
-         MATCH (r:VerificationRun {projectId: $projectId})
-         WHERE r.observedAt IS NOT NULL
+         MATCH (t)-[:HAS_CODE_EVIDENCE]->(sf:SourceFile)
+         MATCH (sf)-[:VERIFIED_BY_RUN]->(r:VerificationRun {projectId: $projectId})
          RETURN DISTINCT r.id AS id`,
         { projectId: req.projectId, taskIds: req.targets },
       );
@@ -87,7 +92,6 @@ async function resolveRunIds(
     case 'full': {
       const rows = await neo4j.run(
         `MATCH (r:VerificationRun {projectId: $projectId})
-         WHERE r.observedAt IS NOT NULL
          RETURN r.id AS id`,
         { projectId: req.projectId },
       );

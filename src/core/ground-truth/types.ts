@@ -162,6 +162,8 @@ export interface Panel1Output {
   contradictions?: Observation[];
   /** GTH-9: Open hypotheses for current milestone scope */
   openHypotheses?: Observation[];
+  /** TC bridge: temporal confidence health */
+  temporalConfidence?: Observation[];
   /** Panel 1B: Integrity report */
   integrity: IntegrityReport;
 }

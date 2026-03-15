@@ -385,7 +385,7 @@ export class GroundTruthRuntime {
     currentTaskId?: string,
     filesTouched?: string[],
   ): Promise<Panel1Output> {
-    const [planStatus, governanceHealth, evidenceCoverage, relevantClaims, integrity] =
+    const [planStatus, governanceHealth, evidenceCoverage, relevantClaims, integrity, temporalConfidence] =
       await Promise.all([
         this.pack.queryPlanStatus(planProjectId),
         this.pack.queryGovernanceHealth(projectId),
@@ -394,9 +394,10 @@ export class GroundTruthRuntime {
           ? this.pack.queryRelevantClaims(currentTaskId, filesTouched ?? [], projectId)
           : Promise.resolve([]),
         this.panel1B(projectId, depth),
+        this.queryTemporalConfidence(projectId),
       ]);
 
-    return { planStatus, governanceHealth, evidenceCoverage, relevantClaims, integrity };
+    return { planStatus, governanceHealth, evidenceCoverage, relevantClaims, integrity, temporalConfidence };
   }
 
   /**
@@ -422,6 +423,58 @@ export class GroundTruthRuntime {
         criticalFailures: failed.filter(f => f.severity === 'critical').length,
       },
     };
+  }
+
+  /**
+   * Temporal Confidence health — TC pipeline summary for Panel 1A.
+   */
+  private async queryTemporalConfidence(projectId: string): Promise<Observation[]> {
+    const obs: Observation[] = [];
+    const now = new Date().toISOString();
+    try {
+      const rows = await this.neo4j.run(
+        `MATCH (r:VerificationRun {projectId: $projectId})
+         RETURN count(r) AS total,
+                count(r.timeConsistencyFactor) AS withTCF,
+                count(r.shadowEffectiveConfidence) AS withShadow,
+                count(r.confidenceDebt) AS withDebt,
+                avg(r.timeConsistencyFactor) AS avgTCF,
+                avg(r.confidenceDebt) AS avgDebt,
+                max(r.confidenceDebt) AS maxDebt,
+                count(CASE WHEN r.confidenceDebt > 0.3 THEN 1 END) AS highDebt`,
+        { projectId },
+      );
+      if (rows.length > 0) {
+        const r = rows[0];
+        const total = Number(r.total ?? 0);
+        const withTCF = Number(r.withTCF ?? 0);
+        const avgTCF = Number(r.avgTCF ?? 0);
+        const avgDebt = Number(r.avgDebt ?? 0);
+        const maxDebt = Number(r.maxDebt ?? 0);
+        const highDebt = Number(r.highDebt ?? 0);
+
+        obs.push({
+          value: { total, withTCF, avgTCF: +avgTCF.toFixed(3), avgDebt: +avgDebt.toFixed(3), maxDebt: +maxDebt.toFixed(3), highDebt, label: `TC coverage: ${withTCF}/${total} runs have temporal factors`, severity: withTCF < total ? 'warning' : 'info' },
+          observedAt: now,
+          source: 'temporal_confidence',
+          freshnessState: 'fresh',
+          confidenceClass: 'derived',
+        });
+
+        if (highDebt > 0) {
+          obs.push({
+            value: { highDebt, maxDebt: +maxDebt.toFixed(3), label: `⚠️ ${highDebt} runs have high confidence debt (>0.3)`, severity: 'warning' },
+            observedAt: now,
+            source: 'temporal_confidence',
+            freshnessState: 'fresh',
+            confidenceClass: 'derived',
+          });
+        }
+      }
+    } catch {
+      // Non-fatal — TC data may not exist yet
+    }
+    return obs;
   }
 
   /**
