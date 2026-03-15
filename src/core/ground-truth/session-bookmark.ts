@@ -99,13 +99,17 @@ export class SessionBookmarkManager {
     const now = new Date().toISOString();
     const bookmarkId = `bm_${opts.agentId}_${Date.now()}`;
 
-    // ℹ️-4: Single transaction — fold done check into MERGE to eliminate TOCTOU race.
-    // If task is done, the MATCH fails and MERGE never runs.
+    // ℹ️-4: Single transaction — fold done check + active guard into MERGE to eliminate TOCTOU race.
+    // If task is done, the WHERE doneTask IS NULL fails and MERGE never runs.
+    // C3: If agent has an active (in_progress/completing) bookmark, the WHERE activeBm IS NULL fails.
     const claimRows = await this.neo4j.run(
       `OPTIONAL MATCH (t:Task {projectId: $projectId})
        WHERE (t.id = $taskId OR t.name = $taskId) AND t.status = 'done'
        WITH t AS doneTask
-       WHERE doneTask IS NULL
+       OPTIONAL MATCH (existingBm:SessionBookmark {agentId: $agentId, projectId: $projectId})
+       WHERE existingBm.status IN ['in_progress', 'completing']
+       WITH doneTask, existingBm
+       WHERE doneTask IS NULL AND existingBm IS NULL
        MERGE (b:SessionBookmark {agentId: $agentId, projectId: $projectId})
        ON CREATE SET
          b.id = $bookmarkId,
@@ -147,13 +151,28 @@ export class SessionBookmarkManager {
 
     const conflicts: MultiAgentConflict[] = [];
 
-    // If MERGE didn't run (claimRows empty), task was done
+    // If MERGE didn't run (claimRows empty), either task was done or agent has active bookmark
     if (claimRows.length === 0) {
-      conflicts.push({
-        type: 'task_already_done',
-        severity: 'hard_stop',
-        message: `Task "${opts.taskId}" is already done in the graph`,
-      });
+      // Distinguish the two failure cases with a quick check
+      const activeCheck = await this.neo4j.run(
+        `OPTIONAL MATCH (bm:SessionBookmark {agentId: $agentId, projectId: $projectId})
+         WHERE bm.status IN ['in_progress', 'completing']
+         RETURN bm.currentTaskId AS activeTask`,
+        { agentId: opts.agentId, projectId: opts.projectId },
+      );
+      if (activeCheck.length > 0 && activeCheck[0].activeTask != null) {
+        conflicts.push({
+          type: 'duplicate_claim',
+          severity: 'hard_stop',
+          message: `Agent "${opts.agentId}" has an active task "${activeCheck[0].activeTask}" in project "${opts.projectId}" — transition to idle first`,
+        });
+      } else {
+        conflicts.push({
+          type: 'task_already_done',
+          severity: 'hard_stop',
+          message: `Task "${opts.taskId}" is already done in the graph`,
+        });
+      }
     }
 
     // Advisory: check for duplicate claims (separate query — advisory only)

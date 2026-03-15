@@ -70,7 +70,7 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     description: 'GovernanceMetricSnapshot is current (< 4h old)',
     tier: 'fast',
     cypher: `
-      MATCH (g:GovernanceMetricSnapshot {projectId: $projectId})
+      OPTIONAL MATCH (g:GovernanceMetricSnapshot {projectId: $projectId})
       WITH g ORDER BY g.timestamp DESC LIMIT 1
       RETURN CASE
         WHEN g IS NULL THEN 1
@@ -87,7 +87,7 @@ const CORE_CHECKS: CoreIntegrityCheck[] = [
     description: 'IntegritySnapshot exists and is less than 30h old',
     tier: 'fast',
     cypher: `
-      MATCH (s:IntegritySnapshot {projectId: $projectId})
+      OPTIONAL MATCH (s:IntegritySnapshot {projectId: $projectId})
       WITH s ORDER BY s.timestamp DESC LIMIT 1
       RETURN CASE
         WHEN s IS NULL THEN 1

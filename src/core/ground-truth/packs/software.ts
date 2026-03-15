@@ -424,7 +424,8 @@ export class SoftwareGovernancePack implements GroundTruthPack {
   async queryClaimChainForTask(taskId: string, projectId?: string): Promise<Observation[]> {
     // Traverse: Task -[:HAS_CODE_EVIDENCE]-> SourceFile <-[:ANCHORS]- Evidence -[:SUPPORTED_BY|CONTRADICTED_BY]- Claim
     const rows = await this.neo4j.run(
-      `MATCH (t:Task) WHERE t.id = $taskId OR t.name = $taskId
+      `MATCH (t:Task) WHERE (t.id = $taskId OR t.name = $taskId)
+         AND ($projectId IS NULL OR t.projectId = $projectId)
        MATCH (t)-[:HAS_CODE_EVIDENCE]->(sf:SourceFile)
        MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)-[:ANCHORS]->(sf)
        RETURN DISTINCT c.id AS claimId, c.statement AS statement,
