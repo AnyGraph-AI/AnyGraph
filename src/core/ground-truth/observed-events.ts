@@ -100,29 +100,27 @@ export async function emitCommitReferencesTask(
   if (refs.size === 0) return [];
 
   const now = new Date().toISOString();
-  const matched: string[] = [];
+  const refArray = [...refs];
 
-  for (const ref of refs) {
-    try {
-      const rows = await neo4j.run(
-        `MATCH (t:Task {projectId: $projectId})
-         WHERE t.name CONTAINS $ref OR t.id CONTAINS $ref
-         WITH t LIMIT 1
-         MERGE (c:Commit {hash: $hash})
-         ON CREATE SET c.message = $message, c.timestamp = $now
-         MERGE (c)-[r:COMMIT_REFERENCES_TASK]->(t)
-         ON CREATE SET r.timestamp = $now
-         RETURN t.name AS name`,
-        { projectId, ref, hash: commitHash, message: commitMessage, now },
-      );
-      if (rows.length > 0) matched.push(String(rows[0].name));
-    } catch (err) {
-      // Non-fatal
-      if (process.env.GTH_DEBUG) console.error('[GTH] emitCommitReferencesTask:', (err as Error).message ?? err);
-    }
+  try {
+    const rows = await neo4j.run(
+      `UNWIND $refs AS ref
+       MATCH (t:Task {projectId: $projectId})
+       WHERE t.name CONTAINS ref OR t.id CONTAINS ref
+       WITH ref, t LIMIT 1
+       MERGE (c:Commit {hash: $hash})
+       ON CREATE SET c.message = $message, c.timestamp = $now
+       MERGE (c)-[r:COMMIT_REFERENCES_TASK]->(t)
+       ON CREATE SET r.timestamp = $now
+       RETURN t.name AS name`,
+      { projectId, refs: refArray, hash: commitHash, message: commitMessage, now },
+    );
+    return rows.map(r => String(r.name));
+  } catch (err) {
+    // Non-fatal
+    if (process.env.GTH_DEBUG) console.error('[GTH] emitCommitReferencesTask:', (err as Error).message ?? err);
+    return [];
   }
-
-  return matched;
 }
 
 /**
