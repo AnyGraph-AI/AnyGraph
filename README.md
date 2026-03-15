@@ -8,11 +8,12 @@ Code parsing was the proof of concept. The architecture is the product.
 
 ## Current State
 
-- **63,000+ nodes, 415,000+ edges** across 22 projects
-- **6 operational layers**: Code, Corpus, Documents (planned), Plans, Claims, Reasoning
-- **39 MCP tools** for agents to query, edit, and coordinate
-- **132+ hermetic tests** across 20 test suites
-- **v0.1.0** — TypeScript parser shipping, universal IR layer next
+- **61,000+ nodes, 428,000+ edges** across 17 projects
+- **7 operational layers**: Code, Corpus, Documents (planned), Plans, Claims, Reasoning, Ground Truth
+- **40 MCP tools** for agents to query, edit, and coordinate
+- **328 hermetic tests** across 29 test suites
+- **41-step governance pipeline** (done-check) with ground truth post-gate
+- **v0.1.0** — TypeScript parser shipping, temporal confidence layer active
 
 ### Projects in the Graph
 
@@ -21,7 +22,7 @@ Code parsing was the proof of concept. The architecture is the product.
 | **Code** | CodeGraph (self-graph), GodSpeed, Bible-graph | TypeScript AST → nodes/edges, risk scoring, blast radius |
 | **Corpus** | KJV Bible, Deuterocanon, Pseudepigrapha, Early Contested, Quran | Verse/Chapter/Book nodes, cross-references, entity resolution |
 | **Plans** | codegraph, godspeed, bible-graph, plan-graph, hygiene-governance, + 3 more | Task/Milestone/Sprint tracking, auto-completion detection |
-| **Claims** | 414 claims, 1,400+ evidence nodes, 52 hypotheses | Cross-layer synthesis, self-audit verdicts |
+| **Claims** | 1,050 claims, 1,300+ evidence nodes, 494 hypotheses | Cross-layer synthesis, self-audit verdicts |
 
 ## Quick Start
 
@@ -107,8 +108,10 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 | `Evidence` | Supporting/contradicting evidence for claims |
 | `Verse` / `Chapter` / `Book` | Corpus text nodes |
 | `IRNode:Entity` / `IRNode:Site` / `IRNode:Artifact` | Intermediate representation nodes |
+| `IntegrityFindingObservation` | Ground truth integrity check result |
+| `Discrepancy` | Delta between expected and observed state |
 
-### Edge Types (47)
+### Edge Types (53)
 
 **Code structure:**
 `CALLS`, `CONTAINS`, `IMPORTS`, `RESOLVES_TO`, `HAS_PARAMETER`, `HAS_MEMBER`, `REGISTERED_BY`, `READS_STATE`, `WRITES_STATE`, `POSSIBLE_CALL`, `EXTENDS`, `IMPLEMENTS`, `ORIGINATES_IN`, `OWNED_BY`, `BELONGS_TO_LAYER`, `DECLARES`
@@ -125,6 +128,9 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 **Governance provenance:**
 `MEASURED`, `DERIVED_FROM_PROOF`, `DERIVED_FROM_RUN`, `DERIVED_FROM_COMMIT`, `DERIVED_FROM_GATE`, `AFFECTS_COMMIT`, `CAPTURED_COMMIT`, `CAPTURED_WORKTREE`, `EMITS_GATE_DECISION`, `BASED_ON_RUN`, `GENERATED_ARTIFACT`, `USED_BY`
 
+**Ground Truth Hook:**
+`OBSERVED_AS`, `PRODUCED`, `GENERATED_HYPOTHESIS`, `BECAME_TASK`, `RESOLVED_BY_COMMIT`, `PRECEDES`
+
 ### Key Properties
 
 **On CodeNode (functions/methods):**
@@ -140,7 +146,7 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 **On CALLS edges:**
 - `conditional`, `conditionalKind`, `isAsync`, `crossFile`, `resolutionKind`
 
-## MCP Tools (39)
+## MCP Tools (40)
 
 ### Core Analysis
 | Tool | Purpose |
@@ -189,6 +195,11 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 | `save_session_note` / `recall_session_notes` / `cleanup_session` | Session notes |
 | `test_neo4j_connection` / `hello` | Diagnostics |
 
+### Ground Truth Hook
+| Tool | Purpose |
+|------|---------|
+| `ground_truth` | Three-panel integrity report: graph state, agent state, delta computation |
+
 ### Swarm Coordination (multi-agent)
 `swarm_post_task`, `swarm_claim_task`, `swarm_complete_task`, `swarm_get_tasks`, `swarm_message`, `swarm_pheromone`, `swarm_sense`, `swarm_graph_refresh`, `swarm_cleanup`
 
@@ -221,6 +232,9 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 ### IR & Parser
 `ir:parity`, `ir:parity:resume`, `parser:contracts:verify`, `parser:gold:harness`, `python:parse:ir`, `query:contract:verify`
 
+### Ground Truth
+`ground-truth`, `ground-truth:post-gate`
+
 ### Corpus
 `corpus:bible:hash-ingest`
 
@@ -232,7 +246,7 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 
 ## Test Infrastructure
 
-### TDD Harness (132+ tests, 20 suites)
+### TDD Harness (328 tests, 29 suites)
 
 The test harness provides hermetic, deterministic testing for all governance surfaces:
 
@@ -273,7 +287,8 @@ The test harness provides hermetic, deterministic testing for all governance sur
 | **Documents** | 🔲 Adapter built | — | Generic PDF/text ingestion (pipeline exists, not yet populated) |
 | **Plans** | ✅ 8 projects | ~5,000 | Task/Milestone tracking, drift detection, cross-domain evidence |
 | **Claims** | ✅ | ~2,900 | 414 claims, 1,400+ evidence nodes, cross-layer synthesis |
-| **Reasoning** | ✅ | ~500 | 52 hypotheses from evidence gaps, self-audit |
+| **Reasoning** | ✅ | ~500 | 494 hypotheses from evidence gaps, self-audit |
+| **Ground Truth** | ✅ | — | Agent-graph coordination: integrity checks, delta engine, session bookmarks |
 
 ## Architecture
 
@@ -288,11 +303,12 @@ codegraph/
 │   │   ├── embeddings/       # OpenAI embeddings + NL→Cypher
 │   │   ├── ir/               # Intermediate representation (v1 schema, materializer, validator)
 │   │   ├── adapters/document/ # Document parser, entity extractor, PDF extractor
-│   │   ├── verification/     # Advisory gate, exception enforcement
-│   │   ├── test-harness/     # 15 hermetic test modules + fixtures
+│   │   ├── ground-truth/     # Ground Truth Hook: runtime, delta, packs, session bookmarks
+│   │   ├── verification/     # Advisory gate, exception enforcement, temporal confidence
+│   │   ├── test-harness/     # 20 hermetic test modules + fixtures
 │   │   └── utils/            # File detection, graph factory, path utils
 │   ├── mcp/
-│   │   ├── tools/            # 39 MCP tools
+│   │   ├── tools/            # 40 MCP tools
 │   │   ├── handlers/         # Graph generation, traversal, incremental parse
 │   │   └── services/         # Watch manager, job manager
 │   ├── scripts/
@@ -326,16 +342,17 @@ codegraph/
 - **MCP**: @modelcontextprotocol/sdk
 - **Embeddings**: OpenAI text-embedding-3-large (optional)
 - **NL→Cypher**: OpenAI gpt-4o (optional)
-- **Tests**: Custom hermetic harness (132+ tests) + Vitest
+- **Tests**: Custom hermetic harness (328 tests, 29 suites) + Vitest
 - **File watching**: @parcel/watcher (native inotify)
 - **CLI**: commander
 
 ## What's Next
 
-1. **IR layer**: Parser → IR → Enrichment → Graph (language-agnostic intermediate representation)
-2. **Python parser**: CPython ast + Pyright sidecar (scaffold exists)
-3. **GitHub push + npm publish**: Package distribution
-4. **Document adapter population**: Generic PDF/text ingestion at scale
+1. **Temporal Confidence (TC-2→TC-8)**: Incremental recompute, shadow propagation, explainability paths, confidence debt, anti-gaming, calibration
+2. **Reasoning Framework (RF-2→RF-12)**: Temporal enforcement, deterministic baseline, graph invariant engine, entropy monitoring
+3. **IR layer**: Parser → IR → Enrichment → Graph (language-agnostic intermediate representation)
+4. **Python parser**: CPython ast + Pyright sidecar (scaffold exists)
+5. **Domain packs**: Formation governance, Sci-Fi, Patents, ArXiv — all implementing GroundTruthPack interface
 
 Full roadmap: `plans/codegraph/MULTI_LANGUAGE_ASSESSMENT.md`
 
