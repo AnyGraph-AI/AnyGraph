@@ -501,5 +501,6 @@ export class GroundTruthRuntime {
 
   async close(): Promise<void> {
     await this.neo4j.close();
+    await this.pack.close?.();
   }
 }

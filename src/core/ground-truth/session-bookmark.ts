@@ -250,8 +250,7 @@ export class SessionBookmarkManager {
   // ─── Garbage Collection ─────────────────────────────────────────
 
   async gc(agentId: string): Promise<number> {
-    // Keep last 20 completed bookmarks + 10 most recent idle/abandoned
-    // Delete anything older
+    // Keep last 20 idle/completed bookmarks, delete older
     const result = await this.neo4j.run(
       `MATCH (b:SessionBookmark {agentId: $agentId, status: 'idle'})
        WITH b ORDER BY b.updatedAt DESC

@@ -85,4 +85,7 @@ export interface GroundTruthPack {
    * Observed edges (TOUCHED) are separate from predicted scope.
    */
   queryCandidateModifies(taskId: string, projectId?: string): Promise<CandidateEdge[]>;
+
+  /** Optional cleanup — close underlying connections */
+  close?(): Promise<void>;
 }

@@ -178,8 +178,7 @@ export class SoftwareGovernancePack implements GroundTruthPack {
     const structuralRows = await this.neo4j.run(
       `UNWIND $files AS filePath
        ${sfFilter}
-       OPTIONAL MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)-[:ANCHORS]->(sf)
-       WHERE c IS NOT NULL
+       MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)-[:ANCHORS]->(sf)
        RETURN DISTINCT c.id AS claimId, c.statement AS statement,
               c.confidence AS confidence, 'structural' AS matchMethod`,
       { files: filesTouched, projectId: projectId ?? null },
@@ -341,8 +340,8 @@ export class SoftwareGovernancePack implements GroundTruthPack {
     const rows = await this.neo4j.run(
       `UNWIND $files AS filePath
        ${sfFilter}
-       OPTIONAL MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)-[:ANCHORS]->(sf)
-       WHERE c IS NOT NULL AND c.claimType = 'transitive_impact'
+       MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)-[:ANCHORS]->(sf)
+       WHERE c.claimType = 'transitive_impact'
        RETURN DISTINCT c.id AS claimId, c.statement AS statement,
               c.confidence AS confidence, collect(DISTINCT sf.filePath) AS files`,
       { files: filesTouched, projectId: projectId ?? null },

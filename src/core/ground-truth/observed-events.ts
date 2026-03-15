@@ -33,7 +33,7 @@ export async function emitTouched(
     await neo4j.run(
       `MATCH (b:SessionBookmark {agentId: $agentId})
        WHERE b.status IN ['claimed', 'in_progress', 'completing']
-       MATCH (sf) WHERE sf.filePath ENDS WITH $filePath AND sf.projectId = $projectId
+       MATCH (sf:SourceFile) WHERE sf.filePath ENDS WITH $filePath AND sf.projectId = $projectId
        MERGE (b)-[t:TOUCHED]->(sf)
        ON CREATE SET t.firstSeen = $now, t.lastSeen = $now, t.count = 1
        ON MATCH SET t.lastSeen = $now, t.count = t.count + 1`,
@@ -60,7 +60,7 @@ export async function emitReferenced(
       `UNWIND $files AS fp
        MATCH (b:SessionBookmark {agentId: $agentId})
        WHERE b.status IN ['claimed', 'in_progress', 'completing']
-       MATCH (sf) WHERE sf.filePath ENDS WITH fp AND sf.projectId = $projectId
+       MATCH (sf:SourceFile) WHERE sf.filePath ENDS WITH fp AND sf.projectId = $projectId
        MERGE (b)-[r:REFERENCED]->(sf)
        ON CREATE SET r.firstSeen = $now, r.lastSeen = $now, r.count = 1
        ON MATCH SET r.lastSeen = $now, r.count = r.count + 1`,
@@ -147,7 +147,7 @@ export async function emitVerifiedByRun(
       await neo4j.run(
         `UNWIND $paths AS fp
          MATCH (r:VerificationRun {id: $runId})
-         MATCH (sf) WHERE sf.filePath ENDS WITH fp AND sf.projectId = $projectId
+         MATCH (sf:SourceFile) WHERE sf.filePath ENDS WITH fp AND sf.projectId = $projectId
          MERGE (sf)-[v:VERIFIED_BY_RUN]->(r)
          ON CREATE SET v.timestamp = $now`,
         { runId, paths: affectedPaths, projectId, now },
