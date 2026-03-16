@@ -17,6 +17,7 @@ import {
   extractAnalyzedPairs,
   extractScopeCoveragePairs,
   stripFileUri,
+  resolveIncludedPath,
   type AnalyzedPair,
   type ScopeCoveragePair,
 } from '../../../../scripts/enrichment/create-analyzed-edges.js';
@@ -39,6 +40,32 @@ describe('[GC-2] stripFileUri', () => {
 
   it('handles empty string', () => {
     expect(stripFileUri('')).toBe('');
+  });
+});
+
+// ------------------------------------------------------------------
+// resolveIncludedPath: handles both file:// URIs and relative paths
+// ------------------------------------------------------------------
+describe('[GC-2] resolveIncludedPath', () => {
+  const repoRoot = '/home/user/code';
+
+  it('resolves file:///absolute/path correctly', () => {
+    expect(resolveIncludedPath('file:///home/user/code/src/a.ts', repoRoot))
+      .toBe('/home/user/code/src/a.ts');
+  });
+
+  it('resolves relative Semgrep paths against repoRoot', () => {
+    expect(resolveIncludedPath('src/cli/cli.ts', repoRoot))
+      .toBe('/home/user/code/src/cli/cli.ts');
+  });
+
+  it('handles repoRoot with trailing slash', () => {
+    expect(resolveIncludedPath('src/a.ts', '/home/user/code/'))
+      .toBe('/home/user/code/src/a.ts');
+  });
+
+  it('returns empty for empty input', () => {
+    expect(resolveIncludedPath('', repoRoot)).toBe('');
   });
 });
 

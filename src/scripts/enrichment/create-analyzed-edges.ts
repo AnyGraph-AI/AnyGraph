@@ -107,20 +107,35 @@ export function extractScopeCoveragePairs(
 
 // --------------- Neo4j enrichment ---------------
 
+/**
+ * Resolve an includedPath to an absolute SourceFile path.
+ * 
+ * ESLint paths: file:///home/user/code/a.ts → /home/user/code/a.ts
+ * Semgrep paths: src/cli/cli.ts → /home/user/code/src/cli/cli.ts (needs repoRoot)
+ */
+export function resolveIncludedPath(uri: string, repoRoot: string): string {
+  const stripped = stripFileUri(uri);
+  if (!stripped) return '';
+  // Already absolute
+  if (stripped.startsWith('/')) return stripped;
+  // Relative — resolve against repo root
+  return repoRoot.endsWith('/') ? repoRoot + stripped : repoRoot + '/' + stripped;
+}
+
 export async function enrichAnalyzedEdges(
   driver: Driver,
   projectId: string,
-): Promise<{ edgesCreated: number; familyCount: number; fileCount: number }> {
+): Promise<{ edgesCreated: number; vrCount: number; fileCount: number }> {
   const session = driver.session();
 
   try {
-    // 0. Delete old per-VR ANALYZED edges (from pre-dedup run)
+    // 0. Clean old ANALYZED edges (idempotent re-run)
     const deleteResult = await session.run(`
       MATCH (:VerificationRun {projectId: $projectId})-[r:ANALYZED]->(:SourceFile)
       DELETE r RETURN count(r) AS deleted
     `, { projectId });
     const deleted = deleteResult.records[0]?.get('deleted')?.toNumber?.() || 0;
-    if (deleted > 0) console.log(`Cleaned ${deleted} old per-VR ANALYZED edges`);
+    if (deleted > 0) console.log(`Cleaned ${deleted} old ANALYZED edges`);
 
     // 1. Get all SourceFile paths for this project
     const sfResult = await session.run(`
@@ -133,59 +148,76 @@ export async function enrichAnalyzedEdges(
     for (const record of sfResult.records) {
       sourceFilePaths.add(record.get('filePath') as string);
     }
-
     console.log(`Found ${sourceFilePaths.size} SourceFiles for project ${projectId}`);
+
+    // Derive repoRoot from longest common prefix of all SourceFile paths
+    const pathArray = [...sourceFilePaths];
+    let repoRoot = '';
+    if (pathArray.length > 0) {
+      repoRoot = pathArray[0];
+      for (let i = 1; i < pathArray.length; i++) {
+        while (!pathArray[i].startsWith(repoRoot)) {
+          repoRoot = repoRoot.substring(0, repoRoot.lastIndexOf('/'));
+        }
+      }
+      if (!repoRoot.endsWith('/')) repoRoot += '/';
+    }
+    console.log(`Derived repoRoot: ${repoRoot}`);
 
     // 2. Get all VR→AnalysisScope data with sourceFamily
     const scopeResult = await session.run(`
       MATCH (vr:VerificationRun {projectId: $projectId})-[:HAS_SCOPE]->(scope:AnalysisScope)
       WHERE scope.includedPaths IS NOT NULL
-      RETURN vr.sourceFamily AS sourceFamily, scope.includedPaths AS includedPaths
+      RETURN vr.id AS vrId, vr.sourceFamily AS sourceFamily, scope.includedPaths AS includedPaths
     `, { projectId });
 
-    const scopes: Array<{ sourceFamily: string; includedPaths: string[] }> = [];
+    // 3. Build unique (sourceFamily, filePath) pairs — scope-level dedup
+    //    Each tool family gets ONE ANALYZED edge per file, not one per finding.
+    //    "ESLint analyzed this file" is true once, not 197 times.
+    const familyFilePairs = new Map<string, Set<string>>(); // family → Set<filePath>
+    const familyAnchorVr = new Map<string, string>(); // family → representative vrId
+
     for (const record of scopeResult.records) {
-      scopes.push({
-        sourceFamily: record.get('sourceFamily') as string,
-        includedPaths: record.get('includedPaths') as string[],
-      });
+      const vrId = record.get('vrId') as string;
+      const family = record.get('sourceFamily') as string;
+      const paths = record.get('includedPaths') as string[];
+      if (!paths) continue;
+
+      if (!familyAnchorVr.has(family)) familyAnchorVr.set(family, vrId);
+
+      const fileSet = familyFilePairs.get(family) || new Set<string>();
+      for (const uri of paths) {
+        const resolved = resolveIncludedPath(uri, repoRoot);
+        if (sourceFilePaths.has(resolved)) {
+          fileSet.add(resolved);
+        }
+      }
+      familyFilePairs.set(family, fileSet);
     }
 
-    console.log(`Found ${scopes.length} VR→Scope pairs`);
-
-    // 3. Compute unique (sourceFamily, filePath) pairs — scope-level dedup
-    const pairs = extractScopeCoveragePairs(scopes, sourceFilePaths);
-    console.log(`Computed ${pairs.length} unique (sourceFamily, SourceFile) pairs`);
-
-    if (pairs.length === 0) {
-      return { edgesCreated: 0, familyCount: 0, fileCount: 0 };
+    // 4. Count VRs without scope data (done-check etc.)
+    const noScopeResult = await session.run(`
+      MATCH (vr:VerificationRun {projectId: $projectId})
+      WHERE NOT EXISTS { (vr)-[:HAS_SCOPE]->() }
+      RETURN vr.sourceFamily AS family, count(vr) AS cnt
+    `, { projectId });
+    for (const record of noScopeResult.records) {
+      console.log(`  ${record.get('family')}: ${record.get('cnt')} VRs without scope (skipped — no file-level data)`);
     }
 
-    // 4. Create scope-level ANALYZED edges on SourceFile nodes
-    //    Instead of VR→SF (N×M explosion), store coverage as properties + edges from AnalysisScope
-    //    Use Cypher to create one ANALYZED edge per (sourceFamily, SF) via a virtual scope node
+    // 5. Create ANALYZED edges — one per (tool family, SourceFile)
+    //    Uses an anchor VR per family as the edge source.
+    //    Edge carries sourceFamily so queries can filter by tool.
+    //    Future: per-finding FLAGS edges when importer stores location.
+    const BATCH_SIZE = 500;
     let totalCreated = 0;
+    let totalFiles = 0;
 
-    // Group by sourceFamily for batch processing
-    const byFamily = new Map<string, string[]>();
-    for (const pair of pairs) {
-      const files = byFamily.get(pair.sourceFamily) || [];
-      files.push(pair.filePath);
-      byFamily.set(pair.sourceFamily, files);
-    }
+    for (const [family, fileSet] of familyFilePairs) {
+      const anchorVrId = familyAnchorVr.get(family)!;
+      const filePaths = [...fileSet];
+      totalFiles += filePaths.length;
 
-    for (const [family, filePaths] of byFamily) {
-      // Find one representative VR for this family to serve as the scope anchor
-      const anchorResult = await session.run(`
-        MATCH (vr:VerificationRun {projectId: $projectId, sourceFamily: $family})
-        RETURN vr.id AS vrId LIMIT 1
-      `, { projectId, family });
-
-      const anchorVrId = anchorResult.records[0]?.get('vrId') as string;
-      if (!anchorVrId) continue;
-
-      // Create ANALYZED edges from this one representative VR to all scoped files
-      const BATCH_SIZE = 500;
       for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
         const batch = filePaths.slice(i, i + BATCH_SIZE);
         const result = await session.run(`
@@ -193,7 +225,7 @@ export async function enrichAnalyzedEdges(
           MATCH (vr:VerificationRun {id: $vrId, projectId: $projectId})
           MATCH (sf:SourceFile {filePath: fp, projectId: $projectId})
           MERGE (vr)-[r:ANALYZED]->(sf)
-          ON CREATE SET r.derived = true, 
+          ON CREATE SET r.derived = true,
                         r.source = 'vr-scope-enrichment',
                         r.sourceFamily = $family,
                         r.createdAt = datetime()
@@ -203,19 +235,14 @@ export async function enrichAnalyzedEdges(
         totalCreated += result.records[0]?.get('created')?.toNumber?.() || 0;
       }
 
-      console.log(`  ${family}: ${filePaths.length} files → ${anchorVrId} (anchor)`);
+      console.log(`  ${family}: ${filePaths.length} files → anchor ${anchorVrId.slice(0, 40)}...`);
     }
 
-    const uniqueFamilies = byFamily.size;
-    const uniqueFiles = new Set(pairs.map(p => p.filePath)).size;
+    const uniqueFiles = new Set([...familyFilePairs.values()].flatMap(s => [...s])).size;
 
-    console.log(`Created ${totalCreated} ANALYZED edges (${uniqueFamilies} tool families → ${uniqueFiles} files)`);
+    console.log(`Created ${totalCreated} ANALYZED edges (${familyFilePairs.size} families → ${uniqueFiles} files)`);
 
-    return {
-      edgesCreated: totalCreated,
-      familyCount: uniqueFamilies,
-      fileCount: uniqueFiles,
-    };
+    return { edgesCreated: totalCreated, vrCount: familyFilePairs.size, fileCount: uniqueFiles };
 
   } finally {
     await session.close();
