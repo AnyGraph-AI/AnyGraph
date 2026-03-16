@@ -52,6 +52,36 @@ export const TOOL_NAMES = {
   preEditCheck: 'pre_edit_check',
   swarmGraphRefresh: 'swarm_graph_refresh',
   groundTruth: 'ground_truth',
+  // Plan tools
+  planStatus: 'plan_status',
+  planDrift: 'plan_drift',
+  planGaps: 'plan_gaps',
+  planNextTasks: 'plan_next_tasks',
+  planPriority: 'plan_priority',
+  planQuery: 'plan_query',
+  // Claim tools
+  claimStatus: 'claim_status',
+  claimGenerate: 'claim_generate',
+  claimChainPath: 'claim_chain_path',
+  evidenceFor: 'evidence_for',
+  contradictions: 'contradictions',
+  hypotheses: 'hypotheses',
+  // Governance tools
+  commitAuditStatus: 'commit_audit_status',
+  governanceMetricsStatus: 'governance_metrics_status',
+  parserContractStatus: 'parser_contract_status',
+  recommendationProofStatus: 'recommendation_proof_status',
+  selfAudit: 'self_audit',
+  // Analysis tools
+  detectHotspots: 'detect_hotspots',
+  stateImpact: 'state_impact',
+  registrationMap: 'registration_map',
+  sessionContextSummary: 'session_context_summary',
+  // Verification tools
+  verificationDashboard: 'verification_dashboard',
+  explainabilityPaths: 'explainability_paths',
+  confidenceDebtDashboard: 'confidence_debt_dashboard',
+  importSarif: 'import_sarif',
 } as const;
 
 // Tool Metadata
@@ -430,6 +460,31 @@ Returns: count of files reparsed, nodes updated, edges updated.`,
 - Agent is blocked on a file another agent owns: send blocked to that agent
 - Agent discovers context another agent needs: send finding to that agent`,
   },
+  [TOOL_NAMES.groundTruth]: {
+    title: 'Ground Truth Hook',
+    description: `Three-panel mirror that shows what the graph says, what the agent is doing, and the delta between them.
+
+**Panels:**
+- **Panel 1A**: Graph state — plan status, milestones, unblocked tasks, governance health, evidence coverage
+- **Panel 1B**: Integrity — schema, referential, provenance, freshness checks + domain surfaces
+- **Panel 2**: Agent state — SessionBookmark (current task, working set, governance history)
+- **Panel 3**: Delta — exact/derived/predicted discrepancies between graph and agent
+
+**When to call:**
+- On session boot (before any work)
+- After compaction (to re-ground)
+- Before starting a new task (to see what's unblocked)
+- Periodically during long work sessions
+
+Parameters:
+- projectId (required): Project ID (e.g., 'proj_c0d3e9a1f200')
+- depth (optional): Check depth — 'fast' (default), 'medium', or 'full'
+- agentId (optional): Agent ID for SessionBookmark lookup
+- currentTaskId (optional): Task being worked on
+- filesTouched (optional): Files modified in current work
+
+Returns: Three-panel formatted output with integrity findings, deltas, and recovery references.`,
+  },
 } as const;
 
 // Default Values
@@ -507,31 +562,6 @@ export const MESSAGES = {
     summaryPrefix: '**Summary:** Executed query and found {} results.',
   },
   neo4j: {
-  [TOOL_NAMES.groundTruth]: {
-    title: 'Ground Truth Hook',
-    description: `Three-panel mirror that shows what the graph says, what the agent is doing, and the delta between them.
-
-**Panels:**
-- **Panel 1A**: Graph state — plan status, milestones, unblocked tasks, governance health, evidence coverage
-- **Panel 1B**: Integrity — schema, referential, provenance, freshness checks + domain surfaces
-- **Panel 2**: Agent state — SessionBookmark (current task, working set, governance history)
-- **Panel 3**: Delta — exact/derived/predicted discrepancies between graph and agent
-
-**When to call:**
-- On session boot (before any work)
-- After compaction (to re-ground)
-- Before starting a new task (to see what's unblocked)
-- Periodically during long work sessions
-
-Parameters:
-- projectId (required): Project ID (e.g., 'proj_c0d3e9a1f200')
-- depth (optional): Check depth — 'fast' (default), 'medium', or 'full'
-- agentId (optional): Agent ID for SessionBookmark lookup
-- currentTaskId (optional): Task being worked on
-- filesTouched (optional): Files modified in current work
-
-Returns: Three-panel formatted output with integrity findings, deltas, and recovery references.`,
-  },
     connectionTest: 'RETURN "Connected!" as message, datetime() as timestamp',
     apocTest: 'CALL apoc.help("apoc") YIELD name RETURN count(name) as apocFunctions',
     connectionSuccess: 'Neo4j connected: {} at {}\nAPOC plugin available with {} functions',

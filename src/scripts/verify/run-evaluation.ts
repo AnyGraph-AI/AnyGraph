@@ -189,7 +189,7 @@ async function runEvaluation(projectId: string) {
       // Store MetricResult
       await session.run(`
         MATCH (run:EvaluationRun {runId: $runId})
-        CREATE (run)-[:MEASURED]->(m:MetricResult {
+        CREATE (run)-[:MEASURED {sourceKind: 'evaluation'}]->(m:MetricResult {
           metric: $metric,
           value: $value,
           baselineValue: $baseline,

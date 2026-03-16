@@ -188,7 +188,8 @@ export async function runAdvisoryGate(
              d.updatedAt = toString(datetime())
          MERGE (d)-[e:ADVISES_ON]->(v)
          SET e.projectId = $projectId,
-             e.updatedAt = toString(datetime())`,
+             e.updatedAt = toString(datetime()),
+             e.sourceKind = 'advisory-gate'`,
         {
           runId,
           projectId,

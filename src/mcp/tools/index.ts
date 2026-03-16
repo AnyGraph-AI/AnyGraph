@@ -45,6 +45,7 @@ import { createRecommendationProofStatusTool } from './recommendation-proof-stat
 import { createGovernanceMetricsStatusTool } from './governance-metrics.tool.js';
 import { createSessionContextSummaryTool } from './session-context-summary.tool.js';
 import { createGroundTruthTool } from './ground-truth.tool.js';
+import { createVerificationDashboardTools } from './verification-dashboard.tool.js';
 
 // Track tool calls for debugging
 let globalToolCallCount = 0;
@@ -170,4 +171,7 @@ export const registerAllTools = (server: McpServer): void => {
 
   // Register ground truth hook (three-panel mirror)
   createGroundTruthTool(server);
+
+  // Register verification dashboard tools (trust/confidence layer)
+  createVerificationDashboardTools(server);
 };

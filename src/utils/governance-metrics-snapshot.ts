@@ -214,13 +214,15 @@ async function main(): Promise<void> {
        MERGE (m)-[e:DERIVED_FROM_RUN]->(r)
        SET e.projectId = $projectId,
            e.snapshotWindow = $snapshotWindow,
-           e.updatedAt = toString(datetime())
+           e.updatedAt = toString(datetime()),
+           e.sourceKind = 'governance-metrics'
        WITH m, r
        MATCH (r)-[:CAPTURED_COMMIT]->(c:CommitSnapshot {projectId: $projectId})
        MERGE (m)-[ec:DERIVED_FROM_COMMIT]->(c)
        SET ec.projectId = $projectId,
            ec.snapshotWindow = $snapshotWindow,
-           ec.updatedAt = toString(datetime())`,
+           ec.updatedAt = toString(datetime()),
+           ec.sourceKind = 'governance-metrics'`,
       { snapshotId, projectId, snapshotWindow },
     );
 
@@ -230,14 +232,14 @@ async function main(): Promise<void> {
        WITH m, collect(g) AS gates
        FOREACH (g IN gates |
          MERGE (m)-[eg:DERIVED_FROM_GATE]->(g)
-         SET eg.projectId = $projectId, eg.updatedAt = toString(datetime())
+         SET eg.projectId = $projectId, eg.updatedAt = toString(datetime()), eg.sourceKind = 'governance-metrics'
        )
        WITH m
        OPTIONAL MATCH (p:InvariantProof {projectId: $planProjectId})
        WITH m, collect(p) AS proofs
        FOREACH (p IN proofs |
          MERGE (m)-[ep:DERIVED_FROM_PROOF]->(p)
-         SET ep.projectId = $projectId, ep.updatedAt = toString(datetime())
+         SET ep.projectId = $projectId, ep.updatedAt = toString(datetime()), ep.sourceKind = 'governance-metrics'
        )`,
       { snapshotId, projectId, planProjectId },
     );

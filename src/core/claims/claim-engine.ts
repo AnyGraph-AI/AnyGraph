@@ -194,7 +194,7 @@ export class ClaimEngine {
            e.description = 'Code file ' + sf.name + ' exists and matches task reference',
            e.weight = 0.9,
            e.created = $now
-         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9}]->(e)
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9, sourceKind: 'claim-engine'}]->(e)
          RETURN count(DISTINCT e) AS evidences`,
         params,
       );
@@ -228,7 +228,7 @@ export class ClaimEngine {
            e.description = 'Task checked off in plan file but no code evidence found',
            e.weight = 0.5,
            e.created = $now
-         MERGE (c)-[:SUPPORTED_BY {grade: 'A2', weight: 0.5}]->(e)
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A2', weight: 0.5, sourceKind: 'claim-engine'}]->(e)
          RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
         params,
       );
@@ -267,7 +267,7 @@ export class ClaimEngine {
            e.description = 'Code evidence found but plan still says planned',
            e.weight = 0.8,
            e.created = $now
-         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.8}]->(e)
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.8, sourceKind: 'claim-engine'}]->(e)
          // Also add contradicting evidence: the checkbox says planned
          WITH t, c
          MERGE (ce:Evidence {id: 'ev_drift_plan_' + t.id})
@@ -278,7 +278,7 @@ export class ClaimEngine {
            ce.description = 'Plan file explicitly says task is not done',
            ce.weight = 0.4,
            ce.created = $now
-         MERGE (c)-[:CONTRADICTED_BY {grade: 'A2', weight: 0.4}]->(ce)
+         MERGE (c)-[:CONTRADICTED_BY {grade: 'A2', weight: 0.4, sourceKind: 'claim-engine'}]->(ce)
          RETURN count(DISTINCT c) AS claims`,
         params,
       );
@@ -367,7 +367,7 @@ export class ClaimEngine {
            e.description = 'Structural analysis: riskLevel=' + toString(f.riskLevel) + ', callers=' + toString(callerCount) + ', complexity=' + toString(coalesce(f.complexity, 0)),
            e.weight = 0.85,
            e.created = $now
-         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.85}]->(e)
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.85, sourceKind: 'claim-engine'}]->(e)
          RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
         { projectId, now },
       );
@@ -458,7 +458,7 @@ export class ClaimEngine {
            e.description = 'Person "' + name + '" mentioned in verses across ' + toString(projCount) + ' corpus projects via NER',
            e.weight = 0.7,
            e.created = $now
-         MERGE (c)-[:SUPPORTED_BY {grade: 'A2', weight: 0.7}]->(e)
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A2', weight: 0.7, sourceKind: 'claim-engine'}]->(e)
          RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
         { now },
       );
@@ -524,7 +524,7 @@ export class ClaimEngine {
              e.description = sf.name + ': riskLevel=' + toString(risk) + ', callers=' + toString(callers) + ', plan tasks depending=' + toString(tasksDependingOnIt),
              e.weight = 0.9,
              e.created = $now
-           MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9}]->(e)
+           MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9, sourceKind: 'claim-engine'}]->(e)
            RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
           { cg, now },
         );
@@ -587,7 +587,7 @@ export class ClaimEngine {
            e.description = toString(done) + '/' + toString(total) + ' tasks done, completion=' + toString(round(completionRate * 100)) + '%',
            e.weight = 0.95,
            e.created = $now
-         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.95}]->(e)
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.95, sourceKind: 'claim-engine'}]->(e)
          RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
         { now },
       );
@@ -643,7 +643,7 @@ export class ClaimEngine {
            e.description = a.name + ' ↔ ' + b.name + ' changed together in ' + toString(changes) + ' commits',
            e.weight = CASE WHEN changes >= 8 THEN 0.95 WHEN changes >= 5 THEN 0.85 ELSE 0.7 END,
            e.created = $now
-         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9}]->(e)
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9, sourceKind: 'claim-engine'}]->(e)
          RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
         { now },
       );
@@ -707,7 +707,7 @@ export class ClaimEngine {
              e.description = toString(untested) + '/' + toString(total) + ' high-risk functions untested',
              e.weight = 0.95,
              e.created = $now
-           MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.95}]->(e)
+           MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.95, sourceKind: 'claim-engine'}]->(e)
            RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
           { cg, now },
         );
@@ -769,7 +769,7 @@ export class ClaimEngine {
            e.description = p.name + ': ' + toString(mentionCount) + ' verse mentions across ' + toString(size(corpusProjects)) + ' corpora',
            e.weight = 0.9,
            e.created = $now
-         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9}]->(e)
+         MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9, sourceKind: 'claim-engine'}]->(e)
          RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
         { now },
       );

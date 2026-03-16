@@ -811,7 +811,8 @@ export async function enrichCrossDomain(
              SET r.projectId = $planProjectId,
                  r.refType = 'project_mapping',
                  r.refValue = $codeProjectId,
-                 r.resolvedAt = datetime()`,
+                 r.resolvedAt = datetime(),
+                 r.sourceKind = 'plan-parser'`,
             { planProjectId, codeProjectId },
           );
         }
@@ -907,7 +908,8 @@ export async function enrichCrossDomain(
                          r.rawRefValue = $rawRefValue,
                          r.tokenCount = $tokenCount,
                          r.tokenIndex = $tokenIndex,
-                         r.resolvedAt = datetime()`,
+                         r.resolvedAt = datetime(),
+                         r.sourceKind = 'plan-parser'`,
                     {
                       srcId: ref.taskId,
                       dstId: targetId,
@@ -961,7 +963,8 @@ export async function enrichCrossDomain(
                    SET r.refType = 'file_path',
                        r.refValue = $refValue,
                        r.codeProjectId = $sfProjectId,
-                       r.resolvedAt = datetime()`,
+                       r.resolvedAt = datetime(),
+                       r.sourceKind = 'plan-parser'`,
                   { taskId: ref.taskId, sfId, refValue: ref.refValue, sfProjectId },
                 );
                 evidenceEdges++;
@@ -1009,7 +1012,8 @@ export async function enrichCrossDomain(
                    SET r.refType = 'function',
                        r.refValue = $refValue,
                        r.codeProjectId = $fnProjectId,
-                       r.resolvedAt = datetime()`,
+                       r.resolvedAt = datetime(),
+                       r.sourceKind = 'plan-parser'`,
                   { taskId: ref.taskId, fnId, refValue: ref.refValue, fnProjectId },
                 );
                 evidenceEdges++;
@@ -1422,7 +1426,7 @@ export async function ingestToNeo4j(
         await session.run(
           `MATCH (a:CodeNode {id: $source}), (b:CodeNode {id: $target})
            MERGE (a)-[r:${edge.type}]->(b)
-           SET r += $props`,
+           SET r += $props, r.sourceKind = 'plan-parser'`,
           { source: edge.source, target: edge.target, props: edge.properties },
         );
         edgesCreated++;

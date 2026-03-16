@@ -231,7 +231,7 @@ async function main() {
   // MCP client for code watchers
   const transport = new StdioClientTransport({
     command: 'node',
-    args: [new URL('./dist/mcp/mcp.server.js', import.meta.url).pathname],
+    args: [nodePath.join(process.cwd(), 'dist/mcp/mcp.server.js')],
   });
 
   const client = new Client({ name: 'codegraph-watch-all', version: '1.1.0' }, { capabilities: { logging: {} } });
@@ -373,7 +373,16 @@ async function main() {
   let planParseTimer: NodeJS.Timeout | null = null;
   const PLAN_DEBOUNCE_MS = 3000;
 
+  let planParsing = false;
+  let planPendingReparse = false;
+
   async function reParsePlans() {
+    if (planParsing) {
+      planPendingReparse = true;
+      return;
+    }
+    planParsing = true;
+    planPendingReparse = false;
     try {
       const time = new Date().toLocaleTimeString();
       console.log(`[${time}] 📋 Plan change detected — reparsing...`);
@@ -423,6 +432,12 @@ async function main() {
       }
     } catch (err) {
       console.error(`[plan-watcher] ❌ Parse failed: ${err}`);
+    } finally {
+      planParsing = false;
+      if (planPendingReparse) {
+        planPendingReparse = false;
+        setTimeout(reParsePlans, 500);
+      }
     }
   }
 

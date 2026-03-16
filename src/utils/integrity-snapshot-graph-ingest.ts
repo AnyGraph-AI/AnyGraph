@@ -116,7 +116,8 @@ MERGE (s)-[me:MEASURED {projectId: row.projectId, metric: metric.metric}]->(m)
 ON CREATE SET me.createdAt = datetime()
 SET
   me.graphEpoch = row.graphEpoch,
-  me.updatedAt = datetime()
+  me.updatedAt = datetime(),
+  me.sourceKind = 'integrity-snapshot'
 RETURN
   count(DISTINCT s) AS snapshotNodeCount,
   count(DISTINCT m) AS metricNodeCount,
