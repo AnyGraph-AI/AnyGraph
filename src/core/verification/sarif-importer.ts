@@ -199,6 +199,12 @@ export async function importSarifToVerificationBundle(
         if (uri) includedPaths.add(uri);
       }
 
+      // Extract primary location for FLAGS edge creation (GC-2/10 unblock)
+      const primaryLoc = locs[0]?.physicalLocation;
+      const targetFilePath = primaryLoc?.artifactLocation?.uri ?? undefined;
+      const startLine = primaryLoc?.region?.startLine ?? undefined;
+      const endLine = primaryLoc?.region?.endLine ?? startLine;
+
       const digest = `sha256:${sha256Digest(options.projectId, toolName, result.ruleId, fingerprint, runConfigHash)}`;
       const attestationRef = `${attestationRefBase}/${normalizeToolName(toolName)}/${runConfigHash}/${digest.slice(7, 27)}`;
 
@@ -224,6 +230,11 @@ export async function importSarifToVerificationBundle(
         runConfigHash,
         createdAt: now,
         updatedAt: now,
+
+        // Per-finding location for FLAGS edge creation
+        targetFilePath,
+        startLine,
+        endLine,
 
         // VerificationRun attestation/provenance refs
         attestationRef,

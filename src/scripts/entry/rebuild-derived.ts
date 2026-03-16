@@ -71,6 +71,7 @@ async function main() {
 
     // Step 4: Re-run enrichment scripts in dependency order
     const scripts = [
+      'enrich:normalize-project-labels',
       'enrich:temporal-coupling',
       'enrich:git-frequency',
       'enrich:vr-scope',
@@ -79,6 +80,7 @@ async function main() {
       'enrich:evidence-project',
       'enrich:composite-risk',
       'enrich:evaluated-edges',
+      'enrich:flags-edges',
     ];
 
     for (const script of scripts) {

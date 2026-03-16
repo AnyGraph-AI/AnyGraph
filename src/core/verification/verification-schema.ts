@@ -89,6 +89,11 @@ export const VerificationRunSchema = z.object({
 
   createdAt: z.string().datetime().optional(),
   updatedAt: z.string().datetime().optional(),
+
+  // Per-finding location (for FLAGS edge creation)
+  targetFilePath: z.string().optional(),
+  startLine: z.number().int().positive().optional(),
+  endLine: z.number().int().positive().optional(),
 });
 
 export const AnalysisScopeSchema = z.object({

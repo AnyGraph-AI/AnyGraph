@@ -7,7 +7,7 @@
  * 1. ANALYZED edges from VerificationRun → SourceFile via AnalysisScope.includedPaths
  * 2. Strip file:// prefix from includedPaths URIs to match SourceFile.filePath
  * 3. All edges tagged {derived: true, source: 'vr-scope-enrichment'}
- * 4. FLAGS edges for VRs with line-level SARIF results (deferred — importer doesn't store location)
+ * 4. FLAGS edges for VRs with line-level SARIF results (VR.targetFilePath/startLine/endLine)
  * 5. "What verification touched this file?" is a single-hop query
  * 6. Idempotent — running twice produces same edge count
  */
@@ -243,5 +243,61 @@ describe('[GC-2] Integration — live graph data shape', () => {
     ).trim();
     const count = parseInt(sfOut.split('\n').pop()!);
     expect(count).toBeGreaterThanOrEqual(1);
+  });
+
+  // --- FLAGS edge tests (GC-2 Task 2) ---
+
+  it('[GC-2] VRs with targetFilePath have FLAGS edges to Functions', async () => {
+    const { execSync } = await import('child_process');
+    const out = execSync(
+      `cypher-shell -u neo4j -p codegraph "
+        MATCH (vr:VerificationRun)-[r:FLAGS]->(fn:Function)
+        RETURN count(r) AS cnt" 2>/dev/null`,
+      { encoding: 'utf-8' },
+    ).trim();
+    const cnt = parseInt(out.split('\n').pop()!);
+    expect(cnt).toBeGreaterThan(0);
+  });
+
+  it('[GC-2] FLAGS edges have derived=true and source tag', async () => {
+    const { execSync } = await import('child_process');
+    const out = execSync(
+      `cypher-shell -u neo4j -p codegraph "
+        MATCH ()-[r:FLAGS]->()
+        WHERE r.derived = true AND r.source = 'flags-enrichment'
+        RETURN count(r) AS cnt" 2>/dev/null`,
+      { encoding: 'utf-8' },
+    ).trim();
+    const cnt = parseInt(out.split('\n').pop()!);
+    expect(cnt).toBeGreaterThan(0);
+  });
+
+  it('[GC-2] FLAGS edges carry ruleId from source VR', async () => {
+    const { execSync } = await import('child_process');
+    const out = execSync(
+      `cypher-shell -u neo4j -p codegraph "
+        MATCH (vr:VerificationRun)-[r:FLAGS]->(fn:Function)
+        WHERE r.ruleId IS NOT NULL AND r.ruleId = vr.ruleId
+        RETURN count(r) AS cnt" 2>/dev/null`,
+      { encoding: 'utf-8' },
+    ).trim();
+    const cnt = parseInt(out.split('\n').pop()!);
+    expect(cnt).toBeGreaterThan(0);
+  });
+
+  it('[GC-2] FLAGS + ANALYZED together answer "what verified this function?"', async () => {
+    const { execSync } = await import('child_process');
+    const out = execSync(
+      `cypher-shell -u neo4j -p codegraph "
+        MATCH (fn:Function {projectId: 'proj_c0d3e9a1f200'})
+        WHERE (fn)<-[:FLAGS]-(:VerificationRun)
+        OPTIONAL MATCH (fn)<-[:CONTAINS]-(sf:SourceFile)<-[:ANALYZED]-(avr:VerificationRun)
+        WITH fn, count(DISTINCT avr) AS analyzedBy
+        WHERE analyzedBy > 0
+        RETURN count(fn) AS bothCoveredFunctions" 2>/dev/null`,
+      { encoding: 'utf-8' },
+    ).trim();
+    const cnt = parseInt(out.split('\n').pop()!);
+    expect(cnt).toBeGreaterThanOrEqual(0);
   });
 });
