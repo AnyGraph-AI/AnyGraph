@@ -168,12 +168,51 @@ export interface Panel1Output {
   integrity: IntegrityReport;
 }
 
+export interface MilestoneBriefing {
+  milestone: {
+    code: string;
+    name: string;
+    status: string;
+    specText: string | null;
+    tasksDone: number;
+    tasksTotal: number;
+  };
+  /** Milestones this one depends on (DEPENDS_ON backward) */
+  inputs: Array<{
+    code: string;
+    name: string;
+    status: string;
+    specText: string | null;
+  }>;
+  /** Milestones this one unlocks (who DEPENDS_ON this) */
+  unlocks: Array<{
+    code: string;
+    name: string;
+    status: string;
+  }>;
+  /** Hazards from integrity panel */
+  hazards: Array<{
+    checkName: string;
+    severity: string;
+    message: string;
+  }>;
+  /** Last verified state from governance metrics */
+  lastVerified: {
+    commit: string | null;
+    gateVerdict: string | null;
+    tcCoverage: string | null;
+    timestamp: string | null;
+  };
+}
+
 export interface Panel2Output {
   agentId: string;
   status: string;
   currentTaskId: string | null;
   currentMilestone: string | null;
   sessionBookmark: Record<string, unknown> | null;
+  /** Self-briefing context for cold-start sessions */
+  briefing: MilestoneBriefing | null;
 }
 
 export interface Panel3Output {

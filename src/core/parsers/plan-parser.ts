@@ -305,6 +305,28 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
         properties: { projectId: ctx.projectId },
       });
 
+      // Peek forward to collect spec prose between milestone header and first task/section
+      const specLines: string[] = [];
+      let peekIdx = i + 1;
+      while (peekIdx < lines.length) {
+        const peekLine = lines[peekIdx].trim();
+        if (peekLine.match(MILESTONE_HEADER) ||
+            peekLine.match(SPRINT_HEADER) ||
+            peekLine.match(CHECKBOX_DONE) ||
+            peekLine.match(CHECKBOX_PLANNED) ||
+            peekLine.startsWith('## ') ||
+            peekLine.startsWith('### ')) {
+          break;
+        }
+        if (peekLine.length > 0) {
+          specLines.push(peekLine);
+        }
+        peekIdx++;
+      }
+      if (specLines.length > 0) {
+        nodes[nodes.length - 1].properties.specText = specLines.join('\n');
+      }
+
       currentSectionId = nodeId;
       currentSectionKey = sectionKey;
       taskOrdinalInSection = 0;

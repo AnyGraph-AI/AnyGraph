@@ -21,6 +21,7 @@ import type {
   IntegrityReport,
   GroundTruthOutput,
   Panel1Output,
+  MilestoneBriefing,
   Panel2Output,
   Panel3Output,
   Observation,
@@ -543,13 +544,17 @@ export class GroundTruthRuntime {
     agentId?: string,
     projectId?: string,
   ): Promise<Panel2Output> {
+    const planProjectId = projectId ? this.derivePlanProjectId(projectId) : 'plan_codegraph';
+
     if (!agentId) {
+      const briefing = await this.queryMilestoneBriefing(planProjectId);
       return {
         agentId: 'unknown',
         status: 'IDLE',
         currentTaskId: null,
-        currentMilestone: null,
+        currentMilestone: briefing?.milestone.code ?? null,
         sessionBookmark: null,
+        briefing,
       };
     }
 
@@ -561,23 +566,17 @@ export class GroundTruthRuntime {
         { agentId, projectId: projectId ?? null },
       );
 
-      if (rows.length === 0) {
-        return {
-          agentId,
-          status: 'IDLE',
-          currentTaskId: null,
-          currentMilestone: null,
-          sessionBookmark: null,
-        };
-      }
+      const bookmark = rows.length > 0 ? (rows[0].props as Record<string, unknown>) : null;
+      const milestoneCode = bookmark?.currentMilestone != null ? String(bookmark.currentMilestone) : undefined;
+      const briefing = await this.queryMilestoneBriefing(planProjectId, milestoneCode);
 
-      const bookmark = rows[0].props as Record<string, unknown>;
       return {
-        agentId,
-        status: String(bookmark.status ?? 'IDLE'),
-        currentTaskId: bookmark.currentTaskId != null ? String(bookmark.currentTaskId) : null,
-        currentMilestone: bookmark.currentMilestone != null ? String(bookmark.currentMilestone) : null,
+        agentId: bookmark ? String(bookmark.agentId ?? agentId) : agentId,
+        status: bookmark ? String(bookmark.status ?? 'IDLE') : 'IDLE',
+        currentTaskId: bookmark?.currentTaskId != null ? String(bookmark.currentTaskId) : null,
+        currentMilestone: milestoneCode ?? briefing?.milestone.code ?? null,
         sessionBookmark: bookmark,
+        briefing,
       };
     } catch (err) {
       if (process.env.GTH_DEBUG) console.error('[GTH] runPanel2:', (err as Error).message ?? err);
@@ -587,6 +586,7 @@ export class GroundTruthRuntime {
         currentTaskId: null,
         currentMilestone: null,
         sessionBookmark: null,
+        briefing: null,
       };
     }
   }
@@ -626,6 +626,107 @@ export class GroundTruthRuntime {
       proj_0e32f3c187f4: 'plan_bible_graph',
     };
     return mapping[projectId] ?? projectId.replace('proj_', 'plan_');
+  }
+
+  private async queryMilestoneBriefing(
+    planProjectId: string,
+    milestoneCode?: string,
+  ): Promise<MilestoneBriefing | null> {
+    try {
+      const rows = await this.neo4j.run(
+        `// Find the active milestone (specified, or first in_progress, or first planned)
+         MATCH (m:Milestone {projectId: $planProjectId})
+         WHERE ($milestoneCode IS NOT NULL AND m.code = $milestoneCode)
+            OR ($milestoneCode IS NULL AND m.status IN ['in_progress', 'planned'])
+         WITH m ORDER BY
+           CASE WHEN $milestoneCode IS NOT NULL AND m.code = $milestoneCode THEN 0
+                WHEN m.status = 'in_progress' THEN 1
+                ELSE 2 END,
+           m.code LIMIT 1
+
+         // Task completion
+         OPTIONAL MATCH (t:Task)-[:PART_OF]->(m) WHERE t.projectId = $planProjectId
+         WITH m,
+           count(t) AS tasksTotal,
+           sum(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS tasksDone
+
+         // Inputs (DEPENDS_ON forward — what this milestone depends on)
+         OPTIONAL MATCH (m)-[:DEPENDS_ON]->(dep:Milestone)
+         WITH m, tasksTotal, tasksDone, collect(DISTINCT {
+           code: dep.code, name: dep.name, status: dep.status, specText: dep.specText
+         }) AS inputs
+
+         // Unlocks (who DEPENDS_ON me?)
+         OPTIONAL MATCH (blocked:Milestone)-[:DEPENDS_ON]->(m)
+         WITH m, tasksTotal, tasksDone, inputs, collect(DISTINCT {
+           code: blocked.code, name: blocked.name, status: blocked.status
+         }) AS unlocks
+
+         RETURN m.code AS code, m.name AS name, m.status AS status,
+                m.specText AS specText, tasksTotal, tasksDone,
+                inputs, unlocks`,
+        { planProjectId, milestoneCode: milestoneCode ?? null },
+      );
+
+      if (rows.length === 0) return null;
+
+      const r = rows[0] as any;
+
+      // Query hazards from open hypotheses
+      const hazardRows = await this.neo4j.run(
+        `MATCH (h:Hypothesis {status: 'open'})
+         RETURN h.name AS checkName, 'warning' AS severity, h.description AS message
+         LIMIT 10`,
+      );
+
+      const hazards = hazardRows.map((h: any) => ({
+        checkName: String(h.checkName ?? 'unknown'),
+        severity: String(h.severity ?? 'warning'),
+        message: String(h.message ?? ''),
+      }));
+
+      // Query last governance metrics
+      const govRows = await this.neo4j.run(
+        `MATCH (g:GovernanceMetricSnapshot)
+         RETURN g.commitRef AS commit, g.gateFailures AS gateFailures,
+                g.verificationRuns AS tcCoverage, g.timestamp AS ts
+         ORDER BY g.timestamp DESC LIMIT 1`,
+      );
+
+      const gov = govRows[0] as any;
+
+      return {
+        milestone: {
+          code: String(r.code),
+          name: String(r.name),
+          status: String(r.status),
+          specText: r.specText ? String(r.specText) : null,
+          tasksDone: Number(r.tasksDone),
+          tasksTotal: Number(r.tasksTotal),
+        },
+        inputs: (r.inputs ?? [])
+          .filter((d: any) => d.code != null)
+          .map((d: any) => ({
+            code: String(d.code), name: String(d.name),
+            status: String(d.status), specText: d.specText ? String(d.specText) : null,
+          })),
+        unlocks: (r.unlocks ?? [])
+          .filter((d: any) => d.code != null)
+          .map((d: any) => ({
+            code: String(d.code), name: String(d.name), status: String(d.status),
+          })),
+        hazards,
+        lastVerified: gov ? {
+          commit: gov.commit ? String(gov.commit) : null,
+          gateVerdict: gov.gateFailures === 0 ? 'PASS' : 'FAIL',
+          tcCoverage: gov.tcCoverage != null ? `${gov.tcCoverage}` : null,
+          timestamp: gov.ts ? String(gov.ts) : null,
+        } : { commit: null, gateVerdict: null, tcCoverage: null, timestamp: null },
+      };
+    } catch (err) {
+      if (process.env.GTH_DEBUG) console.error('[GTH] queryMilestoneBriefing:', (err as Error).message ?? err);
+      return null;
+    }
   }
 
   async close(): Promise<void> {

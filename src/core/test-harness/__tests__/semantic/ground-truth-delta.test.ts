@@ -44,6 +44,7 @@ function makePanel2(overrides: Partial<Panel2Output> = {}): Panel2Output {
     currentTaskId: null,
     currentMilestone: null,
     sessionBookmark: null,
+    briefing: null,
     ...overrides,
   };
 }
