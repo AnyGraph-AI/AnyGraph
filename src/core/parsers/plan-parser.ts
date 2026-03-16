@@ -306,6 +306,7 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       });
 
       // Peek forward to collect spec prose between milestone header and first task/section
+      // Filter out dependency metadata lines (DEPENDS_ON, NO_DEPENDS_OK) — those aren't specs
       const specLines: string[] = [];
       let peekIdx = i + 1;
       while (peekIdx < lines.length) {
@@ -318,7 +319,9 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
             peekLine.startsWith('### ')) {
           break;
         }
-        if (peekLine.length > 0) {
+        if (peekLine.length > 0 &&
+            !peekLine.startsWith('DEPENDS_ON') &&
+            !peekLine.startsWith('NO_DEPENDS_OK')) {
           specLines.push(peekLine);
         }
         peekIdx++;
