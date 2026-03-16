@@ -179,6 +179,7 @@ export const VALIDATION_QUERIES: Array<{
         AND NOT n:Evidence
         AND NOT n:Claim
         AND NOT n:Hypothesis
+        AND NOT n:GraphMetricsSnapshot
       RETURN labels(n)[0] AS label, count(n) AS count
       LIMIT 10
     `,
