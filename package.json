@@ -105,7 +105,7 @@
     "hygiene:platform:verify": "node --loader ts-node/esm src/utils/verify-hygiene-platform-parity.ts",
     "hygiene:deps:sync": "node --loader ts-node/esm src/utils/hygiene-external-deps-sync.ts",
     "commit:audit:verify": "node --loader ts-node/esm src/scripts/verify/verify-commit-audit-invariants.ts",
-    "done-check": "npm run build && npm run plan:refresh && npm run edges:normalize && npm run evidence:auto-link && npm run plan:evidence:recompute && npm run document:evidence:link-runtime && npm run verification:proof:record && npm run registry:reconcile && npm run registry:verify && npm run registry:identity:verify && npm run edges:verify && npm run parser:contracts:verify && npm run query:contract:verify && npm run governance:metric:def:sync && npm run governance:metric:def:verify && npm run governance:attribution:backfill && npm run governance:metrics:snapshot && npm run governance:metrics:report && npm run governance:metrics:integrity:verify && npm run plan:deps:verify && npm run governance:stale:verify && npm run tc:recompute && npm run tc:shadow && npm run tc:debt && npm run tc:verify && npm run document:witness:advisory && npm run document:namespace:reconcile && npm run document:namespace:verify && npm run document:claims:grade && npm run document:claims:verify && npm run document:wording:verify && npm run integrity:snapshot && npm run integrity:snapshot:fields:verify && npm run hygiene:foundation:sync && npm run hygiene:foundation:verify && npm run hygiene:topology:sync && npm run hygiene:topology:verify && npm run hygiene:ownership:sync && npm run hygiene:ownership:verify && npm run hygiene:exception:verify && npm run hygiene:proof:scope:sync && npm run hygiene:proof:verify && npm run evidence:coverage && npm run verification:recommendation:mismatch && npm run integrity:verify",
+    "done-check": "npm run build && npm run plan:refresh && npm run edges:normalize && npm run evidence:auto-link && npm run plan:evidence:recompute && npm run document:evidence:link-runtime && npm run verification:proof:record && npm run registry:reconcile && npm run registry:verify && npm run registry:identity:verify && npm run edges:verify && npm run parser:contracts:verify && npm run query:contract:verify && npm run governance:metric:def:sync && npm run governance:metric:def:verify && npm run governance:attribution:backfill && npm run governance:metrics:snapshot && npm run governance:metrics:report && npm run governance:metrics:integrity:verify && npm run plan:deps:verify && npm run governance:stale:verify && npm run tc:recompute && npm run tc:shadow && npm run tc:debt && npm run tc:anti-gaming && npm run tc:explain && npm run tc:calibrate && npm run tc:promote && npm run tc:verify && npm run document:witness:advisory && npm run document:namespace:reconcile && npm run document:namespace:verify && npm run document:claims:grade && npm run document:claims:verify && npm run document:wording:verify && npm run integrity:snapshot && npm run integrity:snapshot:fields:verify && npm run hygiene:foundation:sync && npm run hygiene:foundation:verify && npm run hygiene:topology:sync && npm run hygiene:topology:verify && npm run hygiene:ownership:sync && npm run hygiene:ownership:verify && npm run hygiene:exception:verify && npm run hygiene:proof:scope:sync && npm run hygiene:proof:verify && npm run evidence:coverage && npm run verification:recommendation:mismatch && npm run integrity:verify",
     "document:witness:advisory": "node --loader ts-node/esm src/utils/verify-document-witness-advisory.ts",
     "document:namespace:audit": "node --loader ts-node/esm src/utils/document-namespace-audit.ts",
     "document:evidence:link-runtime": "node --loader ts-node/esm src/utils/link-document-runtime-evidence.ts",
@@ -130,7 +130,12 @@
     "tc:debt": "npx tsx src/scripts/entry/tc-pipeline.ts debt",
     "tc:verify": "npx tsx src/scripts/entry/tc-pipeline.ts verify",
     "tc:all": "npx tsx src/scripts/entry/tc-pipeline.ts all",
-    "tc:claims": "npx tsx src/scripts/entry/tc-pipeline.ts claims"
+    "tc:claims": "npx tsx src/scripts/entry/tc-pipeline.ts claims",
+    "tc:anti-gaming": "npx tsx src/scripts/entry/tc-pipeline.ts anti-gaming",
+    "tc:explain": "npx tsx src/scripts/entry/tc-pipeline.ts explain",
+    "tc:calibrate": "npx tsx src/scripts/entry/tc-pipeline.ts calibrate",
+    "tc:promote": "npx tsx src/scripts/entry/tc-pipeline.ts promote",
+    "verification:scan": "npx tsx src/scripts/entry/scan-and-import.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.15.1",

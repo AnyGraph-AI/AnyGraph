@@ -163,3 +163,4 @@ artifacts/governance-metric-integrity/
 artifacts/governance-metrics/
 artifacts/project-registry/
 artifacts/watcher-recheck-events.jsonl
+semgrep-results.sarif

@@ -135,13 +135,13 @@ export async function runCalibration(
   );
 
   const prodData: ConfidenceOutcome[] = rows.map(r => ({
-    confidence: r.prodConf as number,
-    outcome: r.outcome as number,
+    confidence: Number(r.prodConf),
+    outcome: Number(r.outcome),
   }));
 
   const shadowData: ConfidenceOutcome[] = rows.map(r => ({
-    confidence: r.shadowConf as number,
-    outcome: r.outcome as number,
+    confidence: Number(r.shadowConf),
+    outcome: Number(r.outcome),
   }));
 
   const production = computeMetrics(prodData, config.bins);
