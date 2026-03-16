@@ -52,14 +52,14 @@ Any Source → Language Parser → IR v1 → Enrichment Plugins → Neo4j → MC
 
 ### Key Directories
 
-- `src/mcp/` — MCP server + 39 tools across code, plan, claim, swarm, governance, and session domains
+- `src/mcp/` — MCP server + 56 tools across code, plan, claim, swarm, governance, verification, ground truth, and session domains
 - `src/core/parsers/` — TypeScript (ts-morph, ~1000 lines), Plan (~800 lines, v2.1), Python (scaffold)
 - `src/core/claims/` — Claim engine (3 domain generators + 5 cross-layer synthesizers) + self-audit
 - `src/core/config/` — Schema definitions, invariant registry (6 hard + 4 advisory), change-class matrix (5 classes, 7 lanes), eval lineage, gate decision packets, test provenance
 - `src/core/ir/` — IR v1 schema, materializer, validator, enrichment plugins
 - `src/core/adapters/document/` — Document parser, entity extractor, PDF extractor
 - `src/core/verification/` — Advisory gate, exception enforcement
-- `src/core/test-harness/` — 15 hermetic test modules (frozen clock, network guard, ephemeral graph, PBT runner, metamorphic testing, AI TEVV, provenance, confidence analytics) + fixture tiers (micro/scenario/sampled/stress)
+- `src/core/test-harness/` — 21 hermetic test modules (frozen clock, network guard, ephemeral graph, PBT runner, metamorphic testing, AI TEVV, provenance, confidence analytics) + fixture tiers (micro/scenario/sampled/stress)
 - `src/core/embeddings/` — OpenAI embeddings + NL-to-Cypher
 - `src/storage/neo4j/` — Neo4j driver and queries
 - `src/scripts/entry/` — Parse, ingest, watch entry points
@@ -80,7 +80,7 @@ All nodes carry `projectId`. Projects coexist in one Neo4j instance. Always filt
 - **Code project**: `proj_c0d3e9a1f200` (CodeGraph self-graph)
 - **Plan projects**: `plan_codegraph`, `plan_plan_graph`, `plan_runtime_graph`, `plan_governance_org`, `plan_hygiene_governance`, `plan_hygiene_ai`
 
-### MCP Tools (39)
+### MCP Tools (56)
 
 **Code Analysis (11):** `pre_edit_check`, `simulate_edit`, `impact_analysis`, `search_codebase`, `natural_language_to_cypher`, `traverse_from_node`, `detect_dead_code`, `detect_duplicate_code`, `detect_hotspots`, `state_impact`, `registration_map`
 
@@ -90,9 +90,13 @@ All nodes carry `projectId`. Projects coexist in one Neo4j instance. Always filt
 
 **Governance (5):** `self_audit`, `commit_audit_status`, `recommendation_proof_status`, `governance_metrics_status`, `parser_contract_status`
 
+**Verification & Trust (4):** `verification_dashboard`, `explainability_paths`, `confidence_debt_dashboard`, `import_sarif`
+
+**Ground Truth (1):** `ground_truth`
+
 **Session (6):** `session_context_summary`, `save_session_bookmark`, `restore_session_bookmark`, `save_session_note`, `recall_session_notes`, `cleanup_session`
 
-**Discovery (5):** `list_projects`, `parse_typescript_project`, `check_parse_status`, `start_watch_project`, `stop_watch_project`, `list_watchers`, `test_neo4j_connection`, `hello`
+**Discovery (8):** `list_projects`, `parse_typescript_project`, `check_parse_status`, `start_watch_project`, `stop_watch_project`, `list_watchers`, `test_neo4j_connection`, `hello`
 
 **Swarm (9):** `swarm_post_task`, `swarm_claim_task`, `swarm_complete_task`, `swarm_get_tasks`, `swarm_message`, `swarm_pheromone`, `swarm_sense`, `swarm_graph_refresh`, `swarm_cleanup`
 
@@ -197,7 +201,7 @@ Threshold policy: strict by default. Temporary overrides must be documented in c
 
 ## Test Infrastructure
 
-20 test suites, 132+ tests. All hermetic (frozen clock, no network, ephemeral graph isolation).
+40 test suites, 636 tests. All hermetic (frozen clock, no network, ephemeral graph isolation).
 
 **Semantic suites**: done-proven-status, status-resolver, waiver-expiry, verification-capture, freshness-guards, confidence-invariants, policy-replayability, stateful-pbt, metamorphic-suite, metamorphic-expanded, flake-governance, ai-tevv, provenance-hardening, confidence-analytics
 

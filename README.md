@@ -169,6 +169,7 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 |------|---------|
 | `claim_status` / `evidence_for` / `contradictions` / `hypotheses` | Claim lifecycle |
 | `claim_generate` / `claim_chain_path` | Generation pipeline, cross-layer chain view |
+| `explainability_paths` | Trace claim → evidence paths |
 
 ### Governance & Verification
 | Tool | Purpose |
@@ -240,7 +241,7 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 
 ## Test Infrastructure
 
-### TDD Harness (328 tests, 29 suites)
+### TDD Harness (636 tests, 40 suites)
 
 The test harness provides hermetic, deterministic testing for all governance surfaces:
 
@@ -296,10 +297,10 @@ codegraph/
 │   │   ├── adapters/document/ # Document parser (scaffold)
 │   │   ├── ground-truth/     # Ground Truth Hook: runtime, delta, packs, session bookmarks
 │   │   ├── verification/     # Advisory gate, exception enforcement, temporal confidence
-│   │   ├── test-harness/     # 20 hermetic test modules + fixtures
+│   │   ├── test-harness/     # 21 hermetic test modules + fixtures
 │   │   └── utils/            # File detection, graph factory, path utils
 │   ├── mcp/
-│   │   ├── tools/            # 40 MCP tools
+│   │   ├── tools/            # 56 MCP tools
 │   │   ├── handlers/         # Graph generation, traversal, incremental parse
 │   │   └── services/         # Watch manager, job manager
 │   ├── scripts/
@@ -333,7 +334,7 @@ codegraph/
 - **MCP**: @modelcontextprotocol/sdk
 - **Embeddings**: OpenAI text-embedding-3-large (optional)
 - **NL→Cypher**: OpenAI gpt-4o (optional)
-- **Tests**: Custom hermetic harness (334 tests, 30 suites) + Vitest
+- **Tests**: Custom hermetic harness (636 tests, 40 suites) + Vitest
 - **File watching**: @parcel/watcher (native inotify)
 - **CLI**: commander
 

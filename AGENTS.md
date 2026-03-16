@@ -4,9 +4,9 @@
 
 AnythingGraph (repo: codegraph) is a **universal reasoning graph**. It ingests code, plans, corpora, and documents into Neo4j, cross-references across domains, generates claims with evidence, detects drift, and self-audits. Code parsing was the proof of concept — the architecture handles any structured knowledge.
 
-**Current state**: 63,000+ nodes, 415,000+ edges, 22 projects, 39 MCP tools, 132+ hermetic tests, and 6 operational layers.
+**Current state** (v0.1.0): ~16,500 nodes, ~25,000 edges, 8 projects, 56 MCP tools, 636 tests across 40 suites, and 6 operational layers.
 
-**Six layers**: Code (3 projects) → Corpus (5 projects) → Plans (8 projects) → Claims (414) → Reasoning (52 hypotheses) → Self-Audit.
+**Six layers**: Code (3 projects) → Plans (4 projects) → Governance (1 project) → Claims (~490) → Reasoning (~490 hypotheses) → Self-Audit.
 
 Every function, task, verse, claim, and entity is a node. Every call, evidence link, mention, and dependency is an edge.
 **Query the graph before you edit. That's the entire point.**
@@ -53,7 +53,6 @@ Code nodes use **multi-label**: `CodeNode:TypeScript:Function`, `CodeNode:TypeSc
 | `Project` | Top-level project with stats |
 | `IntegritySnapshot` / `MetricResult` | Integrity tracking |
 | `Claim` / `Evidence` / `Hypothesis` | Claims layer |
-| `Verse` / `Chapter` / `Book` | Corpus text nodes |
 | `IRNode:Entity` / `IRNode:Site` / `IRNode:Artifact` | IR nodes |
 
 Framework-specific labels (added when `.codegraph.yml` specifies a framework):
@@ -266,17 +265,28 @@ If the MCP server is running (`node codegraph/dist/mcp/mcp.server.js`), these to
 
 | Tool | Use For |
 |------|---------|
+**Core Analysis (6 tools)**
 | `pre_edit_check` | **ALWAYS call before editing a function.** Returns verdict + callers + state + coupling. |
 | `simulate_edit` | When pre_edit_check says SIMULATE_FIRST. Shows full graph delta before applying. |
 | `impact_analysis` | Deep blast radius with transitive dependents and risk scoring. |
 | `search_codebase` | Natural language code search (uses embeddings). |
 | `natural_language_to_cypher` | Ask structural questions in plain English. |
 | `traverse_from_node` | Walk the graph from a specific node. |
+
+**Code Quality (5 tools)**
 | `detect_dead_code` | Find unused exports. |
 | `detect_duplicate_code` | Find near-duplicates by normalized hash. |
+| `detect_hotspots` | Ranked list of functions with highest risk × change frequency. |
+| `state_impact` | Query state field access patterns. Shows readers/writers, detects race conditions. |
+| `registration_map` | Query framework entrypoints. "What happens when the user sends /buy?" |
+
+**Session & Project (5 tools)**
 | `list_projects` | Get project name and ID. |
 | `save_session_bookmark` / `restore_session_bookmark` | Cross-session continuity. |
 | `save_session_note` / `recall_session_notes` | Persistent notes. |
+| `session_context_summary` | Cold-start context from graph truth — run on session boot. |
+
+**Swarm Coordination (8 tools)**
 | `swarm_post_task` | Post refactoring task with dependencies and context. |
 | `swarm_claim_task` | Claim a pending task. Returns unread messages. |
 | `swarm_complete_task` | Complete/fail/request_review/approve/reject. |
@@ -285,20 +295,57 @@ If the MCP server is running (`node codegraph/dist/mcp/mcp.server.js`), these to
 | `swarm_pheromone` | Deposit coordination signals on nodes. |
 | `swarm_sense` | Read pheromones near a node. |
 | `swarm_graph_refresh` | Re-parse changed files after edits. Workers MUST call before completing. |
-| `state_impact` | Query state field access patterns. Shows readers/writers, detects race conditions. |
-| `registration_map` | Query framework entrypoints. "What happens when the user sends /buy?" |
-| `detect_hotspots` | Ranked list of functions with highest risk × change frequency. |
+
+**Plan Tracking (5 tools)**
 | `plan_status` | Completion rates per plan project (done/planned/drift). |
 | `plan_drift` | Tasks with code evidence but unchecked boxes. |
 | `plan_gaps` | Planned tasks with zero evidence. |
 | `plan_query` | Free-form plan graph queries. |
 | `plan_priority` | Dynamic priority ranking — "what should I build next?" |
+
+**Claims & Reasoning (5 tools)**
 | `claim_status` | Overview of claims by domain and status. |
 | `evidence_for` | Evidence supporting/contradicting a specific claim. |
 | `contradictions` | Find contested or contradicted claims. |
 | `hypotheses` | Auto-generated investigation targets from evidence gaps. |
 | `claim_generate` | Run claim generation pipeline across all domains. |
+
+**Self-Audit (1 tool)**
 | `self_audit` | Summary / generate audit questions / apply verdicts. |
+
+**Project Parsing & Watching (5 tools)**
+| `parse_typescript_project` | Parse a TypeScript project into the graph. |
+| `check_parse_status` | Check status of a running parse job. |
+| `start_watch_project` | Start file watcher for incremental re-parse. |
+| `stop_watch_project` | Stop file watcher for a project. |
+| `list_watchers` | List active file watchers. |
+
+**Utility (4 tools)**
+| `hello` | Health check / server info. |
+| `test_neo4j_connection` | Verify Neo4j connectivity and version. |
+| `cleanup_session` | Clean up session state. |
+| `swarm_cleanup` | Clean up stale swarm pheromones/tasks. |
+
+**Additional Claims (1 tool)**
+| `claim_chain_path` | Trace evidence chain paths between claims and sources. |
+
+**Additional Plans (1 tool)**
+| `plan_next_tasks` | Recommended next tasks (with freshness guard). |
+
+**Verification & Trust (4 tools)**
+| `verification_dashboard` | Overview of verification runs, pass/fail rates, coverage. |
+| `explainability_paths` | Trace evidence chains from claims back to source. |
+| `confidence_debt_dashboard` | Track low-confidence edges and claims needing reinforcement. |
+| `import_sarif` | Import SARIF tool findings into the verification subsystem. |
+
+**Ground Truth (1 tool)**
+| `ground_truth` | Three-panel mirror (Graph State / Agent State / Delta). Call on boot, after compaction, before/after tasks. |
+
+**Governance (4 tools)**
+| `commit_audit_status` | Latest commit audit results from `artifacts/commit-audit/latest.json`. |
+| `governance_metrics_status` | Latest/trend governance observability snapshot. |
+| `parser_contract_status` | Parser contract verification status. |
+| `recommendation_proof_status` | Recommendation truth-health panel for a plan project. |
 
 MCP config for Claude Code (`.mcp.json` in project root):
 ```json
@@ -427,7 +474,9 @@ The claim layer generates domain-agnostic assertions with evidence.
 | `cross_cutting_impact` | cross | "Editing X invalidates evidence for Y plan tasks" |
 | `bottleneck` | plan | "Sprint X is 41% complete — 23 remaining" |
 | `temporal_coupling` | code | "A and B change together (8 co-commits)" |
-| `coverage_gap` | code | "85 of 85 high-risk functions have no tests" |
+| `coverage_gap` | code | "High-risk functions without test coverage" |
+
+**Current totals**: ~490 claims, ~790 evidence nodes, ~490 open hypotheses (mostly "no structural evidence" and "no test coverage" findings).
 
 ### Key queries
 ```cypher
@@ -544,7 +593,7 @@ Before declaring any implementation task complete, run:
 npm run done-check
 ```
 
-`done-check` currently executes:
+`done-check` currently executes **55 steps** across build, normalization, verification, and integrity gates. Core stages include:
 1. `npm run build`
 2. `npm run edges:normalize`
 3. `npm run plan:evidence:recompute`
@@ -555,6 +604,7 @@ npm run done-check
 8. `npm run plan:deps:verify`
 9. `npm run integrity:snapshot`
 10. `npm run integrity:verify`
+Plus 45 additional verification, governance, and audit sub-steps.
 
 Rules:
 - If gate fails, task is **not done**.

@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A code intelligence graph (10,000+ nodes, 14,000+ edges, 8 projects) in Neo4j. Every declaration — functions, classes, methods, variables, imports, types — is a node. Every call, import, containment, state access, ownership, and co-change pattern is an edge. Risk scores, fan-in/fan-out, architecture layers, and author ownership are pre-computed.
+A code intelligence graph (~16,500 nodes, ~25,000 edges, 8 projects) in Neo4j. Every declaration — functions, classes, methods, variables, imports, types — is a node. Every call, import, containment, state access, ownership, and co-change pattern is an edge. Risk scores, fan-in/fan-out, architecture layers, and author ownership are pre-computed.
 
 Code nodes use **multi-label**: `CodeNode:TypeScript:Function`, `CodeNode:TypeScript:Method`, etc. The `kind` property discriminates. Plan nodes are `CodeNode:Task`, `CodeNode:Milestone`, `CodeNode:Decision`.
 
@@ -81,7 +81,7 @@ RETURN f.riskTier, round(f.riskLevel) AS risk, f.fanInCount, f.fanOutCount,
 
 ## MCP Tools
 
-39 MCP tools (grouped):
+56 MCP tools (grouped):
 
 ### Core graph + safety
 - `pre_edit_check` — **always** before editing a function
@@ -93,8 +93,12 @@ RETURN f.riskTier, round(f.riskLevel) AS risk, f.fanInCount, f.fanOutCount,
 - `search_codebase` — semantic code search
 - `traverse_from_node` — structural graph traversal
 - `natural_language_to_cypher` — NL → Cypher conversion
+- `ground_truth` — agent-graph coordination, integrity delta engine
+- `detect_dead_code` — find exported but uncalled functions
+- `detect_duplicate_code` — find structural code duplication
 
 ### Discovery + project ops
+- `hello` — server health check / ping
 - `list_projects`
 - `parse_typescript_project`
 - `check_parse_status`
@@ -115,14 +119,20 @@ RETURN f.riskTier, round(f.riskLevel) AS risk, f.fanInCount, f.fanOutCount,
 - `contradictions`
 - `hypotheses`
 - `claim_generate`
-- `claim_chain_path` (code → plan chain view)
+- `claim_chain_path` — code → plan chain view
+
+### Verification & trust
+- `verification_dashboard` — unified verification overview
+- `explainability_paths` — trace reasoning paths through evidence
+- `confidence_debt_dashboard` — track confidence debt across claims
+- `import_sarif` — import SARIF analysis results into graph
 
 ### Governance / verification status
-- `parser_contract_status`
-- `commit_audit_status`
-- `recommendation_proof_status`
-- `governance_metrics_status`
-- `self_audit`
+- `parser_contract_status` — parser contract regression check
+- `commit_audit_status` — latest commit-audit result view
+- `recommendation_proof_status` — recommendation truth-health
+- `governance_metrics_status` — governance observability snapshot/trend
+- `self_audit` — generates questions, agents verify, graph updates
 
 ### Session continuity + cold start
 - `save_session_bookmark` / `restore_session_bookmark`
@@ -478,8 +488,8 @@ Parser → IR v1 → Enrichment Plugins → Graph
 ```
 IR schema, materializer, and validator exist in `src/core/ir/`. Current TS parser still writes Neo4j directly. IR becomes the primary path when multi-language ships.
 
-### Test Infrastructure (132+ tests)
-Hermetic test harness with frozen clock, network guard, ephemeral graph, seeded RNG, PBT runner, metamorphic testing, AI TEVV, SLSA-shaped provenance, confidence analytics. All in `src/core/test-harness/`.
+### Test Infrastructure (636 tests across 40 suites)
+Hermetic test harness (21 modules) with frozen clock, network guard, ephemeral graph, seeded RNG, PBT runner, metamorphic testing, AI TEVV, SLSA-shaped provenance, confidence analytics. All in `src/core/test-harness/`. Done-check runs 55 verification steps.
 
 ---
 

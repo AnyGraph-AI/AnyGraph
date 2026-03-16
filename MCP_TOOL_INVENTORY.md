@@ -6,7 +6,7 @@
 
 ---
 
-## Tool Count: 52 Tools Registered
+## Tool Count: 56 Tools Registered
 
 All tools are **exposed** via `registerAllTools()` in `src/mcp/tools/index.ts`.  
 Server runs from compiled `dist/` — any source changes require `npm run build`.
@@ -38,7 +38,7 @@ Server runs from compiled `dist/` — any source changes require `npm run build`
 | `state_impact` | code | Field, READS_STATE, WRITES_STATE | - | ✅ | State field access patterns, race detection |
 | `registration_map` | code | CodeNode, CALLS edges | - | ✅ | Endpoint → handler → callee mapping |
 
-### 🛠️ Parsing & Project Mgmt (5)
+### 🛠️ Parsing & Project Mgmt (6)
 | Tool Name | Domain | Reads | Writes | Status | Notes |
 |-----------|--------|-------|--------|--------|-------|
 | `parse_typescript_project` | code | - | All CodeNodes, edges | ✅ | Async mode recommended, uses ts-morph parser |
@@ -240,9 +240,7 @@ The following **exported functions** exist in `src/core/` but have **NO MCP tool
 ✅ **Good documentation** — TOOL_METADATA in constants.ts provides clear descriptions.  
 ✅ **Consistent naming** — snake_case for tool names, camelCase for tool creation functions.  
 
-⚠️ **TOOL_NAMES constant is stale** — Only has 26 tools, but 52 are registered. The newer tools (plan/claim/governance) bypass TOOL_NAMES and use string literals in `server.tool()` calls.
-
-**Fix:** Update `TOOL_NAMES` constant to include all 52 tools for consistency.
+✅ **TOOL_NAMES constant is current** — All 56 tools are listed in TOOL_NAMES constant and registered via `registerAllTools()`.
 
 ---
 
