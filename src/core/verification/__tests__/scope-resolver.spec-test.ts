@@ -743,9 +743,10 @@ describe('Scope Resolver — Implementation Edge Cases', () => {
         RETURN s.scopeCompleteness AS completeness
       `, { pid: projectId });
 
-      // With no targetFileCount and no analyzedFileCount, 
-      // coalesce should treat them as 0, resulting in 'unknown'
-      expect(scopes[0].completeness).toBe('unknown');
+      // With no targetFileCount and no analyzedFileCount (NULL, not 0),
+      // recomputeScopeCompleteness preserves the existing value.
+      // NULL means "not reported" — not the same as "zero files analyzed."
+      expect(scopes[0].completeness).toBe('complete');
     });
 
     it('IMPL-EDGE-CASE: Multiple AnalysisScope nodes for same project', async () => {
@@ -1024,9 +1025,7 @@ describe('Scope Resolver — Implementation Edge Cases', () => {
           projectId: $pid,
           verificationRunId: 'vr_covered_test',
           scopeCompleteness: 'complete',
-          includedPaths: ['/src/covered.ts'],
-          targetFileCount: 1,
-          analyzedFileCount: 1
+          includedPaths: ['/src/covered.ts']
         })
         CREATE (vr)-[:HAS_SCOPE]->(scope)
       `, { pid: projectId });

@@ -131,26 +131,33 @@ describe('Ephemeral Graph Runtime', () => {
 
   it('production data is untouched', async () => {
     const rt = await createEphemeralGraph({ setupSchema: false });
+    const pid = rt.projectId;
 
-    const before = await rt.run(`
-      MATCH (n) WHERE NOT n.projectId STARTS WITH '__test_'
-      RETURN count(n) AS count
+    // Before seeding: pick a known production project and snapshot its count
+    const prodBefore = await rt.run(`
+      MATCH (n {projectId: 'proj_c0d3e9a1f200'})
+      RETURN count(n) AS cnt
     `);
-    const countBefore = before.records[0].get('count').toNumber();
+    const prodCountBefore = prodBefore.records[0].get('cnt').toNumber();
 
     await rt.seed(codeGraphFixture({
       files: [{ name: 'safe.ts' }],
       functions: [{ name: 'safe_fn', file: 'safe.ts' }],
     }));
 
-    const after = await rt.run(`
-      MATCH (n) WHERE NOT n.projectId STARTS WITH '__test_'
-      RETURN count(n) AS count
+    // Invariant 1: seeded data exists under the ephemeral projectId
+    const seeded = await rt.run(`
+      MATCH (n {projectId: $pid}) RETURN count(n) AS cnt
+    `, { pid });
+    expect(seeded.records[0].get('cnt').toNumber()).toBeGreaterThan(0);
+
+    // Invariant 2: production project node count unchanged by seeding
+    const prodAfter = await rt.run(`
+      MATCH (n {projectId: 'proj_c0d3e9a1f200'})
+      RETURN count(n) AS cnt
     `);
-    const countAfter = after.records[0].get('count').toNumber();
-    // Allow ±10 tolerance: concurrent spec tests may create/delete __test_ nodes
-    // whose cleanup temporarily affects global counts via race conditions
-    expect(Math.abs(countBefore - countAfter)).toBeLessThanOrEqual(10);
+    const prodCountAfter = prodAfter.records[0].get('cnt').toNumber();
+    expect(prodCountAfter).toBe(prodCountBefore);
 
     await rt.teardown();
   });

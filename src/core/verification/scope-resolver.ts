@@ -51,10 +51,11 @@ async function recomputeScopeCompleteness(
   );
   updated += (completeResult[0]?.updated as any)?.toNumber?.() ?? completeResult[0]?.updated ?? 0;
 
-  // Mark scopes with zero analyzed files as unknown
+  // Mark scopes with explicitly zero analyzed files as unknown
+  // (NULL analyzedFileCount means "not reported" — don't downgrade)
   const unknownResult = await neo4j.run(
     `MATCH (s:AnalysisScope {projectId: $projectId})
-     WHERE coalesce(s.analyzedFileCount, 0) = 0
+     WHERE s.analyzedFileCount IS NOT NULL AND s.analyzedFileCount = 0
        AND coalesce(s.analysisErrorCount, 0) = 0
        AND s.scopeCompleteness <> 'unknown'
      SET s.scopeCompleteness = 'unknown', s.updatedAt = toString(datetime())
