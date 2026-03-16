@@ -159,7 +159,7 @@ async function runInit() {
   }
 }
 
-async function runParse(dir: string, options: { tsconfig?: string; projectId?: string; name?: string }) {
+async function runParse(dir: string, options: { tsconfig?: string; projectId?: string; name?: string; fresh?: boolean }) {
   const absDir = resolve(dir);
   if (!existsSync(absDir)) {
     console.error(`❌ Directory not found: ${absDir}`);
@@ -172,19 +172,51 @@ async function runParse(dir: string, options: { tsconfig?: string; projectId?: s
     process.exit(1);
   }
   
-  const projectId = options.projectId || generateProjectId(absDir);
-  const projectName = options.name || detectProjectName(absDir);
-  
-  console.log(`📝 Parsing: ${absDir}`);
-  console.log(`   tsconfig: ${tsconfig}`);
-  console.log(`   projectId: ${projectId}`);
-  console.log(`   name: ${projectName}\n`);
-  
   // Check Neo4j
   if (!await checkNeo4j()) {
     console.error('❌ Neo4j not running. Run `codegraph init` first.');
     process.exit(1);
   }
+
+  // Auto-detect existing projectId from Neo4j if not provided
+  let projectId = options.projectId;
+  let isReparse = false;
+  if (!projectId) {
+    const existing = await queryNeo4j(
+      'MATCH (p:Project) WHERE p.path = $path RETURN p.projectId AS id, p.name AS name',
+      { path: absDir },
+    );
+    if (existing.length > 0) {
+      projectId = existing[0].id;
+      isReparse = true;
+      console.log(`🔄 Found existing project: ${existing[0].name} (${projectId})`);
+      console.log(`   Use --fresh to wipe and recreate from scratch.\n`);
+    } else {
+      projectId = generateProjectId(absDir);
+    }
+  } else {
+    // Check if the provided projectId already exists
+    const existing = await queryNeo4j(
+      'MATCH (p:Project {projectId: $pid}) RETURN p.name AS name',
+      { pid: projectId },
+    );
+    if (existing.length > 0) {
+      isReparse = true;
+      console.log(`🔄 Reparsing existing project: ${existing[0].name} (${projectId})`);
+      if (!options.fresh) {
+        console.log(`   Derived data will be preserved and rebuilt.\n`);
+      }
+    }
+  }
+  
+  const projectName = options.name || detectProjectName(absDir);
+  const freshMode = options.fresh || !isReparse;
+  
+  console.log(`📝 Parsing: ${absDir}`);
+  console.log(`   tsconfig: ${tsconfig}`);
+  console.log(`   projectId: ${projectId}`);
+  console.log(`   name: ${projectName}`);
+  console.log(`   mode: ${freshMode ? 'fresh (wipe + create)' : 'reparse (merge + rebuild-derived)'}\n`);
   
   // Dynamic import parser
   const { TypeScriptParser } = await import('../core/parsers/typescript-parser.js');
@@ -212,50 +244,140 @@ async function runParse(dir: string, options: { tsconfig?: string; projectId?: s
   console.log('Ingesting to Neo4j...');
   const startIngest = Date.now();
   const neo4jService = new Neo4jService();
-  
-  // Clear existing project nodes
-  await neo4jService.run('MATCH (n {projectId: $projectId}) DETACH DELETE n', { projectId });
-  
-  // Batch ingest nodes
   const BATCH_SIZE = 500;
-  for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
-    const batch = nodes.slice(i, i + BATCH_SIZE);
-    await neo4jService.run(`
-      UNWIND $nodes AS node
-      CREATE (n:CodeNode)
-      SET n = node
-    `, { nodes: batch.map((n: any) => ({ ...n, projectId })) });
-  }
   
-  // Batch ingest edges
-  for (let i = 0; i < edges.length; i += BATCH_SIZE) {
-    const batch = edges.slice(i, i + BATCH_SIZE);
-    for (const edge of batch) {
+  if (freshMode) {
+    // Fresh mode: wipe everything and CREATE (original behavior)
+    console.log('  🗑️  Clearing existing project data...');
+    await neo4jService.run('MATCH (n {projectId: $projectId}) DETACH DELETE n', { projectId });
+    
+    for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
+      const batch = nodes.slice(i, i + BATCH_SIZE);
       await neo4jService.run(`
-        MATCH (s:CodeNode {nodeId: $sourceId, projectId: $projectId})
-        MATCH (t:CodeNode {nodeId: $targetId, projectId: $projectId})
-        CREATE (s)-[r:${edge.type}]->(t)
-        SET r = $props
-      `, { 
-        sourceId: (edge as any).sourceId, 
-        targetId: (edge as any).targetId, 
-        projectId,
-        props: Object.fromEntries(Object.entries(edge).filter(([k]) => !['type', 'sourceId', 'targetId'].includes(k)))
+        UNWIND $nodes AS node
+        CREATE (n:CodeNode)
+        SET n = node
+      `, { nodes: batch.map((n: any) => ({ ...n, projectId })) });
+    }
+    
+    for (let i = 0; i < edges.length; i += BATCH_SIZE) {
+      const batch = edges.slice(i, i + BATCH_SIZE);
+      for (const edge of batch) {
+        await neo4jService.run(`
+          MATCH (s:CodeNode {nodeId: $sourceId, projectId: $projectId})
+          MATCH (t:CodeNode {nodeId: $targetId, projectId: $projectId})
+          CREATE (s)-[r:${edge.type}]->(t)
+          SET r = $props
+        `, { 
+          sourceId: (edge as any).sourceId, 
+          targetId: (edge as any).targetId, 
+          projectId,
+          props: Object.fromEntries(Object.entries(edge).filter(([k]) => !['type', 'sourceId', 'targetId'].includes(k)))
+        });
+      }
+    }
+  } else {
+    // Reparse mode: MERGE nodes, delete+recreate parser edges, preserve derived edges
+    console.log('  🔄 Merging nodes (preserving derived data)...');
+    
+    // Delete only parser-created edges (non-derived) for this project
+    await neo4jService.run(`
+      MATCH (s {projectId: $projectId})-[r]->(t)
+      WHERE r.derived IS NULL OR r.derived = false
+      DELETE r
+      RETURN count(r) AS deleted
+    `, { projectId });
+    
+    // MERGE nodes by nodeId — update parser properties, preserve derived properties
+    for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
+      const batch = nodes.slice(i, i + BATCH_SIZE);
+      for (const node of batch) {
+        const props = { ...(node as any), projectId };
+        const nodeId = (node as any).nodeId || (node as any).id;
+        // Use MERGE on nodeId to preserve node identity and derived properties
+        await neo4jService.run(`
+          MERGE (n:CodeNode {nodeId: $nodeId, projectId: $projectId})
+          SET n += $props
+        `, { nodeId, projectId, props });
+      }
+      const end = Math.min(i + BATCH_SIZE, nodes.length);
+      process.stdout.write(`  Nodes ${i + 1}-${end} of ${nodes.length}\r`);
+    }
+    console.log();
+    
+    // Recreate parser edges
+    console.log('  🔄 Recreating parser edges...');
+    for (let i = 0; i < edges.length; i += BATCH_SIZE) {
+      const batch = edges.slice(i, i + BATCH_SIZE);
+      for (const edge of batch) {
+        await neo4jService.run(`
+          MATCH (s:CodeNode {nodeId: $sourceId, projectId: $projectId})
+          MATCH (t:CodeNode {nodeId: $targetId, projectId: $projectId})
+          MERGE (s)-[r:${edge.type}]->(t)
+          SET r += $props
+        `, { 
+          sourceId: (edge as any).sourceId, 
+          targetId: (edge as any).targetId, 
+          projectId,
+          props: Object.fromEntries(Object.entries(edge).filter(([k]) => !['type', 'sourceId', 'targetId'].includes(k)))
+        });
+      }
+      const end = Math.min(i + BATCH_SIZE, edges.length);
+      process.stdout.write(`  Edges ${i + 1}-${end} of ${edges.length}\r`);
+    }
+    console.log();
+    
+    // Remove stale nodes (in graph but not in parse output)
+    const parsedNodeIds = new Set(nodes.map((n: any) => (n as any).nodeId || (n as any).id));
+    const existingNodes = await queryNeo4j(
+      `MATCH (n:CodeNode {projectId: $projectId})
+       WHERE NOT n:Entrypoint AND NOT n:Field AND NOT n:UnresolvedReference
+         AND NOT n:VerificationResult AND NOT n:AnalysisScope AND NOT n:VerificationBundle
+         AND NOT n:GraphMetricsSnapshot AND NOT n:AuditCheck AND NOT n:InvariantViolation
+         AND NOT n:EvaluationRun AND NOT n:MetricResult AND NOT n:TestCase
+       RETURN n.nodeId AS nodeId`,
+      { projectId },
+    );
+    const staleNodeIds = existingNodes
+      .filter(n => n.nodeId && !parsedNodeIds.has(n.nodeId))
+      .map(n => n.nodeId);
+    
+    if (staleNodeIds.length > 0) {
+      console.log(`  🧹 Removing ${staleNodeIds.length} stale nodes...`);
+      await neo4jService.run(
+        'MATCH (n:CodeNode {projectId: $projectId}) WHERE n.nodeId IN $staleIds DETACH DELETE n',
+        { projectId, staleIds: staleNodeIds },
+      );
+    }
+    
+    // Run rebuild-derived to restore derived layers
+    console.log('\n  🔧 Rebuilding derived layers...');
+    try {
+      execSync('npm run rebuild-derived', {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+        timeout: 300_000,
       });
+    } catch (err: any) {
+      console.error('  ⚠️  rebuild-derived failed — run manually: npm run rebuild-derived');
     }
   }
   
   const ingestMs = Date.now() - startIngest;
   console.log(`  ✅ Ingested to Neo4j in ${ingestMs}ms`);
   
-  // Create project node
+  // Create/update project node
   await neo4jService.run(`
     MERGE (p:Project {projectId: $projectId})
-    SET p.name = $name, p.path = $path, p.nodeCount = $nodes, p.edgeCount = $edges,
+    SET p:CodeNode, p.name = $name, p.path = $path, p.nodeCount = $nodes, p.edgeCount = $edges,
         p.status = 'parsed', p.updatedAt = datetime()
   `, { projectId, name: projectName, path: absDir, nodes: nodes.length, edges: edges.length });
   
-  console.log(`\n✅ Project "${projectName}" parsed. Run \`codegraph enrich ${projectId}\` next.`);
+  if (freshMode) {
+    console.log(`\n✅ Project "${projectName}" parsed. Run \`codegraph enrich ${projectId}\` next.`);
+  } else {
+    console.log(`\n✅ Project "${projectName}" reparsed. Derived layers rebuilt.`);
+  }
 }
 
 async function runEnrich(projectIdArg?: string) {
@@ -600,6 +722,7 @@ program
   .option('--tsconfig <path>', 'Path to tsconfig.json (auto-detected)')
   .option('--project-id <id>', 'Custom project ID (auto-generated from path)')
   .option('--name <name>', 'Project name (from package.json or dir name)')
+  .option('--fresh', 'Wipe all project data before parsing (destructive)')
   .action(runParse);
 
 program
