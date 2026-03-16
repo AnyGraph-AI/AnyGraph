@@ -20,6 +20,10 @@ import { parseDocumentCollection, documentSchemaToIr } from '../../../src/core/a
 import { materializeIrDocument } from '../../../src/core/ir/ir-materializer.js';
 import { incrementalRecompute } from '../../../src/core/verification/incremental-recompute.js';
 import { Neo4jService } from '../../../src/storage/neo4j/neo4j.service.js';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 
 dotenv.config();
 
@@ -320,6 +324,42 @@ async function main() {
     await startWatching(p);
   }
 
+  // ========================================
+  // POST-PARSE STRUCTURAL ENRICHMENT
+  // ========================================
+  const ENRICHMENT_SCRIPTS = [
+    'create-possible-call-edges.ts',
+    'create-state-edges.ts',
+    'create-virtual-dispatch-edges.ts',
+    'create-unresolved-nodes.ts',
+  ];
+  const ENRICHMENT_DIR = nodePath.join(process.cwd(), 'src/scripts/enrichment');
+  let enrichmentRunning = false;
+
+  async function runPostParseEnrichment(projectId: string) {
+    if (enrichmentRunning) return; // skip if already running
+    enrichmentRunning = true;
+    const time = new Date().toLocaleTimeString();
+    try {
+      for (const script of ENRICHMENT_SCRIPTS) {
+        const scriptPath = nodePath.join(ENRICHMENT_DIR, script);
+        try {
+          await execFileAsync('node', ['--loader', 'ts-node/esm', scriptPath], {
+            cwd: process.cwd(),
+            timeout: 60_000, // 60s max per script
+            env: { ...process.env },
+          });
+        } catch (err: any) {
+          // Log but don't fail — enrichment is best-effort
+          console.error(`[${time}] ⚠️  ${projectId}: enrichment ${script} failed: ${err.message?.slice(0, 120)}`);
+        }
+      }
+      console.log(`[${time}] 🔬 ${projectId}: post-parse enrichment complete (${ENRICHMENT_SCRIPTS.length} scripts)`);
+    } finally {
+      enrichmentRunning = false;
+    }
+  }
+
   // logging notifications from code watchers
   client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
     const data = notification.params?.data as any;
@@ -338,6 +378,10 @@ async function main() {
         console.log(
           `[${time}] ✅ ${pid}: Graph updated: ${data.data?.nodesUpdated} nodes, ${data.data?.edgesUpdated} edges (${data.data?.elapsedMs}ms)`,
         );
+        // Structural enrichment: POSSIBLE_CALL, state edges, virtual dispatch, unresolved nodes
+        runPostParseEnrichment(pid).catch(err => {
+          if (process.env.GTH_DEBUG) console.error(`[code-watcher] enrichment error: ${err}`);
+        });
         // TC-2: Scoped temporal recompute after code change
         {
           const changedFiles = data.data?.filesChanged as string[] | undefined;

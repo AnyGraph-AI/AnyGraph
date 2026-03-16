@@ -6,11 +6,11 @@ A code intelligence graph that gives AI agents structural awareness before they 
 
 ## Current State
 
-- **10,000+ nodes, 14,000+ edges** across 8 projects
+- **~16,500 nodes, ~25,000 edges** across 8 projects (1 code + 6 plan + 1 document)
 - **4 operational layers**: Code, Plans, Claims/Reasoning, Ground Truth
-- **40 MCP tools** for agents to query, edit, and coordinate
-- **334 hermetic tests** across 30 test suites
-- **41-step governance pipeline** (done-check) with ground truth post-gate
+- **56 MCP tools** for agents to query, edit, and coordinate
+- **636 hermetic tests** across 40 test suites
+- **55-step governance pipeline** (done-check) with ground truth post-gate
 - **v0.1.0** — TypeScript parser, temporal confidence, incremental recompute
 
 ### Projects in the Graph
@@ -140,7 +140,7 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 **On CALLS edges:**
 - `conditional`, `conditionalKind`, `isAsync`, `crossFile`, `resolutionKind`
 
-## MCP Tools (40)
+## MCP Tools (56)
 
 ### Core Analysis
 | Tool | Purpose |
@@ -178,6 +178,9 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 | `recommendation_proof_status` | Recommendation truth-health |
 | `governance_metrics_status` | Governance observability snapshot |
 | `parser_contract_status` | Parser regression checks |
+| `verification_dashboard` | Unified trust/confidence overview |
+| `confidence_debt_dashboard` | Track confidence debt |
+| `import_sarif` | Import SARIF tool outputs |
 
 ### Session & Discovery
 | Tool | Purpose |

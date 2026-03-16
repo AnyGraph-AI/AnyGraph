@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **AnythingGraph** (repo: codegraph) is an MCP server that builds **universal reasoning graphs**. Give it any structured knowledge — code, documents, plans, corpora — and it parses, cross-references, generates claims, detects drift, and self-audits. Code parsing was the proof of concept. The architecture is the product.
 
-**Current state**: 63,000+ nodes, 415,000+ edges, 22 projects, 39 MCP tools, 132+ tests.
+**Current state**: ~16,500 nodes, ~25,000 edges, 8 projects, 56 MCP tools, 636 tests across 40 suites.
 
 ### Six Operational Layers
 | Layer | Status | What It Does |
