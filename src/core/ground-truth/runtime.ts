@@ -634,21 +634,24 @@ export class GroundTruthRuntime {
   ): Promise<MilestoneBriefing | null> {
     try {
       const rows = await this.neo4j.run(
-        `// Find the active milestone (specified, or first in_progress, or first planned)
+        `// Find the active milestone: compute task completion first, then pick
          MATCH (m:Milestone {projectId: $planProjectId})
          WHERE ($milestoneCode IS NOT NULL AND m.code = $milestoneCode)
             OR ($milestoneCode IS NULL AND m.status IN ['in_progress', 'planned'])
-         WITH m ORDER BY
-           CASE WHEN $milestoneCode IS NOT NULL AND m.code = $milestoneCode THEN 0
-                WHEN m.status = 'in_progress' THEN 1
-                ELSE 2 END,
-           m.code LIMIT 1
-
-         // Task completion
          OPTIONAL MATCH (t:Task)-[:PART_OF]->(m) WHERE t.projectId = $planProjectId
          WITH m,
            count(t) AS tasksTotal,
            sum(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS tasksDone
+         // Skip milestones that are effectively done (all tasks complete)
+         WHERE $milestoneCode IS NOT NULL
+            OR NOT (tasksTotal > 0 AND tasksDone = tasksTotal)
+         WITH m, tasksTotal, tasksDone ORDER BY
+           CASE WHEN $milestoneCode IS NOT NULL AND m.code = $milestoneCode THEN 0
+                WHEN m.status = 'in_progress' THEN 1
+                // Deprioritize deferred/parking-lot milestones
+                WHEN m.code STARTS WITH 'DF' OR m.code CONTAINS '-D' OR toLower(m.name) CONTAINS 'deferred' THEN 3
+                ELSE 2 END,
+           m.code LIMIT 1
 
          // Inputs (DEPENDS_ON forward — what this milestone depends on)
          OPTIONAL MATCH (m)-[:DEPENDS_ON]->(dep:Milestone)
@@ -672,10 +675,17 @@ export class GroundTruthRuntime {
 
       const r = rows[0] as any;
 
-      // Query hazards from open hypotheses
+      // Query hazards from open hypotheses, deduplicated by finding pattern
       const hazardRows = await this.neo4j.run(
         `MATCH (h:Hypothesis {status: 'open'})
-         RETURN h.name AS checkName, 'warning' AS severity, h.description AS message
+         WITH h,
+           // Extract the base finding name (strip consecutive count suffix)
+           CASE WHEN h.name CONTAINS '(' 
+             THEN trim(substring(h.name, 0, apoc.text.indexOf(h.name, '(')))
+             ELSE h.name END AS baseName
+         WITH baseName, max(h.name) AS checkName, 'warning' AS severity,
+              max(h.description) AS message
+         RETURN checkName, severity, message
          LIMIT 10`,
       );
 
