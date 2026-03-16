@@ -21,7 +21,7 @@ dotenv.config({ path: join(rootDir, '.env'), quiet: true });
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
-import { MCP_SERVER_CONFIG, MESSAGES } from './constants.js';
+import { MCP_SERVER_CONFIG, MESSAGES, TOOL_NAMES } from './constants.js';
 import { performIncrementalParse } from './handlers/incremental-parse.handler.js';
 import { initializeServices } from './service-init.js';
 import { watchManager } from './services/watch-manager.js';
@@ -67,7 +67,7 @@ const startServer = async (): Promise<void> => {
 
   // Register all tools
   registerAllTools(server);
-  await debugLog('Tools registered', { toolCount: 15 });
+  await debugLog('Tools registered', { toolCount: Object.keys(TOOL_NAMES).length });
 
   // Configure watch manager with incremental parse handler and MCP server
   watchManager.setIncrementalParseHandler(performIncrementalParse);

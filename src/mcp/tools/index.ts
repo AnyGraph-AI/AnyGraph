@@ -4,6 +4,7 @@
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { TOOL_NAMES } from '../constants.js';
 
 import { createCheckParseStatusTool } from './check-parse-status.tool.js';
 import { createDetectDeadCodeTool } from './detect-dead-code.tool.js';
@@ -174,4 +175,14 @@ export const registerAllTools = (server: McpServer): void => {
 
   // Register verification dashboard tools (trust/confidence layer)
   createVerificationDashboardTools(server);
+
+  // Runtime parity check: every TOOL_NAMES entry must be registered
+  const registeredNames = new Set((server as any)._registeredTools?.keys?.() ?? []);
+  if (registeredNames.size > 0) {
+    const expected = Object.values(TOOL_NAMES);
+    const missing = expected.filter(name => !registeredNames.has(name));
+    if (missing.length > 0) {
+      console.error(`[MCP] ⚠️ TOOL_NAMES/registration mismatch: ${missing.length} tools in TOOL_NAMES but not registered: ${missing.join(', ')}`);
+    }
+  }
 };
