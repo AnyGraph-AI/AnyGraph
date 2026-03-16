@@ -614,7 +614,53 @@ export class TypeScriptParser {
 
       for (const namedImport of importDecl.getNamedImports()) {
         try {
-          const symbol = namedImport.getSymbol();
+          let symbol = namedImport.getSymbol();
+
+          // ESM .js → .ts fallback: if symbol resolution fails and specifier ends with .js,
+          // manually resolve to the .ts source file and look up the exported symbol there.
+          if (!symbol && moduleSpecifier.endsWith('.js')) {
+            const tsSpecifier = moduleSpecifier.replace(/\.js$/, '.ts');
+            const resolvedDir = path.dirname(sourceFile.getFilePath());
+            const candidatePath = path.resolve(resolvedDir, tsSpecifier);
+            const targetSf = this.project.getSourceFile(candidatePath);
+            if (targetSf) {
+              const exportedName = namedImport.getName();
+              // Try to find the exported symbol in the target file
+              const targetExportSymbol = targetSf.getExportedDeclarations().get(exportedName);
+              if (targetExportSymbol && targetExportSymbol.length > 0) {
+                const decl = targetExportSymbol[0];
+                const targetFilePath = decl.getSourceFile().getFilePath();
+                const targetName = exportedName;
+                const isTypeOnly = namedImport.isTypeOnly() || importDecl.isTypeOnly();
+
+                const kindName = decl.getKindName();
+                let targetType = CoreNodeType.FUNCTION_DECLARATION;
+                if (kindName === 'ClassDeclaration') targetType = CoreNodeType.CLASS_DECLARATION;
+                else if (kindName === 'InterfaceDeclaration') targetType = CoreNodeType.INTERFACE_DECLARATION;
+                else if (kindName === 'TypeAliasDeclaration') targetType = CoreNodeType.TYPE_ALIAS;
+                else if (kindName === 'VariableDeclaration') targetType = CoreNodeType.VARIABLE_DECLARATION;
+                else if (kindName === 'EnumDeclaration') targetType = CoreNodeType.CLASS_DECLARATION;
+
+                this.deferredEdges.push({
+                  edgeType: CoreEdgeType.RESOLVES_TO,
+                  sourceNodeId: importNodeId,
+                  targetName,
+                  targetType,
+                  targetFilePath,
+                  callContext: {
+                    receiverExpression: moduleSpecifier,
+                    receiverType: isTypeOnly ? 'type-only' : 'runtime',
+                    lineNumber: namedImport.getStartLineNumber(),
+                    isAsync: false,
+                    argumentCount: 0,
+                    conditional: false,
+                  },
+                });
+                continue; // Successfully resolved via .js → .ts fallback
+              }
+            }
+          }
+
           if (!symbol) continue;
 
           const aliased = symbol.getAliasedSymbol?.() || symbol;
