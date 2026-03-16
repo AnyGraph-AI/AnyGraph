@@ -81,6 +81,8 @@ async function main() {
       'enrich:composite-risk',
       'enrich:evaluated-edges',
       'enrich:flags-edges',
+      'enrich:entrypoint-edges',
+      'enrich:state-fields',
     ];
 
     for (const script of scripts) {
