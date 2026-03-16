@@ -78,14 +78,14 @@ export async function computeConfidenceDebt(
      WHERE r.timeConsistencyFactor IS NOT NULL
      SET r.requiredConfidence = coalesce(r.requiredConfidence, $defaultRequired),
          r.effectiveConfidence = coalesce(r.effectiveConfidence,
-           r.timeConsistencyFactor * coalesce(r.retroactivePenalty, 1.0)),
+           coalesce(r.confidence, 0.5) * r.timeConsistencyFactor * coalesce(r.retroactivePenalty, 1.0)),
          r.confidenceDebt = CASE
            WHEN coalesce(r.requiredConfidence, $defaultRequired) >
                 coalesce(r.effectiveConfidence,
-                  r.timeConsistencyFactor * coalesce(r.retroactivePenalty, 1.0))
+                  coalesce(r.confidence, 0.5) * r.timeConsistencyFactor * coalesce(r.retroactivePenalty, 1.0))
            THEN coalesce(r.requiredConfidence, $defaultRequired) -
                 coalesce(r.effectiveConfidence,
-                  r.timeConsistencyFactor * coalesce(r.retroactivePenalty, 1.0))
+                  coalesce(r.confidence, 0.5) * r.timeConsistencyFactor * coalesce(r.retroactivePenalty, 1.0))
            ELSE 0.0
          END
      RETURN count(r) AS stamped`,

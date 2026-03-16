@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "runId": "hygiene-foundation:proj_c0d3e9a1f200:1773624233285",
+  "projectId": "proj_c0d3e9a1f200",
+  "schemaVersion": "1.0.0",
+  "profileVersion": "v1",
+  "failureClasses": [
+    "regression",
+    "security_issue",
+    "reliability_issue",
+    "governance_drift"
+  ],
+  "controls": [
+    "B1",
+    "B2",
+    "B3",
+    "B6",
+    "B7",
+    "A2",
+    "A3",
+    "A6"
+  ],
+  "requiredEvidenceEntities": [
+    "Project",
+    "VerificationRun",
+    "GateDecision",
+    "CommitSnapshot",
+    "Artifact",
+    "DocumentWitness"
+  ],
+  "timestamp": "2026-03-16T01:23:53.285Z"
+}

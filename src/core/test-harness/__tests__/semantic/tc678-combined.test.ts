@@ -79,7 +79,7 @@ describe('TC-6: Anti-Gaming', () => {
   it('verifyAntiGaming fails when source family exceeds cap', async () => {
     const neo4j = new MockNeo4j();
     neo4j.setRunResult('avg(r.effectiveConfidence)', [
-      { fam: 'done-check', avgConf: 0.85, cnt: 10 },
+      { fam: 'done-check', avgConf: 0.95, cnt: 10 },
     ]);
     neo4j.setRunResult('sourceFamily = \'untrusted\'', [{ cnt: 0 }]);
 

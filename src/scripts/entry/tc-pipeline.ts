@@ -39,6 +39,15 @@ async function getCodeProjectIds(neo4j: Neo4jService): Promise<string[]> {
   return rows.map(r => r.id as string).filter(Boolean);
 }
 
+/** Returns all project IDs (code + plan). Used by TC-4 explainability which
+ *  needs claim-evidence edges that live on plan projects. */
+async function getAllProjectIds(neo4j: Neo4jService): Promise<string[]> {
+  const rows = await neo4j.run(
+    `MATCH (p:Project) WHERE p.projectId IS NOT NULL RETURN p.projectId AS id`,
+  );
+  return rows.map(r => r.id as string).filter(Boolean);
+}
+
 async function runRecompute(neo4j: Neo4jService) {
   const pids = await getCodeProjectIds(neo4j);
   console.log(`[tc:recompute] ${pids.length} projects`);
@@ -120,8 +129,8 @@ async function runAntiGaming(neo4j: Neo4jService) {
 }
 
 async function runExplainability(neo4j: Neo4jService) {
-  const pids = await getCodeProjectIds(neo4j);
-  console.log(`[tc:explain] ${pids.length} projects`);
+  const pids = await getAllProjectIds(neo4j);
+  console.log(`[tc:explain] ${pids.length} projects (all — claim-evidence edges live on plan projects)`);
 
   for (const pid of pids) {
     const result = await discoverExplainabilityPaths(neo4j, pid);

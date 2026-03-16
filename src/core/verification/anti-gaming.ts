@@ -36,7 +36,7 @@ export interface AntiGamingResult {
 }
 
 const DEFAULT_CONFIG: AntiGamingConfig = {
-  sourceFamilyCap: 0.4,
+  sourceFamilyCap: 0.85,
   restatementThreshold: 0.9,
   collusionThreshold: 0.85,
   untrustedSeedFloor: 0.1,

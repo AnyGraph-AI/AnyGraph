@@ -128,8 +128,14 @@ export async function runCalibration(
     `MATCH (r:VerificationRun {projectId: $projectId})
      WHERE r.status IN ['satisfies', 'violates']
      RETURN r.id AS id,
-            coalesce(r.effectiveConfidence, 0.5) AS prodConf,
-            coalesce(r.shadowEffectiveConfidence, 0.5) AS shadowConf,
+            CASE WHEN r.status = 'satisfies'
+              THEN coalesce(r.effectiveConfidence, 0.5)
+              ELSE 1.0 - coalesce(r.effectiveConfidence, 0.5)
+            END AS prodConf,
+            CASE WHEN r.status = 'satisfies'
+              THEN coalesce(r.shadowEffectiveConfidence, 0.5)
+              ELSE 1.0 - coalesce(r.shadowEffectiveConfidence, 0.5)
+            END AS shadowConf,
             CASE WHEN r.status = 'satisfies' THEN 1 ELSE 0 END AS outcome`,
     { projectId },
   );
