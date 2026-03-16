@@ -85,7 +85,10 @@ function computeECE(data: ConfidenceOutcome[], bins: number): { ece: number; buc
   for (let i = 0; i < bins; i++) {
     const binStart = i * binWidth;
     const binEnd = (i + 1) * binWidth;
-    const inBin = data.filter(d => d.confidence >= binStart && d.confidence < binEnd);
+    const inBin = data.filter(d => {
+      const idx = Math.min(Math.floor(d.confidence * bins), bins - 1);
+      return idx === i;
+    });
 
     if (inBin.length === 0) {
       buckets.push({ binStart, binEnd, avgConfidence: 0, avgOutcome: 0, count: 0 });

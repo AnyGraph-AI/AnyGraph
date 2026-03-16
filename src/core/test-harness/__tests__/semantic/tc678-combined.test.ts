@@ -164,28 +164,27 @@ describe('TC-7: Calibration', () => {
     // 10 buckets
     expect(result.production.buckets).toHaveLength(10);
 
-    // ECE should be non-trivial for this data
-    expect(result.production.ece).toBeGreaterThan(0);
-    expect(result.production.ece).toBeLessThan(1);
+    // ECE = (1/3)*|0.3-0| + (1/3)*|0.8-1| + (1/3)*|0.9-1| = 0.1+0.0667+0.0333 = 0.2
+    expect(result.production.ece).toBeCloseTo(0.2, 3);
 
-    // NOTE: JS floating point means binStart = i * 0.1 is not exact.
-    // e.g., 3 * 0.1 = 0.30000000000000004, so 0.3 < 0.30000000000000004
-    // and falls into bin 2 ([0.2, 0.3)) not bin 3 ([0.3, 0.4)).
-    // This is a known FP issue in computeECE — not fixing production code here.
+    // Check populated bins: bin3 [0.3,0.4), bin8 [0.8,0.9), bin9 [0.9,1.0)
+    const bin3 = result.production.buckets[3]; // 0.3 falls in [0.3, 0.4)
+    expect(bin3.count).toBe(1);
+    expect(bin3.avgConfidence).toBeCloseTo(0.3, 3);
+    expect(bin3.avgOutcome).toBe(0);
 
-    // Find which bins got populated (avoid hardcoding bin indices due to FP)
-    const populatedBins = result.production.buckets.filter(b => b.count > 0);
-    expect(populatedBins).toHaveLength(3); // 3 data points, each in a different bin
+    const bin8 = result.production.buckets[8]; // 0.8 falls in [0.8, 0.9)
+    expect(bin8.count).toBe(1);
+    expect(bin8.avgConfidence).toBeCloseTo(0.8, 3);
+    expect(bin8.avgOutcome).toBe(1);
 
-    // Verify bin structure: avgConfidence close to data points
-    const avgConfs = populatedBins.map(b => b.avgConfidence).sort();
-    expect(avgConfs[0]).toBeCloseTo(0.3, 1);
-    expect(avgConfs[1]).toBeCloseTo(0.8, 1);
-    expect(avgConfs[2]).toBeCloseTo(0.9, 1);
+    const bin9 = result.production.buckets[9]; // 0.9 falls in [0.9, 1.0)
+    expect(bin9.count).toBe(1);
+    expect(bin9.avgConfidence).toBeCloseTo(0.9, 3);
 
     // Empty bins have count 0
-    const emptyBins = result.production.buckets.filter(b => b.count === 0);
-    expect(emptyBins).toHaveLength(7); // 10 - 3 = 7
+    expect(result.production.buckets[0].count).toBe(0);
+    expect(result.production.buckets[5].count).toBe(0);
   });
 
   it('detects promotion eligibility', async () => {
