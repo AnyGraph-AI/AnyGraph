@@ -11,5 +11,6 @@ export default defineConfig({
       'dist/**',
       'node_modules/**',
     ],
+    globalSetup: './src/core/test-harness/vitest-global-teardown.ts',
   },
 });

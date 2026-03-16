@@ -44,21 +44,61 @@ async function main() {
   }
 
   const scanMs = Date.now() - startScan;
-  console.log(`[verification:scan] Scan complete (${scanMs}ms)`);
+  console.log(`[verification:scan] Semgrep complete (${scanMs}ms)`);
 
-  console.log('[verification:scan] Importing SARIF...');
-  const bundle = await importSarifToVerificationBundle({
+  console.log('[verification:scan] Importing Semgrep SARIF...');
+  const semgrepBundle = await importSarifToVerificationBundle({
     sarifPath,
     projectId,
     toolFilter: 'semgrep',
   });
 
-  const result = await ingestVerificationFoundation(bundle);
+  const semgrepResult = await ingestVerificationFoundation(semgrepBundle);
+  console.log(`[verification:scan] Semgrep: ${semgrepResult.runsUpserted} VRs, ${semgrepResult.scopesUpserted} scopes`);
 
-  console.log(`[verification:scan] Imported: ${result.runsUpserted} VRs, ${result.scopesUpserted} scopes, ${result.adjudicationsUpserted} adjudications, ${result.pathWitnessesUpserted} witnesses (${result.hasScopeEdges} HAS_SCOPE edges)`);
-
-  // Clean up SARIF file
+  // Clean up Semgrep SARIF
   try { unlinkSync(sarifPath); } catch { /* ignore */ }
+
+  // --- ESLint scan ---
+  const eslintSarifPath = resolve(ROOT, 'eslint-results.sarif');
+  console.log('[verification:scan] Running ESLint...');
+  const startEslint = Date.now();
+
+  try {
+    execSync(
+      `npx eslint src/ ` +
+      `--rule 'prettier/prettier: off' ` +
+      `--rule 'prefer-arrow/prefer-arrow-functions: off' ` +
+      `--rule 'import/order: off' ` +
+      `--rule '@typescript-eslint/prefer-nullish-coalescing: off' ` +
+      `--rule '@typescript-eslint/prefer-optional-chain: off' ` +
+      `-f @microsoft/eslint-formatter-sarif -o ${eslintSarifPath}`,
+      { cwd: ROOT, timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+  } catch (err: any) {
+    // ESLint exits non-zero when it finds issues — expected
+    if (!existsSync(eslintSarifPath)) {
+      console.warn('[verification:scan] ESLint failed to produce SARIF output, skipping');
+    }
+  }
+
+  if (existsSync(eslintSarifPath)) {
+    const eslintMs = Date.now() - startEslint;
+    console.log(`[verification:scan] ESLint complete (${eslintMs}ms)`);
+
+    console.log('[verification:scan] Importing ESLint SARIF...');
+    const eslintBundle = await importSarifToVerificationBundle({
+      sarifPath: eslintSarifPath,
+      projectId,
+      toolFilter: 'any',
+    });
+
+    const eslintResult = await ingestVerificationFoundation(eslintBundle);
+    console.log(`[verification:scan] ESLint: ${eslintResult.runsUpserted} VRs, ${eslintResult.scopesUpserted} scopes`);
+
+    // Clean up ESLint SARIF
+    try { unlinkSync(eslintSarifPath); } catch { /* ignore */ }
+  }
 }
 
 main().catch(err => {

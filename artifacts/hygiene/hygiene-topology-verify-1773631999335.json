@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "projectId": "proj_c0d3e9a1f200",
+  "filesScanned": 18854,
+  "findingsCount": 0,
+  "findingsBySubtype": {},
+  "exceptionPatterns": [],
+  "maxPathLength": 180,
+  "maxSourceFileBytes": 1048576,
+  "sampleFindings": []
+}
