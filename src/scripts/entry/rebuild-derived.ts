@@ -78,6 +78,7 @@ async function main() {
       'enrich:claim-project',
       'enrich:evidence-project',
       'enrich:composite-risk',
+      'enrich:evaluated-edges',
     ];
 
     for (const script of scripts) {
