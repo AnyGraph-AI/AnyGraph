@@ -12,7 +12,7 @@ import { resolve } from 'node:path';
 const ROOT = resolve(import.meta.dirname, '../../../../..');
 
 describe('TC Pipeline Orchestration', () => {
-  it('tc:recompute runs without error', () => {
+  it('tc:recompute runs without error', { timeout: 30_000 }, () => {
     const output = execSync(
       `npx tsx src/scripts/entry/tc-pipeline.ts recompute`,
       { cwd: ROOT, timeout: 30000, encoding: 'utf-8' },

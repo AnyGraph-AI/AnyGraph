@@ -73,9 +73,11 @@ describe('[GC-1] Git Frequency Signal Repair', () => {
       expect(churn).toBe(0);
     });
 
-    it('caps at 1.0 when changed exceeds total (full rewrite)', () => {
+    it('does NOT cap at 1.0 — raw ratio preserves variance', () => {
+      // 500 lines changed in a 200-line file = 2.5× churn (heavy rewriting)
       const churn = computeChurnRelative(500, 200);
-      expect(churn).toBeLessThanOrEqual(1.0);
+      expect(churn).toBeCloseTo(2.5, 4);
+      expect(churn).toBeGreaterThan(1.0);
     });
 
     it('returns 0 when no lines changed', () => {
@@ -112,16 +114,22 @@ describe('[GC-1] Git Frequency Signal Repair', () => {
       expect(stats.commitCountRaw).toBeGreaterThanOrEqual(stats.commitCountWindowed);
     });
 
-    it('churnRelative is between 0 and 1 inclusive', () => {
-      const stats: GitFileStats = {
+    it('churnRelative is >= 0 (uncapped — can exceed 1.0 for heavily rewritten files)', () => {
+      const stable: GitFileStats = {
         commitCountRaw: 10,
         commitCountWindowed: 5,
-        churnRelative: 0.5,
+        churnRelative: 0.3,
+        windowPeriod: '6m',
+      };
+      const rewritten: GitFileStats = {
+        commitCountRaw: 50,
+        commitCountWindowed: 40,
+        churnRelative: 2.5,
         windowPeriod: '6m',
       };
 
-      expect(stats.churnRelative).toBeGreaterThanOrEqual(0);
-      expect(stats.churnRelative).toBeLessThanOrEqual(1.0);
+      expect(stable.churnRelative).toBeGreaterThanOrEqual(0);
+      expect(rewritten.churnRelative).toBeGreaterThan(1.0);
     });
   });
 

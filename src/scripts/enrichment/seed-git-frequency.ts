@@ -79,11 +79,17 @@ export function parseGitNumstat(numstatOutput: string): Map<string, { added: num
 }
 
 /**
- * Compute churn relative: (linesChanged / totalLines), capped at 1.0.
+ * Compute churn relative: linesChanged / totalLines (uncapped).
+ * 
+ * A value of 0.3 = 30% of file changed. A value of 2.1 = total line churn
+ * was 2.1× the file's current size (heavy rewriting across multiple commits).
+ * 
+ * NOT capped at 1.0 — raw ratio preserves variance for ranking.
+ * "Normalize only for ranking/display, never for storage."
  */
 export function computeChurnRelative(linesChanged: number, totalLines: number): number {
   if (totalLines <= 0) return 0;
-  return Math.min(linesChanged / totalLines, 1.0);
+  return linesChanged / totalLines;
 }
 
 // --------------- Neo4j enrichment (main) ---------------

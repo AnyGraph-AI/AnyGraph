@@ -15,8 +15,10 @@ import { describe, it, expect } from 'vitest';
 
 import {
   extractAnalyzedPairs,
+  extractScopeCoveragePairs,
   stripFileUri,
   type AnalyzedPair,
+  type ScopeCoveragePair,
 } from '../../../../scripts/enrichment/create-analyzed-edges.js';
 
 // ------------------------------------------------------------------
@@ -108,6 +110,49 @@ describe('[GC-2] extractAnalyzedPairs', () => {
 
     const pairs = extractAnalyzedPairs(scopes, sourceFilePaths);
     expect(pairs).toHaveLength(0);
+  });
+});
+
+// ------------------------------------------------------------------
+// extractScopeCoveragePairs: dedup by (sourceFamily, filePath)
+// ------------------------------------------------------------------
+describe('[GC-2] extractScopeCoveragePairs — scope-level dedup', () => {
+  it('deduplicates: 197 VRs from same tool → 1 pair per file', () => {
+    // Simulate ESLint: 3 VRs all scanning same 2 files
+    const scopes = [
+      { sourceFamily: 'ESLint', includedPaths: ['file:///a.ts', 'file:///b.ts'] },
+      { sourceFamily: 'ESLint', includedPaths: ['file:///a.ts', 'file:///b.ts'] },
+      { sourceFamily: 'ESLint', includedPaths: ['file:///a.ts', 'file:///b.ts'] },
+    ];
+    const sourceFilePaths = new Set(['/a.ts', '/b.ts']);
+
+    const pairs = extractScopeCoveragePairs(scopes, sourceFilePaths);
+    // Should be 2 (one per file), NOT 6 (one per VR×file)
+    expect(pairs).toHaveLength(2);
+    expect(pairs).toContainEqual({ sourceFamily: 'ESLint', filePath: '/a.ts' });
+    expect(pairs).toContainEqual({ sourceFamily: 'ESLint', filePath: '/b.ts' });
+  });
+
+  it('different tool families get separate pairs', () => {
+    const scopes = [
+      { sourceFamily: 'ESLint', includedPaths: ['file:///a.ts'] },
+      { sourceFamily: 'Semgrep', includedPaths: ['file:///a.ts'] },
+    ];
+    const sourceFilePaths = new Set(['/a.ts']);
+
+    const pairs = extractScopeCoveragePairs(scopes, sourceFilePaths);
+    expect(pairs).toHaveLength(2);
+    expect(pairs.map(p => p.sourceFamily).sort()).toEqual(['ESLint', 'Semgrep']);
+  });
+
+  it('filters out paths not in SourceFile set', () => {
+    const scopes = [
+      { sourceFamily: 'ESLint', includedPaths: ['file:///a.ts', 'file:///deleted.ts'] },
+    ];
+    const sourceFilePaths = new Set(['/a.ts']);
+
+    const pairs = extractScopeCoveragePairs(scopes, sourceFilePaths);
+    expect(pairs).toHaveLength(1);
   });
 });
 
