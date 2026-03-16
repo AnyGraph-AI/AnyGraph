@@ -5,6 +5,7 @@ export default defineConfig({
     include: [
       'tests/**/*.test.ts',
       'src/**/*.test.ts',
+      'src/**/*.spec-test.ts',
     ],
     exclude: [
       'dist/**',
