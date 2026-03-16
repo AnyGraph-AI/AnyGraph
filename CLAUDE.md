@@ -25,7 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Self-audit**: Graph generates verification questions, agents answer, graph updates itself
 - **Hermetic testing**: Frozen clock, network guard, ephemeral graph, seeded RNG — all tests are deterministic
 
-Full architecture plan: `plans/codegraph/MULTI_LANGUAGE_ASSESSMENT.md`
+Full architecture plan: `docs/MULTI_LANGUAGE_ASSESSMENT.md`
 
 ## Build & Development Commands
 

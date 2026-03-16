@@ -1,11 +1,15 @@
 #!/bin/bash
-# Run ALL post-ingest enrichment passes after parse-and-ingest.ts
-# Usage: cd codegraph && bash post-ingest-all.sh
+# LEGACY: Run ALL post-ingest enrichment passes after parse-and-ingest.ts
 # 
+# PREFER: npm run done-check (55-step governance pipeline that includes enrichment)
+# 
+# This script predates the npm enrichment scripts (enrich:*) and done-check pipeline.
+# It still works but paths assume running from the repo root.
+#
+# Usage: cd codegraph && bash scripts/post-ingest-all.sh
 # Set STRUCTURAL_ONLY=true to skip embeddings (no OpenAI API key needed).
-# Everything except search_codebase and NL→Cypher works without embeddings.
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 echo "=== 1/17: Risk scoring + edge classification ==="
 python3 post-ingest-enrich.py

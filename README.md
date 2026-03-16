@@ -1,40 +1,44 @@
 # AnythingGraph
 
-A code intelligence graph that gives AI agents structural awareness before they edit. Parses TypeScript into Neo4j, tracks plan tasks with cross-domain evidence, detects drift, and self-audits. Agents query the graph to see blast radius, risk, dependencies, and what breaks.
+A universal reasoning graph that gives AI agents structural awareness before they edit. Give it any structured knowledge — code, documents, plans — and it parses, cross-references, generates claims, detects drift, and self-audits.
 
-**The thesis:** Understanding lives in connections, not individual files. A function's risk depends on who calls it, what plan tasks reference it, what state it mutates, and how often it changes. AnyGraph makes all of that queryable.
+**The thesis:** Understanding lives in connections, not individual files. A function's risk depends on who calls it, what plan tasks reference it, what state it mutates, and how often it changes. AnythingGraph makes all of that queryable.
 
 ## Current State
 
-- **~16,500 nodes, ~25,000 edges** across 8 projects (1 code + 6 plan + 1 document)
-- **4 operational layers**: Code, Plans, Claims/Reasoning, Ground Truth
+- **~16,500 nodes, ~25,000 edges** across 8 projects (1 code, 6 plan, 1 document)
+- **4 operational layers:** Code, Plans, Claims/Reasoning, Ground Truth
 - **56 MCP tools** for agents to query, edit, and coordinate
-- **636 hermetic tests** across 40 test suites
-- **55-step governance pipeline** (done-check) with ground truth post-gate
+- **636 tests** across 40 suites (hermetic, deterministic)
+- **55-step governance pipeline** (`done-check`) with ground truth post-gate
 - **v0.1.0** — TypeScript parser, temporal confidence, incremental recompute
 
-### Projects in the Graph
+## Projects in the Graph
 
 | Domain | Projects | What's In Them |
 |--------|----------|----------------|
-| **Code** | CodeGraph (self-graph) | TypeScript AST → nodes/edges, risk scoring, blast radius |
-| **Plans** | codegraph, plan-graph, runtime-graph, governance-org, hygiene-governance, hygiene-ai | Task/Milestone/Sprint tracking, auto-completion detection |
-| **Claims** | Claims, evidence, hypotheses | Cross-layer synthesis, self-audit verdicts |
+| Code | CodeGraph (self-graph) | TypeScript AST → nodes/edges, risk scoring, blast radius |
+| Plans | codegraph, plan-graph, runtime-graph, governance-org, hygiene-governance, hygiene-ai | Task/Milestone/Sprint tracking, auto-completion detection |
+| Document | IR scaffold | Document adapter proof-of-concept |
+| Claims | (cross-cutting) | Cross-layer synthesis, self-audit verdicts, hypotheses |
 
 ## Quick Start
 
 ### Prerequisites
+
 - Node.js 22+
 - Neo4j 5.x (native install, not Docker)
 - `npm install` in this directory
 
 ### Start Neo4j
+
 ```bash
 sudo neo4j start
+# Auth: neo4j / codegraph — bolt://localhost:7687
 ```
-Auth: `neo4j` / `codegraph` — `bolt://localhost:7687`
 
 ### Parse a TypeScript project
+
 ```bash
 # Parse and ingest to Neo4j
 npx tsx src/scripts/entry/parse-and-ingest.ts
@@ -42,20 +46,40 @@ npx tsx src/scripts/entry/parse-and-ingest.ts
 # Parse CodeGraph itself (self-graph)
 npx tsx src/scripts/entry/parse-and-ingest-self.ts
 
-# Run 17-step post-ingest enrichment
-bash post-ingest-all.sh
+# Run enrichment (risk scoring, temporal coupling, provenance, etc.)
+npm run enrich:temporal-coupling
+npm run enrich:author-ownership
+npm run enrich:git-frequency
+npm run enrich:provenance
 ```
 
 ### Query the graph
+
 ```bash
 # List all projects
-cypher-shell -u neo4j -p codegraph "MATCH (p:Project) RETURN p.name, p.projectId, p.nodeCount, p.edgeCount"
+cypher-shell -u neo4j -p codegraph \
+  "MATCH (p:Project) RETURN p.displayName, p.projectId, p.nodeCount, p.edgeCount"
 
 # Find riskiest functions
-cypher-shell -u neo4j -p codegraph "MATCH (f:CodeNode {projectId: 'proj_c0d3e9a1f200'}) WHERE f.riskTier IN ['CRITICAL', 'HIGH'] RETURN f.name, f.riskTier, f.kind ORDER BY f.riskLevel DESC LIMIT 10"
+cypher-shell -u neo4j -p codegraph \
+  "MATCH (f:CodeNode {projectId: 'proj_c0d3e9a1f200'})
+   WHERE f.riskTier IN ['CRITICAL', 'HIGH']
+   RETURN f.name, f.riskTier, f.kind
+   ORDER BY f.riskLevel DESC LIMIT 10"
+```
+
+### Run the governance pipeline
+
+```bash
+# Full 55-step done-check (build → enrich → verify → integrity)
+npm run done-check
+
+# Run tests
+npx vitest run
 ```
 
 ### Start the MCP server
+
 ```bash
 node dist/mcp/mcp.server.js
 
@@ -72,58 +96,111 @@ node dist/mcp/mcp.server.js
 
 ## Graph Schema
 
-### Node Label Model
+### Node Labels
 
-Code nodes use a **multi-label model**: every code declaration is a `CodeNode` with additional labels for language (`TypeScript`) and kind (`Function`, `Method`, `Class`, etc.). The `kind` property provides the discriminator.
+**Code nodes** use a multi-label model: every code declaration is a `CodeNode` with additional labels for language (`TypeScript`) and kind (`Function`, `Method`, `Class`, etc.).
 
-| Label Pattern | What It Represents |
-|--------------|-------------------|
+| Label | What It Represents |
+|-------|-------------------|
 | `CodeNode:TypeScript:Function` | Named function |
 | `CodeNode:TypeScript:Method` | Class method |
 | `CodeNode:TypeScript:Class` | Class declaration |
 | `CodeNode:TypeScript:Interface` | Interface declaration |
 | `CodeNode:TypeScript:Variable` | const/let/var |
-| `CodeNode:TypeScript:TypeAlias` | `type X = ...` |
+| `CodeNode:TypeScript:TypeAlias` | type X = ... |
 | `CodeNode:TypeScript:Property` | Class property |
 | `CodeNode:TypeScript:Parameter` | Function parameter |
 | `CodeNode:TypeScript:Import` | Import statement |
 | `CodeNode:TypeScript:Enum` | Enum declaration |
 | `CodeNode:TypeScript:Constructor` | Class constructor |
-| `CodeNode:SourceFile:TypeScript` | A `.ts` file |
+| `CodeNode:SourceFile:TypeScript` | A .ts file |
 | `CodeNode:Entrypoint` | Framework registration (command, callback, event) |
-| `CodeNode:Task` | Plan task node |
-| `CodeNode:Milestone` | Plan milestone node |
-| `CodeNode:Decision` | Plan decision node |
-| `CodeNode:VerificationRun` | Governance verification run |
-| `CodeNode:GateDecision` | Gate pass/fail decision |
-| `CodeNode:GovernanceMetricSnapshot` | Governance metrics snapshot |
+| `Author` | Git author |
+| `UnresolvedReference` | Import that couldn't be resolved to a graph node |
+
+**Plan nodes** (standalone labels, not CodeNode subtypes):
+
+| Label | What It Represents |
+|-------|-------------------|
+| `PlanProject` | Top-level plan project |
+| `Milestone` | Plan milestone with spec text |
+| `Sprint` | Time-boxed sprint |
+| `Task` | Individual work item with status |
+| `Decision` | Architectural decision record |
+
+**Verification & governance nodes:**
+
+| Label | What It Represents |
+|-------|-------------------|
 | `Project` | Top-level project with stats |
+| `VerificationRun` | SARIF tool output (Semgrep, ESLint, done-check) |
+| `AnalysisScope` | Scope of a verification run |
+| `InfluencePath` | Transitive dependency path for explainability |
+| `AdvisoryGateDecision` | Gate pass/fail decision |
+| `PromotionDecision` | TC-8 promotion verdict |
+| `GateDecision` | Legacy gate decision |
+| `GovernanceMetricSnapshot` | Point-in-time governance metrics |
 | `IntegritySnapshot` | Graph integrity snapshot |
 | `MetricResult` | Single metric value |
+| `MetricDefinition` | Metric definition |
+| `ParserContract` | Parser regression contract |
+| `InvariantProof` | Proof of invariant satisfaction |
+
+**Claims & reasoning nodes:**
+
+| Label | What It Represents |
+|-------|-------------------|
 | `Claim` | Domain-agnostic assertion with evidence |
-| `Hypothesis` | Auto-generated investigation target |
 | `Evidence` | Supporting/contradicting evidence for claims |
-| `Verse` / `Chapter` / `Book` | Corpus text nodes (when corpus domain loaded) |
-| `IRNode:Entity` / `IRNode:Site` / `IRNode:Artifact` | Intermediate representation nodes |
-| `IntegrityFindingObservation` | Ground truth integrity check result |
+| `Hypothesis` | Auto-generated investigation target |
+
+**Ground truth nodes:**
+
+| Label | What It Represents |
+|-------|-------------------|
+| `SessionBookmark` | Agent session state (task, milestone, lease) |
+| `IntegrityFindingDefinition` | Integrity check definition |
+| `IntegrityFindingObservation` | Integrity check result |
 | `Discrepancy` | Delta between expected and observed state |
+
+**Hygiene governance nodes:**
+
+| Label | What It Represents |
+|-------|-------------------|
+| `HygieneDomain` | Governance domain (foundation, topology, ownership) |
+| `HygieneControl` | Individual hygiene control |
+| `HygieneViolation` | Hygiene violation instance |
+| `HygieneMetricSnapshot` | Hygiene metrics snapshot |
+
+**IR nodes (intermediate representation):**
+
+| Label | What It Represents |
+|-------|-------------------|
+| `IRNode:Entity` / `IRNode:Site` / `IRNode:Artifact` | Parser-agnostic IR nodes |
+| `DocumentCollection` / `DocumentNode` / `DocumentWitness` | Document adapter nodes |
 
 ### Edge Types
 
 **Code structure:**
-`CALLS`, `CONTAINS`, `IMPORTS`, `RESOLVES_TO`, `HAS_PARAMETER`, `HAS_MEMBER`, `REGISTERED_BY`, `READS_STATE`, `WRITES_STATE`, `POSSIBLE_CALL`, `EXTENDS`, `IMPLEMENTS`, `ORIGINATES_IN`, `OWNED_BY`, `BELONGS_TO_LAYER`, `DECLARES`
+`CALLS`, `CONTAINS`, `IMPORTS`, `RESOLVES_TO`, `HAS_PARAMETER`, `HAS_MEMBER`, `EXTENDS`, `IMPLEMENTS`, `REGISTERED_BY`, `READS_STATE`, `WRITES_STATE`, `POSSIBLE_CALL`, `ORIGINATES_IN`, `OWNED_BY`, `CO_CHANGES_WITH`
 
 **Plans & governance:**
 `PART_OF`, `DEPENDS_ON`, `HAS_CODE_EVIDENCE`, `TARGETS`, `BLOCKS`, `NEXT_STAGE`, `READS_PLAN_FIELD`, `MUTATES_TASK_FIELD`, `EMITS_NODE_TYPE`, `EMITS_EDGE_TYPE`
 
 **Claims & reasoning:**
-`SUPPORTED_BY`, `CONTRADICTED_BY`, `WITNESSES`, `PROVES`, `ANCHORS`
+`SUPPORTED_BY`, `CONTRADICTED_BY`, `EXPLAINS_SUPPORT`, `EXPLAINS_CONTRADICTION`, `PROVES`, `REFERENCES`
+
+**Verification & temporal confidence:**
+`PRECEDES`, `HAS_SCOPE`, `ADJUDICATES`, `ADVISES_ON`, `MEASURED`, `MEASURED_BY`
 
 **Governance provenance:**
-`MEASURED`, `DERIVED_FROM_PROOF`, `DERIVED_FROM_RUN`, `DERIVED_FROM_COMMIT`, `DERIVED_FROM_GATE`, `AFFECTS_COMMIT`, `CAPTURED_COMMIT`, `CAPTURED_WORKTREE`, `EMITS_GATE_DECISION`, `BASED_ON_RUN`, `GENERATED_ARTIFACT`, `USED_BY`
+`DERIVED_FROM_PROOF`, `DERIVED_FROM_RUN`, `DERIVED_FROM_COMMIT`, `DERIVED_FROM_GATE`, `AFFECTS_COMMIT`, `CAPTURED_COMMIT`, `CAPTURED_WORKTREE`, `EMITS_GATE_DECISION`, `BASED_ON_RUN`, `GENERATED_ARTIFACT`, `USED_BY`
 
-**Ground Truth Hook:**
-`OBSERVED_AS`, `PRODUCED`, `GENERATED_HYPOTHESIS`, `BECAME_TASK`, `RESOLVED_BY_COMMIT`, `PRECEDES`
+**Ground truth:**
+`OBSERVED_AS`, `PRODUCED`, `GENERATED_HYPOTHESIS`, `TRIGGERED_BY`
+
+**Hygiene:**
+`DEFINES_CONTROL`, `DEFINES_FAILURE_CLASS`, `DEFINES_PROFILE`, `DEFINES_TOPOLOGY`, `DEFINES_PROOF_SCOPE`, `TARGETS_FAILURE_CLASS`, `OWNS_SCOPE`, `APPLIES_TO`, `USES_SCHEMA_VERSION`, `MENTIONS`
 
 ### Key Properties
 
@@ -135,17 +212,21 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 - `registrationKind`, `registrationTrigger` — framework handlers
 
 **On SourceFile:**
-- `gitChangeFrequency` (0.0-1.0), `authorEntropy`, `primaryAuthor`, `architectureLayer`
+- `gitChangeFrequency` (0.0–1.0), `authorEntropy`, `primaryAuthor`
 
 **On CALLS edges:**
 - `conditional`, `conditionalKind`, `isAsync`, `crossFile`, `resolutionKind`
 
+**On VerificationRun:**
+- `toolFamily`, `confidence`, `effectiveConfidence`, `temporalConfidenceFactor`
+
 ## MCP Tools (56)
 
 ### Core Analysis
+
 | Tool | Purpose |
 |------|---------|
-| `pre_edit_check` | **Gate.** Call before editing any function. Returns verdict. |
+| `pre_edit_check` | Gate. Call before editing any function. Returns verdict. |
 | `simulate_edit` | Preview graph delta before applying changes |
 | `impact_analysis` | Deep blast radius with transitive dependents |
 | `search_codebase` | Semantic search via vector embeddings |
@@ -158,6 +239,7 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 | `registration_map` | Framework entrypoint queries |
 
 ### Plan Tracking
+
 | Tool | Purpose |
 |------|---------|
 | `plan_status` | Completion rates per project |
@@ -165,25 +247,27 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 | `plan_priority` / `plan_next_tasks` | Dynamic priority ranking |
 
 ### Claims & Reasoning
+
 | Tool | Purpose |
 |------|---------|
 | `claim_status` / `evidence_for` / `contradictions` / `hypotheses` | Claim lifecycle |
 | `claim_generate` / `claim_chain_path` | Generation pipeline, cross-layer chain view |
-| `explainability_paths` | Trace claim → evidence paths |
 
 ### Governance & Verification
+
 | Tool | Purpose |
 |------|---------|
 | `self_audit` | Generate questions, apply verdicts, detect drift |
-| `commit_audit_status` | Latest commit audit result |
-| `recommendation_proof_status` | Recommendation truth-health |
-| `governance_metrics_status` | Governance observability snapshot |
-| `parser_contract_status` | Parser regression checks |
 | `verification_dashboard` | Unified trust/confidence overview |
 | `confidence_debt_dashboard` | Track confidence debt |
 | `import_sarif` | Import SARIF tool outputs |
+| `commit_audit_status` | Latest commit audit result |
+| `governance_metrics_status` | Governance observability snapshot |
+| `parser_contract_status` | Parser regression checks |
+| `recommendation_proof_status` | Recommendation truth-health |
 
 ### Session & Discovery
+
 | Tool | Purpose |
 |------|---------|
 | `list_projects` / `parse_typescript_project` / `check_parse_status` | Project management |
@@ -193,160 +277,165 @@ Code nodes use a **multi-label model**: every code declaration is a `CodeNode` w
 | `save_session_note` / `recall_session_notes` / `cleanup_session` | Session notes |
 | `test_neo4j_connection` / `hello` | Diagnostics |
 
-### Ground Truth Hook
+### Ground Truth
+
 | Tool | Purpose |
 |------|---------|
 | `ground_truth` | Three-panel integrity report: graph state, agent state, delta computation |
 
 ### Swarm Coordination (multi-agent)
+
 `swarm_post_task`, `swarm_claim_task`, `swarm_complete_task`, `swarm_get_tasks`, `swarm_message`, `swarm_pheromone`, `swarm_sense`, `swarm_graph_refresh`, `swarm_cleanup`
 
-## npm Scripts (Categorized)
+## npm Scripts
+
+105 scripts total. Key categories:
 
 ### Build & Dev
-`build`, `dev`, `lint`, `format`, `test`, `prepare`, `prepublishOnly`
 
-### Governance (done-check pipeline)
-`done-check`, `done-check:strict:smoke`, `done-check:strict:full`, `commit:audit:verify`, `governance:metrics:snapshot`, `governance:metrics:report`, `governance:metrics:integrity:verify`, `governance:stale:verify`, `governance:attribution:backfill`, `governance:metric:def:sync`, `governance:metric:def:verify`
+`build`, `dev`, `lint`, `format`, `test`, `mcp`
+
+### Governance Pipeline (done-check — 55 steps)
+
+```bash
+npm run done-check  # Full pipeline: build → enrich → verify → integrity
+```
+
+Steps: `build` → `plan:refresh` → `edges:normalize` → `enrich:temporal-coupling` → `enrich:author-ownership` → `enrich:git-frequency` → `enrich:provenance` → `evidence:auto-link` → `plan:evidence:recompute` → ... → `integrity:verify`
+
+### Enrichment (post-parse)
+
+| Script | Trigger | What It Does |
+|--------|---------|-------------|
+| `enrich:possible-calls` | Watcher (post-parse) | POSSIBLE_CALL edges from dynamic dispatch |
+| `enrich:state-edges` | Watcher (post-parse) | READS_STATE/WRITES_STATE from session access |
+| `enrich:virtual-dispatch` | Watcher (post-parse) | Interface→implementation dispatch resolution |
+| `enrich:unresolved-nodes` | Watcher (post-parse) | UnresolvedReference node creation |
+| `enrich:temporal-coupling` | Done-check (step 4) | CO_CHANGES_WITH from git log |
+| `enrich:author-ownership` | Done-check (step 5) | HAS_OWNER from git blame |
+| `enrich:git-frequency` | Done-check (step 6) | gitChangeFrequency from commit counts |
+| `enrich:provenance` | Done-check (step 7) | sourceKind/confidence on edges |
 
 ### Integrity & Verification
-`integrity:snapshot`, `integrity:verify`, `integrity:snapshot:fields:verify`, `integrity:daily:job`, `verification:sarif:import`, `verification:scope:resolve`, `verification:exception:enforce`, `verification:advisory:gate`, `verification:done-check:capture`, `verification:done-check:capture:only`, `verification:proof:record`, `verification:proof:status`, `verification:status:dashboard`, `verification:recommendation:mismatch`, `verification:pilot:ir:validate`, `verification:pilot:vg5:thresholds`, `verification:ingest`
+
+`integrity:snapshot`, `integrity:verify`, `integrity:snapshot:fields:verify`, `integrity:daily:job`
+
+### Temporal Confidence (TC-1→TC-8)
+
+`tc:recompute`, `tc:shadow`, `tc:debt`, `tc:anti-gaming`, `tc:explain`, `tc:calibrate`, `tc:promote`, `tc:verify`
 
 ### Registry & Edges
-`registry:reconcile`, `registry:verify`, `registry:backfill`, `registry:duplicates:report`, `registry:identity:verify`, `edges:normalize`, `edges:verify`
+
+`registry:reconcile`, `registry:verify`, `registry:identity:verify`, `edges:normalize`, `edges:verify`
 
 ### Plans & Evidence
-`plan:deps:verify`, `plan:refresh`, `plan:evidence:recompute`, `plan:embedding:match`, `evidence:backfill`, `evidence:coverage`
 
-### Claims & Embeddings
-`claims:cross:synthesize`, `code:embedding-inputs:enrich`, `embedding:fp:verify`
-
-### Document Adapter
-`doc:ingest`, `document:claims:grade`, `document:claims:verify`, `document:evidence:link-runtime`, `document:namespace:audit`, `document:namespace:reconcile`, `document:namespace:verify`, `document:witness:advisory`, `document:wording:verify`
+`plan:refresh`, `plan:deps:verify`, `plan:evidence:recompute`, `evidence:backfill`, `evidence:coverage`
 
 ### Hygiene Governance
-`hygiene:foundation:sync`, `hygiene:foundation:verify`, `hygiene:topology:sync`, `hygiene:topology:verify`, `hygiene:ownership:sync`, `hygiene:ownership:verify`, `hygiene:exception:sync`, `hygiene:exception:verify`, `hygiene:platform:verify`, `hygiene:proof:scope:sync`, `hygiene:proof:verify`, `hygiene:deps:sync`
 
-### IR & Parser
-`ir:parity`, `ir:parity:resume`, `parser:contracts:verify`, `parser:gold:harness`, `python:parse:ir`, `query:contract:verify`
+`hygiene:foundation:sync/verify`, `hygiene:topology:sync/verify`, `hygiene:ownership:sync/verify`, `hygiene:exception:sync/verify`, `hygiene:proof:scope:sync`, `hygiene:proof:verify`
+
+### Document Adapter
+
+`doc:ingest`, `document:claims:grade/verify`, `document:namespace:reconcile/verify`, `document:witness:advisory`, `document:wording:verify`
 
 ### Ground Truth
+
 `ground-truth`, `ground-truth:post-gate`
-
-### Audit
-`audit:anchor:resolve`
-
-### MCP Server
-`mcp`
 
 ## Test Infrastructure
 
-### TDD Harness (636 tests, 40 suites)
+**636 tests, 40 suites** — all hermetic and deterministic.
 
-The test harness provides hermetic, deterministic testing for all governance surfaces:
+### Test Harness Modules
 
 | Module | What It Does |
 |--------|-------------|
-| `frozen-clock.ts` | Deterministic `Date.now()` via monkey-patch |
-| `frozen-locale.ts` | Deterministic locale/timezone |
-| `seeded-rng.ts` | Seeded xorshift128+ PRNG |
-| `network-guard.ts` | Blocks `Socket.prototype.connect` — no network in tests |
 | `ephemeral-graph.ts` | projectId-isolated Neo4j runtime (`__test_<uuid>`) |
 | `replay.ts` | Full hermetic env setup/teardown + replay from decision packets |
+| `network-guard.ts` | Blocks `Socket.prototype.connect` — no network in tests |
 | `snapshot-digest.ts` | SHA-256 determinism assertions |
 | `structural-constraints.ts` | Graph structural integrity checks |
-| `migration-contracts.ts` | Migration contract verification |
-| `structural-drift.ts` | Structural drift guards |
 | `policy-bundle.ts` | Policy assembly, digest pinning, gate mode resolution |
 | `gate-evaluator.ts` | Deterministic gate evaluation from immutable inputs |
 | `pbt-runner.ts` | Property-based testing with stateful action sequences |
 | `metamorphic.ts` | Query equivalence + semantics-preserving mutation checks |
 | `mutation-library.ts` | Preserving/breaking mutations for metamorphic testing |
 | `flake-governance.ts` | Auto-quarantine, reintegration, budget tracking |
-| `ai-tevv.ts` | AI eval case runner with per-hazard thresholds + lineage-gated promotion |
-| `provenance-hardening.ts` | SLSA-shaped provenance envelopes with fail-closed policy |
-| `confidence-analytics.ts` | Regression budgets, completeness trends, override entropy, policy effectiveness |
+| `ai-tevv.ts` | AI eval case runner with per-hazard thresholds |
 
 ### Fixture Tiers
+
 - `fixtures/micro/` — 8 small deterministic fixtures (code-graph + plan-graph)
 - `fixtures/scenario/` — 2 multi-step scenario fixtures
 - `fixtures/sampled/` — Sampled production data (skeleton)
 - `fixtures/stress/` — Large-scale stress fixtures (skeleton)
-
-## Operational Layers
-
-| Layer | Status | What It Does |
-|-------|--------|-------------|
-| **Code** | ✅ | TypeScript parsing, CALLS/RESOLVES_TO, risk scoring, blast radius |
-| **Plans** | ✅ | Task/Milestone tracking, drift detection, cross-domain evidence |
-| **Claims & Reasoning** | ✅ | Claims with evidence, hypotheses from gaps, self-audit |
-| **Ground Truth** | ✅ | Agent-graph coordination: integrity checks, delta engine, session bookmarks |
 
 ## Architecture
 
 ```
 codegraph/
 ├── src/
-│   ├── cli/                  # CLI (init, parse, enrich, serve, risk, analyze, status)
+│   ├── cli/                    # CLI (init, parse, enrich, serve, risk, analyze, status)
 │   ├── core/
-│   │   ├── parsers/          # TypeScript (ts-morph), Plan
-│   │   ├── config/           # Schemas, invariants, change-class matrix, eval lineage
-│   │   ├── claims/           # Claim engine (3 domain + 5 cross-layer synthesizers)
-│   │   ├── embeddings/       # OpenAI embeddings + NL→Cypher
-│   │   ├── ir/               # Intermediate representation (v1 schema, materializer, validator)
-│   │   ├── adapters/document/ # Document parser (scaffold)
-│   │   ├── ground-truth/     # Ground Truth Hook: runtime, delta, packs, session bookmarks
-│   │   ├── verification/     # Advisory gate, exception enforcement, temporal confidence
-│   │   ├── test-harness/     # 21 hermetic test modules + fixtures
-│   │   └── utils/            # File detection, graph factory, path utils
+│   │   ├── parsers/            # TypeScript (ts-morph), Plan parser
+│   │   ├── config/             # Schemas, invariants, change-class matrix
+│   │   ├── claims/             # Claim engine (3 domain + 5 cross-layer synthesizers)
+│   │   ├── embeddings/         # OpenAI embeddings + NL→Cypher
+│   │   ├── ir/                 # Intermediate representation (v1 schema, materializer)
+│   │   ├── adapters/document/  # Document parser
+│   │   ├── ground-truth/       # Runtime, delta, packs, session bookmarks
+│   │   ├── verification/       # Temporal confidence, advisory gate, SARIF import
+│   │   └── test-harness/       # 12 hermetic test modules + fixtures
 │   ├── mcp/
-│   │   ├── tools/            # 56 MCP tools
-│   │   ├── handlers/         # Graph generation, traversal, incremental parse
-│   │   └── services/         # Watch manager, job manager
+│   │   ├── tools/              # 43 tool files → 56 MCP tools
+│   │   ├── handlers/           # Graph generation, traversal, incremental parse
+│   │   └── services/           # Watch manager, job manager
 │   ├── scripts/
-│   │   ├── entry/            # Parse, ingest, watch entry points
-│   │   ├── tools/            # Edit simulation, reconciliation, embedding
-│   │   └── verify/           # 16 verification scripts
-│   ├── storage/neo4j/        # Neo4j driver + queries
-│   └── utils/                # 40+ utility scripts (governance, hygiene, evidence, verification)
-├── swarm/                    # Multi-agent coordinator + worker protocols
-├── plans/                    # Plan files (codegraph, godspeed, bible-graph, etc.)
-├── fixtures/                 # Test fixtures (micro, scenario, sampled, stress)
-├── artifacts/                # Generated governance artifacts (snapshots, metrics)
-├── docs/                     # Governance rollout, Python scaffolding, audit standards
-├── AGENTS.md                 # Agent instructions for editing CodeGraph
-├── SKILL.md                  # Universal agent skill for any project
-├── CLAUDE.md                 # Claude Code / ACP agent instructions
-└── .codegraph.yml            # Project config (framework, state roots, risk)
+│   │   ├── entry/              # Parse, ingest, watch entry points
+│   │   ├── enrichment/         # 14 enrichment scripts
+│   │   ├── tools/              # Edit simulation, reconciliation
+│   │   └── verify/             # 16 verification scripts
+│   ├── storage/neo4j/          # Neo4j driver + queries
+│   └── utils/                  # 53 utility scripts
+├── scripts/                    # Shell/Python helper scripts
+├── artifacts/                  # Generated governance artifacts
+├── docs/                       # Architecture docs, audit reports
+├── skills/swarm/               # Multi-agent coordinator + worker protocols
+├── AGENTS.md                   # Agent instructions for editing this codebase
+├── SKILL.md                    # Universal agent skill for any tracked project
+└── CLAUDE.md                   # Claude Code / ACP agent instructions
 ```
 
 ## Agent Workflows
 
-- **Editing this codebase**: Read `AGENTS.md`
-- **Editing any CodeGraph-tracked project**: Read `SKILL.md`
-- **Using Claude Code / ACP**: Read `CLAUDE.md`
-- **Multi-agent refactoring**: Read `swarm/COORDINATOR.md` + `swarm/WORKER.md`
+- **Editing this codebase:** Read `AGENTS.md`
+- **Editing any AnythingGraph-tracked project:** Read `SKILL.md`
+- **Using Claude Code / ACP:** Read `CLAUDE.md`
+- **Multi-agent refactoring:** Read `skills/swarm/COORDINATOR.md` + `skills/swarm/WORKER.md`
 
 ## Tech Stack
 
-- **Parser**: ts-morph (semantic TypeScript — resolves types, not just syntax)
-- **Graph**: Neo4j 5.x (same architecture as GOYFILES investigation graph)
-- **MCP**: @modelcontextprotocol/sdk
-- **Embeddings**: OpenAI text-embedding-3-large (optional)
-- **NL→Cypher**: OpenAI gpt-4o (optional)
-- **Tests**: Custom hermetic harness (636 tests, 40 suites) + Vitest
-- **File watching**: @parcel/watcher (native inotify)
-- **CLI**: commander
+- **Parser:** ts-morph (semantic TypeScript — resolves types, not just syntax)
+- **Graph:** Neo4j 5.x with APOC
+- **MCP:** @modelcontextprotocol/sdk
+- **Embeddings:** OpenAI text-embedding-3-large (optional)
+- **NL→Cypher:** OpenAI gpt-4o (optional)
+- **Tests:** Custom hermetic harness + Vitest
+- **File watching:** @parcel/watcher (native inotify)
+- **CLI:** commander
 
 ## What's Next
 
-1. **Second language parser**: Python (CPython ast + Pyright) or Go — prove the architecture is language-agnostic
-2. **IR layer**: Parser → IR → Enrichment → Graph (decouple parsers from Neo4j)
-3. **Temporal Confidence (TC-3→TC-8)**: Shadow propagation, explainability, confidence debt — when a second domain needs it
-4. **Domain packs**: New domains implement GroundTruthPack interface and plug into the same graph
+- **IR layer completion:** Parser → IR → Enrichment → Graph (decouple parsers from Neo4j)
+- **Python parser:** CPython ast + Pyright sidecar — prove the architecture is language-agnostic
+- **Document adapter:** Generic PDF/text ingestion via IR layer
+- **Domain packs:** New domains implement `GroundTruthPack` interface and plug into the same graph
+- **Done-check split:** Break the monolithic done-check into independent tools for TC-8 promotion
 
-Full roadmap: `plans/codegraph/MULTI_LANGUAGE_ASSESSMENT.md`
+Full roadmap: `docs/MULTI_LANGUAGE_ASSESSMENT.md`
 
 ## License
 
-v0.1.0 — Originally forked from drewdrewH/code-graph-context v2.9.0, substantially rewritten
+MIT — Originally forked from [drewdrewH/code-graph-context](https://github.com/drewdrewH/code-graph-context) v2.9.0, substantially rewritten.

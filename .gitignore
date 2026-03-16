@@ -165,3 +165,7 @@ artifacts/project-registry/
 artifacts/watcher-recheck-events.jsonl
 semgrep-results.sarif
 eslint-results.sarif
+neo4j-apoc-schema.json
+
+# Runtime caches
+neo4j-apoc-schema.json

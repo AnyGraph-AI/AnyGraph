@@ -8,7 +8,7 @@ AnythingGraph (repo: codegraph) is a **universal reasoning graph**. It ingests c
 
 **Six layers**: Code (3 projects) → Plans (4 projects) → Governance (1 project) → Claims (~490) → Reasoning (~490 hypotheses) → Self-Audit.
 
-Every function, task, verse, claim, and entity is a node. Every call, evidence link, mention, and dependency is an edge.
+Every function, task, claim, and entity is a node. Every call, evidence link, and dependency is an edge.
 **Query the graph before you edit. That's the entire point.**
 
 ---
@@ -372,7 +372,7 @@ cd codegraph && npx tsx src/scripts/entry/parse-and-ingest.ts
 
 ### Full post-ingest pipeline (17 steps):
 ```bash
-cd codegraph && bash post-ingest-all.sh
+cd codegraph && bash scripts/post-ingest-all.sh
 ```
 Steps: risk scoring → state edges → git frequency → temporal coupling → POSSIBLE_CALL → virtual dispatch → registration properties → project node → author ownership → architecture layers → riskLevel v2 promotion → provenance + confidence → unresolved reference nodes → audit subgraph → test coverage mapping → embeddings → evaluation (regression detection)
 
