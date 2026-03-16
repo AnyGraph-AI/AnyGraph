@@ -175,6 +175,7 @@ export async function enrichCompositeRisk(
     const sortedChurn = functions.map((f) => f.churnRelative).sort((a, b) => a - b);
 
     // Step 3: Compute composite for each function
+    const composites: { id: string; compositeRisk: number; flags: string[] }[] = [];
     const updates: { id: string; compositeRisk: number; riskTier: string; flags: string[] }[] = [];
 
     for (const fn of functions) {
@@ -194,9 +195,19 @@ export async function enrichCompositeRisk(
 
       const composite = computeCompositeRisk(structuralPct, changePct, ownRisk, verGap);
       const flags = computeFlags(input);
-      const tier = resolveRiskTier(composite, flags);
 
-      updates.push({ id: fn.id, compositeRisk: composite, riskTier: tier, flags });
+      composites.push({ id: fn.id, compositeRisk: composite, flags });
+    }
+
+    // Step 3b: Percentile-rank the composite scores themselves for tier assignment
+    // This is the critical step — the raw composite is a weighted sum (0-1),
+    // NOT a percentile. We need to rank within the population.
+    const sortedComposites = composites.map((c) => c.compositeRisk).sort((a, b) => a - b);
+
+    for (const c of composites) {
+      const compositePct = percentileRank(c.compositeRisk, sortedComposites);
+      const tier = resolveRiskTier(compositePct, c.flags);
+      updates.push({ id: c.id, compositeRisk: c.compositeRisk, riskTier: tier, flags: c.flags });
     }
 
     // Step 4: Batch update
