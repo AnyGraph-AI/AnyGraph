@@ -523,7 +523,9 @@ export class ClaimEngine {
              e.grade = 'A1',
              e.description = sf.name + ': riskLevel=' + toString(risk) + ', callers=' + toString(callers) + ', plan tasks depending=' + toString(tasksDependingOnIt),
              e.weight = 0.9,
+             e.projectId = $cg,
              e.created = $now
+           ON MATCH SET e.projectId = coalesce(e.projectId, $cg)
            MERGE (c)-[:SUPPORTED_BY {grade: 'A1', weight: 0.9, sourceKind: 'claim-engine'}]->(e)
            RETURN count(DISTINCT c) AS claims, count(DISTINCT e) AS evidences`,
           { cg, now },

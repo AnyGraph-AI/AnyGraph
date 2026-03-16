@@ -10,7 +10,9 @@ import type { Driver } from 'neo4j-driver';
 
 /**
  * Create SPANS_PROJECT edges from Claims → Projects.
- * A claim spans a project if any of its supporting evidence has that project's projectId.
+ * A claim spans a project if any of its supporting evidence reaches that project:
+ *   Pass 1: via Evidence.projectId (direct)
+ *   Pass 2: via Evidence -[:FROM_PROJECT]-> Project (cross-layer, after GC-4)
  */
 export async function enrichClaimProjects(
   driver: Driver,
@@ -22,7 +24,8 @@ export async function enrichClaimProjects(
       ? 'AND (e.projectId = $projectId OR c.projectId = $projectId)'
       : '';
 
-    const result = await session.run(
+    // Pass 1: Direct — Evidence.projectId → Project
+    const directResult = await session.run(
       `MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)
        WHERE e.projectId IS NOT NULL
        ${filterClause}
@@ -33,11 +36,26 @@ export async function enrichClaimProjects(
        RETURN count(r) AS edges`,
       { projectId: projectId ?? null },
     );
-    const edges = result.records[0]?.get('edges')?.toNumber?.() ??
-      result.records[0]?.get('edges') ?? 0;
+    const direct = directResult.records[0]?.get('edges')?.toNumber?.() ??
+      directResult.records[0]?.get('edges') ?? 0;
 
-    console.log(`[GC-3] SPANS_PROJECT: ${edges} edges created`);
-    return { edges: typeof edges === 'number' ? edges : 0 };
+    // Pass 2: Cross-layer — Evidence -[:FROM_PROJECT]-> Project
+    // This catches projects linked via GC-4 cross-layer enrichment
+    const crossResult = await session.run(
+      `MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)-[:FROM_PROJECT]->(p:Project)
+       WHERE NOT (c)-[:SPANS_PROJECT]->(p)
+       MERGE (c)-[r:SPANS_PROJECT]->(p)
+       ON CREATE SET r.derived = true, r.source = 'claim-project-crosslayer', r.created = datetime()
+       RETURN count(r) AS edges`,
+    );
+    const cross = crossResult.records[0]?.get('edges')?.toNumber?.() ??
+      crossResult.records[0]?.get('edges') ?? 0;
+
+    const total = (typeof direct === 'number' ? direct : 0) +
+      (typeof cross === 'number' ? cross : 0);
+
+    console.log(`[GC-3/4] SPANS_PROJECT: ${total} edges (${direct} direct, ${cross} cross-layer)`);
+    return { edges: total };
   } finally {
     await session.close();
   }
