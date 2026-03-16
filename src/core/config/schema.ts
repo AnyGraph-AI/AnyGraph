@@ -163,6 +163,9 @@ export interface Neo4jNodeProperties {
   parentClassName?: string; // Parent class name for methods/properties/constructors
   typeAnnotation?: string; // Type annotation text for variable declarations
 
+  // === CROSS-PROJECT IDENTITY ===
+  symbolHash?: string; // Project-agnostic hash: sha256(filePath + '::' + name + '::' + coreType). Used for ANCHORED_TO edges.
+
   // === DUPLICATE DETECTION ===
   normalizedHash?: string; // SHA256 hash of normalized code for structural duplicate detection
 

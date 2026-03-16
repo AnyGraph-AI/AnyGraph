@@ -40,6 +40,7 @@ import {
   toNeo4jEdge,
   toParsedEdge,
   generateDeterministicId,
+  computeSymbolHash,
 } from '../utils/graph-factory.js';
 import { resolveProjectId } from '../utils/project-id.js';
 import { convertNeo4jGraphToIrDocument } from '../ir/neo4j-graph-to-ir.js';
@@ -1704,6 +1705,9 @@ export class TypeScriptParser {
         }
       }
     }
+
+    // Compute project-agnostic symbolHash for cross-project matching (ANCHORED_TO edges)
+    properties.symbolHash = computeSymbolHash(filePath, name, coreType);
 
     // Compute normalizedHash for duplicate detection (methods, functions, constructors)
     if (

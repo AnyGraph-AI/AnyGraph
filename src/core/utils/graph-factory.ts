@@ -44,6 +44,23 @@ export const generateDeterministicId = (
   return `${projectId}:${coreType}:${hash}`;
 };
 
+/**
+ * Compute a project-agnostic symbol hash for cross-project matching.
+ * Same function in different projects → same symbolHash.
+ * Used by ANCHORED_TO edges (Evidence → CodeNode).
+ *
+ * Identity: filePath + '::' + name + '::' + coreType
+ * (no projectId — that's the point)
+ */
+export const computeSymbolHash = (
+  filePath: string,
+  name: string,
+  coreType: string,
+): string => {
+  const identity = `${filePath}::${name}::${coreType}`;
+  return crypto.createHash('sha256').update(identity).digest('hex').substring(0, 16);
+};
+
 export interface FrameworkEdgeParams {
   semanticType: string;
   sourceNodeId: string;
