@@ -17,7 +17,7 @@ import type { AffectedNode } from './enforcement-gate.js';
  * Cypher pattern:
  *   MATCH (sf:SourceFile)-[:CONTAINS]->(f:Function)
  *   WHERE sf.filePath IN $filePaths AND sf.projectId = $projectId
- *   OPTIONAL MATCH (sf)<-[:TESTED_BY]-(tf)
+ *   OPTIONAL MATCH (sf)-[:TESTED_BY]->(tf)
  *   RETURN f.id, f.name, sf.filePath, f.riskTier, f.compositeRisk, tf IS NOT NULL AS hasTests
  */
 export async function resolveAffectedNodes(
@@ -31,7 +31,7 @@ export async function resolveAffectedNodes(
     MATCH (sf:SourceFile {projectId: $projectId})-[:CONTAINS]->(f)
     WHERE sf.filePath IN $filePaths
       AND (f:Function OR f:Method)
-    OPTIONAL MATCH (sf)<-[:TESTED_BY]-(tf)
+    OPTIONAL MATCH (sf)-[:TESTED_BY]->(tf)
     WITH f, sf, count(tf) > 0 AS hasTests
     RETURN
       f.id AS id,
@@ -74,7 +74,7 @@ export async function resolveBlastRadius(
     WHERE NOT downstream.id IN $functionIds
     WITH DISTINCT downstream
     OPTIONAL MATCH (sf:SourceFile {projectId: $projectId})-[:CONTAINS]->(downstream)
-    OPTIONAL MATCH (sf)<-[:TESTED_BY]-(tf)
+    OPTIONAL MATCH (sf)-[:TESTED_BY]->(tf)
     WITH downstream, sf, count(tf) > 0 AS hasTests
     RETURN
       downstream.id AS id,

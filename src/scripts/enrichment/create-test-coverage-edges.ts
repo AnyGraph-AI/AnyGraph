@@ -42,8 +42,8 @@ function analyzeTestFile(filePath: string, projectRoot: string): TestFileInfo {
   const name = path.basename(filePath);
   const dir = path.dirname(filePath);
 
-  // Extract imports — both static and from/require
-  const importRegex = /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\))/g;
+  // Extract imports — both static and from/require (supports multiline imports)
+  const importRegex = /(?:import\s+[\s\S]*?from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\))/g;
   const rawImports: string[] = [];
   let match: RegExpExecArray | null;
   while ((match = importRegex.exec(content)) !== null) {
