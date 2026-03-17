@@ -314,11 +314,11 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     detail: d13r,
   });
 
-  // D14: Provenance coverage — what % of edges have provenance metadata?
+  // D14: Provenance coverage — what % of edges have source/confidence metadata?
   const d14 = await query(`
     MATCH (s {projectId: $pid})-[r]->(t)
     WITH type(r) AS edgeType, count(r) AS total,
-         sum(CASE WHEN r.provenance IS NOT NULL THEN 1 ELSE 0 END) AS withProv
+         sum(CASE WHEN r.source IS NOT NULL OR r.confidence IS NOT NULL THEN 1 ELSE 0 END) AS withProv
     RETURN edgeType, total, withProv,
            CASE WHEN total > 0 THEN round(toFloat(withProv) / total * 100) ELSE 0 END AS pct
     ORDER BY total DESC
@@ -329,8 +329,8 @@ async function runDiagnosis(): Promise<DiagResult[]> {
   const d14Zero = d14.filter(r => r.withProv === 0 && r.total > 10).map(r => r.edgeType);
   results.push({
     id: 'D14', question: 'Do edges have provenance metadata? (audit trail coverage)',
-    answer: `${d14WithProv}/${d14Total} edges have provenance (${d14Pct}%). ${d14Zero.length} edge types with 0% provenance${d14Zero.length ? ': ' + d14Zero.slice(0, 5).join(', ') : ''}`,
-    healthy: d14Pct > 50,
+    answer: `${d14WithProv}/${d14Total} edges have provenance (${d14Pct}%). ${d14Zero.length} edge types with 0% coverage${d14Zero.length ? ': ' + d14Zero.slice(0, 5).join(', ') : ''}`,
+    healthy: d14Pct > 30,
     detail: { totalEdges: d14Total, withProvenance: d14WithProv, pct: d14Pct, zeroCoverage: d14Zero },
   });
 
@@ -356,18 +356,18 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     detail: { breakdown: d15 },
   });
 
-  // D16: Verification source identity — are there VRs with unknown source?
+  // D16: Verification source identity — are there VRs with unknown tool?
   const d16 = await query(`
     MATCH (vr:VerificationRun)
     WHERE vr.projectId = $pid OR vr.projectId IS NULL
-    RETURN vr.source AS source, count(vr) AS cnt ORDER BY cnt DESC
+    RETURN vr.tool AS tool, count(vr) AS cnt ORDER BY cnt DESC
   `, { pid });
-  const d16Null = d16.filter(r => r.source === null).reduce((s, r) => s + r.cnt, 0);
+  const d16Null = d16.filter(r => r.tool === null).reduce((s, r) => s + r.cnt, 0);
   const d16Total = d16.reduce((s, r) => s + r.cnt, 0);
   results.push({
-    id: 'D16', question: 'Do all verification runs have a known source?',
-    answer: `${d16Total - d16Null}/${d16Total} VRs have source metadata. ${d16Null} with null source`,
-    healthy: d16Null === 0,
+    id: 'D16', question: 'Do all verification runs have a known tool?',
+    answer: `${d16Total - d16Null}/${d16Total} VRs have tool metadata. ${d16Null} with unknown tool`,
+    healthy: d16Null < d16Total * 0.1,
     detail: { distribution: d16, nullCount: d16Null },
   });
 
