@@ -1,10 +1,11 @@
 #!/usr/bin/env npx tsx
 /**
- * self-diagnosis — 10 epistemological health checks.
+ * self-diagnosis — 25 epistemological health checks.
  * Tests what the graph knows about its own limitations.
  *
  * Each check answers: "Does the graph know what it doesn't know?"
  * A healthy graph has first-class nodes for unknowns, not absence of data.
+ * Every check includes a nextStep — actionable regardless of status.
  *
  * Usage: npm run self-diagnosis
  */
@@ -26,6 +27,7 @@ interface DiagResult {
   question: string;
   answer: string;
   healthy: boolean;
+  nextStep: string;
   detail: Record<string, any>;
 }
 
@@ -58,7 +60,7 @@ async function runDiagnosis(): Promise<DiagResult[]> {
   const pid = await getProjectId();
   const results: DiagResult[] = [];
 
-  // 1. Does the graph track its own blind spots?
+  // ─── D1: Blind spot tracking ─────────────────────────────────────
   const q1 = await query(`
     MATCH (u:UnresolvedReference {projectId: $pid})
     RETURN u.reason AS reason, count(u) AS cnt ORDER BY cnt DESC
@@ -71,26 +73,34 @@ async function runDiagnosis(): Promise<DiagResult[]> {
       ? `Yes — ${totalUnresolved} UnresolvedReference nodes (${localBlind} local blind spots)`
       : 'No unresolved references found (suspicious — may mean enrichment hasn\'t run)',
     healthy: totalUnresolved > 0 && localBlind < 20,
+    nextStep: localBlind > 0
+      ? `Review local blind spots: cypher-shell -u neo4j -p codegraph "MATCH (u:UnresolvedReference {projectId: '${pid}'}) WHERE u.reason <> 'external-package' RETURN u.name, u.reason, u.filePath LIMIT 20". Fix .js→.ts specifier mismatches in source imports.`
+      : `Run npm run rebuild-derived to regenerate UnresolvedReference nodes if count is 0.`,
     detail: { total: totalUnresolved, local: localBlind, breakdown: q1 },
   });
 
-  // 2. Does ANALYZED coverage match expectations?
+  // ─── D2: ANALYZED coverage ───────────────────────────────────────
   const q2 = await query(`
     MATCH (sf:SourceFile {projectId: $pid})
     OPTIONAL MATCH (sf)<-[:ANALYZED]-(vr)
-    WITH count(sf) AS total,
-         sum(CASE WHEN vr IS NOT NULL THEN 1 ELSE 0 END) AS analyzed
-    RETURN total, analyzed, total - analyzed AS gaps
+    WITH sf, count(vr) AS vrCount
+    RETURN count(sf) AS total,
+           sum(CASE WHEN vrCount > 0 THEN 1 ELSE 0 END) AS analyzed,
+           sum(CASE WHEN vrCount = 0 THEN 1 ELSE 0 END) AS gaps
   `, { pid });
   const coveragePct = q2[0]?.total > 0 ? ((q2[0]?.analyzed / q2[0]?.total) * 100).toFixed(1) : '0';
+  const d2Gaps = q2[0]?.gaps || 0;
   results.push({
     id: 'D2', question: 'Does ANALYZED coverage match reality?',
-    answer: `${q2[0]?.analyzed}/${q2[0]?.total} files analyzed (${coveragePct}%), ${q2[0]?.gaps} gaps`,
+    answer: `${q2[0]?.analyzed}/${q2[0]?.total} files analyzed (${coveragePct}%), ${d2Gaps} gaps`,
     healthy: parseFloat(coveragePct) > 50,
+    nextStep: d2Gaps > 0
+      ? `Run npm run verification:scan to refresh SARIF data, then npm run enrich:analyzed-edges. List gap files: cypher-shell -u neo4j -p codegraph "MATCH (sf:SourceFile {projectId: '${pid}'}) WHERE NOT (sf)<-[:ANALYZED]-() RETURN sf.name LIMIT 20".`
+      : `Coverage is complete. Run npm run verification:scan periodically to keep SARIF data fresh.`,
     detail: q2[0] || {},
   });
 
-  // 3. Are integrity snapshots fresh?
+  // ─── D3: Snapshot freshness ──────────────────────────────────────
   const q3 = await query(`
     MATCH (s:GraphMetricsSnapshot)
     RETURN s.timestamp AS ts, s.nodeCount AS nodes, s.edgeCount AS edges
@@ -106,10 +116,13 @@ async function runDiagnosis(): Promise<DiagResult[]> {
       ? `Last snapshot: ${snapshotAge}h ago (${q3[0]?.nodes} nodes, ${q3[0]?.edges} edges)`
       : 'No snapshots found — graph:metrics has never run',
     healthy: snapshotAge !== null && snapshotAge < 24,
+    nextStep: snapshotAge === null || snapshotAge > 24
+      ? `Run npm run graph:metrics to create a fresh snapshot. Snapshots run automatically at end of npm run done-check.`
+      : `Snapshot is fresh. Compare with previous: cypher-shell -u neo4j -p codegraph "MATCH (s:GraphMetricsSnapshot) RETURN s.timestamp, s.nodeCount, s.edgeCount ORDER BY s.timestamp DESC LIMIT 5".`,
     detail: { ageHours: snapshotAge, ...q3[0] },
   });
 
-  // 4. Are there MERGE key collisions? (duplicate nodeIds)
+  // ─── D4: MERGE key collisions ────────────────────────────────────
   const q4 = await query(`
     MATCH (n:CodeNode {projectId: $pid})
     WHERE n.nodeId IS NOT NULL
@@ -123,10 +136,13 @@ async function runDiagnosis(): Promise<DiagResult[]> {
       ? `${q4.length} duplicate nodeIds found — MERGE identity broken`
       : 'No collisions — MERGE keys are unique',
     healthy: q4.length === 0,
+    nextStep: q4.length > 0
+      ? `Duplicate nodeIds break MERGE idempotency. Inspect: cypher-shell -u neo4j -p codegraph "MATCH (n:CodeNode {projectId: '${pid}'}) WITH n.nodeId AS nid, collect(n) AS dupes, count(n) AS cnt WHERE cnt > 1 RETURN nid, cnt, [d IN dupes | d.name] LIMIT 10". Fix the parser's nodeId generation in src/core/parsers/typescript-parser.ts.`
+      : `No action needed. MERGE keys are clean.`,
     detail: { collisions: q4 },
   });
 
-  // 5. Does the graph know which edges are derived vs canonical?
+  // ─── D5: Derived vs canonical edge tagging ───────────────────────
   const q5 = await query(`
     MATCH (s {projectId: $pid})-[r]->(t)
     RETURN
@@ -141,10 +157,13 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     id: 'D5', question: 'Does the graph distinguish derived from canonical edges?',
     answer: `${q5[0]?.derived} derived, ${q5[0]?.canonical} canonical (${derivedPct}% derived)`,
     healthy: q5[0]?.derived > 0 && q5[0]?.canonical > 0,
+    nextStep: (q5[0]?.derived || 0) === 0
+      ? `No derived edges tagged. Run npm run edges:normalize to tag all enrichment-created edges with derived:true.`
+      : `Run npm run edges:verify to check for untagged enrichment edges. All edges created by enrichment scripts must have {derived: true}.`,
     detail: q5[0] || {},
   });
 
-  // 6. Are riskTiers current (not all LOW)?
+  // ─── D6: Risk tier currency ──────────────────────────────────────
   const q6 = await query(`
     MATCH (f:Function {projectId: $pid})
     WHERE f.riskTier IS NOT NULL
@@ -158,10 +177,13 @@ async function runDiagnosis(): Promise<DiagResult[]> {
       ? 'ALL functions are LOW — risk scoring is stale or not running'
       : q6.map(r => `${r.tier}: ${r.cnt}`).join(', '),
     healthy: !allLow && hasCritical,
+    nextStep: allLow
+      ? `Risk tiers are stale. Run: npm run enrich:git-frequency && npm run enrich:temporal-coupling && npm run enrich:composite-risk. The composite risk scorer needs git frequency and temporal coupling data to produce variance.`
+      : `Risk tiers are current. To refresh after code changes: npm run enrich:composite-risk. Check stale tiers: npm run governance:stale:verify.`,
     detail: { distribution: q6 },
   });
 
-  // 7. Do claims have supporting evidence?
+  // ─── D7: Claim evidence support ──────────────────────────────────
   const q7 = await query(`
     MATCH (c:Claim)
     OPTIONAL MATCH (c)-[:SUPPORTED_BY]->(e)
@@ -171,30 +193,38 @@ async function runDiagnosis(): Promise<DiagResult[]> {
       sum(CASE WHEN evidenceCount > 0 THEN 1 ELSE 0 END) AS supported,
       sum(CASE WHEN evidenceCount = 0 THEN 1 ELSE 0 END) AS unsupported
   `);
+  const d7unsup = q7[0]?.unsupported || 0;
+  const d7total = q7[0]?.totalClaims || 1;
   results.push({
     id: 'D7', question: 'Do claims have supporting evidence?',
-    answer: `${q7[0]?.supported}/${q7[0]?.totalClaims} claims have evidence, ${q7[0]?.unsupported} unsupported`,
-    healthy: (q7[0]?.unsupported || 0) < (q7[0]?.totalClaims || 1) * 0.2,
+    answer: `${q7[0]?.supported}/${d7total} claims have evidence, ${d7unsup} unsupported`,
+    healthy: d7unsup < d7total * 0.2,
+    nextStep: d7unsup > 0
+      ? `${d7unsup} claims have no SUPPORTED_BY edges. Run npm run evidence:auto-link to auto-link evidence to claims. List unsupported claims: cypher-shell -u neo4j -p codegraph "MATCH (c:Claim) WHERE NOT (c)-[:SUPPORTED_BY]->() RETURN c.claimType, count(c) AS cnt ORDER BY cnt DESC".`
+      : `All claims have evidence. Run npm run evidence:coverage to verify coverage ratios per project.`,
     detail: q7[0] || {},
   });
 
-  // 8. Are there orphaned edges (missing source or target)?
+  // ─── D8: Orphaned cross-project edges ────────────────────────────
   const q8 = await query(`
     MATCH (s {projectId: $pid})-[r]->(t)
     WHERE NOT t.projectId IS NOT NULL AND NOT t:Project
     RETURN type(r) AS edgeType, count(r) AS cnt ORDER BY cnt DESC LIMIT 5
   `, { pid });
+  const d8total = q8.reduce((s, r) => s + r.cnt, 0);
   results.push({
     id: 'D8', question: 'Are there orphaned edges (cross-project without target projectId)?',
     answer: q8.length > 0
-      ? `${q8.reduce((s, r) => s + r.cnt, 0)} edges point to nodes without projectId`
+      ? `${d8total} edges point to nodes without projectId`
       : 'No orphaned edges detected',
-    healthy: q8.reduce((s, r) => s + r.cnt, 0) < 50,
+    healthy: d8total < 50,
+    nextStep: d8total > 0
+      ? `${d8total} edges target nodes without projectId. Run npm run edges:normalize to tag cross-project edges. Inspect: cypher-shell -u neo4j -p codegraph "MATCH (s {projectId: '${pid}'})-[r]->(t) WHERE t.projectId IS NULL AND NOT t:Project RETURN type(r), t.name, labels(t) LIMIT 20".`
+      : `No orphaned edges. Run npm run edges:verify periodically to confirm.`,
     detail: { orphans: q8 },
   });
 
-  // 9. Is the TC (Temporal Confidence) pipeline producing values?
-  // Note: VRs may not have projectId — check both scoped and global
+  // ─── D9: TC pipeline effectiveConfidence ─────────────────────────
   let q9 = await query(`
     MATCH (vr:VerificationRun {projectId: $pid})
     WHERE vr.effectiveConfidence IS NOT NULL
@@ -209,39 +239,30 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     WHERE vr.effectiveConfidence IS NULL
     RETURN count(vr) AS withoutEC
   `, { pid });
-  // Fallback: if no scoped VRs, check all VRs globally
   if ((q9[0]?.withEC || 0) === 0 && (q9b[0]?.withoutEC || 0) === 0) {
-    q9 = await query(`
-      MATCH (vr:VerificationRun)
-      WHERE vr.effectiveConfidence IS NOT NULL
-      RETURN count(vr) AS withEC, avg(vr.effectiveConfidence) AS avgEC,
-             min(vr.effectiveConfidence) AS minEC, max(vr.effectiveConfidence) AS maxEC
-    `);
-    q9b = await query(`
-      MATCH (vr:VerificationRun) WHERE vr.effectiveConfidence IS NULL
-      RETURN count(vr) AS withoutEC
-    `);
+    q9 = await query(`MATCH (vr:VerificationRun) WHERE vr.effectiveConfidence IS NOT NULL RETURN count(vr) AS withEC, avg(vr.effectiveConfidence) AS avgEC, min(vr.effectiveConfidence) AS minEC, max(vr.effectiveConfidence) AS maxEC`);
+    q9b = await query(`MATCH (vr:VerificationRun) WHERE vr.effectiveConfidence IS NULL RETURN count(vr) AS withoutEC`);
   }
+  const d9withEC = q9[0]?.withEC || 0;
+  const d9withoutEC = q9b[0]?.withoutEC || 0;
   results.push({
     id: 'D9', question: 'Is the TC pipeline producing effectiveConfidence values?',
-    answer: (q9[0]?.withEC || 0) > 0
-      ? `${q9[0]?.withEC} VRs with EC (avg=${(q9[0]?.avgEC || 0).toFixed(3)}, range ${(q9[0]?.minEC || 0).toFixed(3)}–${(q9[0]?.maxEC || 0).toFixed(3)}), ${q9b[0]?.withoutEC || 0} without`
+    answer: d9withEC > 0
+      ? `${d9withEC} VRs with EC (avg=${(q9[0]?.avgEC || 0).toFixed(3)}, range ${(q9[0]?.minEC || 0).toFixed(3)}–${(q9[0]?.maxEC || 0).toFixed(3)}), ${d9withoutEC} without`
       : 'No VRs have effectiveConfidence — TC pipeline not running',
-    healthy: (q9[0]?.withEC || 0) > 0,  // Some VRs (e.g. done-check) legitimately skip TC
-    detail: { ...q9[0], withoutEC: q9b[0]?.withoutEC },
+    healthy: d9withEC > 0,
+    nextStep: d9withEC === 0
+      ? `TC pipeline is not producing values. Run npm run tc:recompute to compute effectiveConfidence on all VRs. If no VRs exist, run npm run verification:scan first.`
+      : d9withoutEC > 0
+        ? `${d9withoutEC} VRs missing effectiveConfidence. Run npm run tc:recompute to fill gaps.`
+        : `All VRs have EC. Run npm run tc:verify to confirm pipeline health. Run npm run verification:status:dashboard for per-family breakdown.`,
+    detail: { ...q9[0], withoutEC: d9withoutEC },
   });
 
-  // 10. Does the graph know its own size accurately?
-  const q10a = await query(`
-    MATCH (p:Project {projectId: $pid})
-    RETURN p.nodeCount AS reportedNodes, p.edgeCount AS reportedEdges
-  `, { pid });
-  const q10b = await query(`
-    MATCH (n {projectId: $pid}) RETURN count(n) AS actualNodes
-  `, { pid });
-  const q10c = await query(`
-    MATCH (s {projectId: $pid})-[r]->(t) RETURN count(r) AS actualEdges
-  `, { pid });
+  // ─── D10: Project node size accuracy ─────────────────────────────
+  const q10a = await query(`MATCH (p:Project {projectId: $pid}) RETURN p.nodeCount AS reportedNodes, p.edgeCount AS reportedEdges`, { pid });
+  const q10b = await query(`MATCH (n {projectId: $pid}) RETURN count(n) AS actualNodes`, { pid });
+  const q10c = await query(`MATCH (s {projectId: $pid})-[r]->(t) RETURN count(r) AS actualEdges`, { pid });
   const reportedNodes = q10a[0]?.reportedNodes || 0;
   const actualNodes = q10b[0]?.actualNodes || 0;
   const reportedEdges = q10a[0]?.reportedEdges || 0;
@@ -251,12 +272,14 @@ async function runDiagnosis(): Promise<DiagResult[]> {
   results.push({
     id: 'D10', question: 'Does the Project node accurately report graph size?',
     answer: `Reported: ${reportedNodes} nodes / ${reportedEdges} edges. Actual: ${actualNodes} / ${actualEdges}. Drift: ${nodeDrift} nodes, ${edgeDrift} edges`,
-    healthy: nodeDrift < actualNodes * 0.1 && edgeDrift < actualEdges * 0.2,  // Edge drift expected: derived edges aren't in p.edgeCount
+    healthy: nodeDrift < actualNodes * 0.1 && edgeDrift < actualEdges * 0.2,
+    nextStep: nodeDrift > actualNodes * 0.1 || edgeDrift > actualEdges * 0.2
+      ? `Project node counts are stale. Run codegraph parse . to refresh the Project node, or run npm run rebuild-derived which updates Project counts at the end.`
+      : `Drift is within tolerance. Edge drift is expected because derived edges are created after parse sets the Project node counts.`,
     detail: { reportedNodes, actualNodes, reportedEdges, actualEdges, nodeDrift, edgeDrift },
   });
 
-  // D11: Enrichment property coverage — are enrichment properties surviving reparse?
-  // (moved below for numbering consistency)
+  // ─── D11: Enrichment property clobber detection ──────────────────
   const d11 = await query(`
     MATCH (f:Function {projectId: $pid})
     WITH count(f) AS total,
@@ -269,15 +292,17 @@ async function runDiagnosis(): Promise<DiagResult[]> {
   const d11r = d11[0] || {};
   const d11Total = d11r.total || 1;
   const d11CoveragePct = Math.round((d11r.hasCompositeRisk || 0) / d11Total * 100);
-  const d11Healthy = d11CoveragePct > 95; // >95% of functions should retain enrichment props
   results.push({
     id: 'D11', question: 'Are enrichment properties surviving reparse? (property clobber detection)',
     answer: `${d11r.hasCompositeRisk}/${d11Total} functions have compositeRisk (${d11CoveragePct}%). riskTier: ${d11r.hasRiskTier}, gitFreq: ${d11r.hasGitFreq}, tempCoupling: ${d11r.hasTempCoupling}`,
-    healthy: d11Healthy,
+    healthy: d11CoveragePct > 95,
+    nextStep: d11CoveragePct <= 95
+      ? `Enrichment properties were clobbered by reparse. Run npm run rebuild-derived to regenerate all enrichment data. Check src/mcp/handlers/incremental-parse.handler.ts for SET n = p (should be SET n += p).`
+      : `Enrichment properties intact. If a reparse drops coverage below 95%, the incremental-parse handler may be using SET n = p instead of SET n += p — check src/mcp/handlers/incremental-parse.handler.ts.`,
     detail: d11r,
   });
 
-  // D12: Entrypoint dispatch coverage — are all entrypoints wired to handlers?
+  // ─── D12: Entrypoint dispatch coverage ───────────────────────────
   const d12 = await query(`
     MATCH (e:Entrypoint {projectId: $pid})
     OPTIONAL MATCH (e)-[:DISPATCHES_TO]->(h)
@@ -288,14 +313,18 @@ async function runDiagnosis(): Promise<DiagResult[]> {
            [x IN unwired WHERE x IS NOT NULL] AS disconnectedNames
   `, { pid });
   const d12r = d12[0] || {};
+  const d12disconnected = d12r.disconnected || 0;
   results.push({
     id: 'D12', question: 'Are all entrypoints wired to handlers? (dispatch coverage)',
-    answer: `${d12r.wired}/${d12r.total} entrypoints have DISPATCHES_TO edges. ${d12r.disconnected} disconnected${d12r.disconnectedNames?.length ? ': ' + d12r.disconnectedNames.slice(0, 5).join(', ') : ''}`,
-    healthy: (d12r.disconnected || 0) === 0,
+    answer: `${d12r.wired}/${d12r.total} entrypoints have DISPATCHES_TO edges. ${d12disconnected} disconnected${d12r.disconnectedNames?.length ? ': ' + d12r.disconnectedNames.slice(0, 5).join(', ') : ''}`,
+    healthy: d12disconnected === 0,
+    nextStep: d12disconnected > 0
+      ? `${d12disconnected} entrypoints have no DISPATCHES_TO edge. Run npm run enrich:entrypoint-edges to rewire. Disconnected entrypoints: ${(d12r.disconnectedNames || []).slice(0, 5).join(', ')}. Check src/scripts/enrichment/create-entrypoint-dispatch-edges.ts for matching patterns.`
+      : `All entrypoints wired. Run npm run enrich:entrypoint-edges after adding new MCP tools or CLI commands to create their dispatch edges.`,
     detail: d12r,
   });
 
-  // D13: Plan task evidence coverage — how many "done" tasks have zero evidence?
+  // ─── D13: Plan task evidence coverage ────────────────────────────
   const d13 = await query(`
     MATCH (t:Task)
     WHERE t.status = 'done'
@@ -311,10 +340,13 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     id: 'D13', question: 'Do "done" tasks have structural evidence? (unproven completions)',
     answer: `${d13r.withEvidence}/${d13r.totalDone} done tasks have code evidence. ${d13r.noEvidence} unproven (${d13Pct}%)`,
     healthy: d13Pct < 50,
+    nextStep: d13Pct > 0
+      ? `${d13r.noEvidence} done tasks have no HAS_CODE_EVIDENCE edges. Run npm run plan:evidence:recompute to refresh semantic keyword matching. List unproven tasks: cypher-shell -u neo4j -p codegraph "MATCH (t:Task) WHERE t.status = 'done' AND NOT (t)-[:HAS_CODE_EVIDENCE]->() RETURN t.name, t.projectId LIMIT 20".`
+      : `All done tasks have code evidence. Run npm run plan:evidence:recompute after code changes to keep evidence links current.`,
     detail: d13r,
   });
 
-  // D14: Provenance coverage — what % of edges have source/confidence metadata?
+  // ─── D14: Provenance coverage ────────────────────────────────────
   const d14 = await query(`
     MATCH (s {projectId: $pid})-[r]->(t)
     WITH type(r) AS edgeType, count(r) AS total,
@@ -331,10 +363,13 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     id: 'D14', question: 'Do edges have provenance metadata? (audit trail coverage)',
     answer: `${d14WithProv}/${d14Total} edges have provenance (${d14Pct}%). ${d14Zero.length} edge types with 0% coverage${d14Zero.length ? ': ' + d14Zero.slice(0, 5).join(', ') : ''}`,
     healthy: d14Pct > 30,
+    nextStep: d14Zero.length > 0
+      ? `${d14Zero.length} edge types have zero provenance. Run npm run enrich:provenance to backfill. Edge types needing provenance: ${d14Zero.slice(0, 5).join(', ')}. Each enrichment script that creates edges must set {source: 'scriptName', confidence: N} on the edge.`
+      : `Provenance coverage is ${d14Pct}%. Target: >80%. Run npm run enrich:provenance to improve. Check src/scripts/enrichment/ for scripts that create edges without source/confidence properties.`,
     detail: { totalEdges: d14Total, withProvenance: d14WithProv, pct: d14Pct, zeroCoverage: d14Zero },
   });
 
-  // D15: Test coverage vs risk — are CRITICAL/HIGH functions in tested files?
+  // ─── D15: Risk vs test coverage gap ──────────────────────────────
   const d15 = await query(`
     MATCH (f:Function {projectId: $pid})
     WHERE f.riskTier IN ['CRITICAL', 'HIGH']
@@ -347,16 +382,28 @@ async function runDiagnosis(): Promise<DiagResult[]> {
   `, { pid });
   const d15Untested = d15.reduce((s, r) => s + r.untested, 0);
   const d15Total = d15.reduce((s, r) => s + r.total, 0);
+  // Get top untested CRITICAL files for nextStep
+  const d15files = await query(`
+    MATCH (f:Function {projectId: $pid})
+    WHERE f.riskTier = 'CRITICAL'
+    MATCH (sf:SourceFile {projectId: $pid})-[:CONTAINS]->(f)
+    WHERE NOT (sf)<-[:TESTED_BY]-()
+    RETURN sf.name AS file, count(f) AS criticalCount
+    ORDER BY criticalCount DESC LIMIT 5
+  `, { pid });
   results.push({
     id: 'D15', question: 'Are CRITICAL/HIGH functions in tested files? (risk vs coverage gap)',
     answer: d15Total > 0
       ? `${d15Untested}/${d15Total} CRITICAL/HIGH functions are in untested files. ${d15.map(r => `${r.tier}: ${r.untested}/${r.total} untested`).join(', ')}`
       : 'No CRITICAL/HIGH functions found (risk tiers may be stale)',
     healthy: d15Total > 0 && d15Untested < d15Total * 0.3,
-    detail: { breakdown: d15 },
+    nextStep: d15Untested > 0
+      ? `${d15Untested} CRITICAL/HIGH functions have no test coverage. Top untested CRITICAL files: ${d15files.map(f => `${f.file} (${f.criticalCount} CRITICAL)`).join(', ')}. Write tests for these files, then run npm run enrich:test-coverage to create TESTED_BY edges. Run codegraph enforce <file> to check gate status.`
+      : `All CRITICAL/HIGH functions are in tested files. Run npm run enrich:test-coverage after adding new tests to refresh TESTED_BY edges.`,
+    detail: { breakdown: d15, topUntestedFiles: d15files },
   });
 
-  // D16: Verification source identity — are there VRs with unknown tool?
+  // ─── D16: Verification source identity ───────────────────────────
   const d16 = await query(`
     MATCH (vr:VerificationRun)
     WHERE vr.projectId = $pid OR vr.projectId IS NULL
@@ -368,10 +415,13 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     id: 'D16', question: 'Do all verification runs have a known tool?',
     answer: `${d16Total - d16Null}/${d16Total} VRs have tool metadata. ${d16Null} with unknown tool`,
     healthy: d16Null < d16Total * 0.1,
+    nextStep: d16Null > 0
+      ? `${d16Null} VRs have no tool property. Inspect: cypher-shell -u neo4j -p codegraph "MATCH (vr:VerificationRun) WHERE vr.tool IS NULL RETURN vr.sourceFamily, vr.ruleId, count(vr) LIMIT 10". Fix the SARIF importer or done-check capture script to set vr.tool on all VRs.`
+      : `All VRs have tool metadata. No action needed.`,
     detail: { distribution: d16, nullCount: d16Null },
   });
 
-  // D17: Claim→Evidence→Code chain completeness — can claims reach source code?
+  // ─── D17: Claim→Evidence→Code chain ──────────────────────────────
   const d17 = await query(`
     MATCH (c:Claim)
     OPTIONAL MATCH (c)-[:SUPPORTED_BY]->(e:Evidence)-[:ANCHORED_TO]->(code)
@@ -384,11 +434,14 @@ async function runDiagnosis(): Promise<DiagResult[]> {
   results.push({
     id: 'D17', question: 'Can claims reach source code? (Claim→Evidence→Code chain)',
     answer: `${d17r.fullyChained}/${d17r.totalClaims} claims have full chain to code (${d17Pct}%). ${d17r.broken} broken chains`,
-    healthy: d17Pct > 10, // Most claims are plan-level, not code-level, so low threshold
+    healthy: d17Pct > 10,
+    nextStep: d17Pct < 100
+      ? `${d17r.broken} claims cannot reach source code. Run npm run evidence:auto-link then npm run enrich:evidence-anchor to create ANCHORED_TO edges from Evidence to CodeNodes. Most broken chains are plan-level claims that need ANCHORED_TO edges to the SourceFile/Function they describe.`
+      : `All claims reach source code. No action needed.`,
     detail: d17r,
   });
 
-  // D18: Property Schema Consistency — do all Function nodes have the same property shape?
+  // ─── D18: Property schema consistency ────────────────────────────
   const d18 = await query(`
     MATCH (f:Function {projectId: $pid})
     WITH apoc.coll.sort(keys(f)) AS sig, count(*) AS cnt
@@ -396,15 +449,19 @@ async function runDiagnosis(): Promise<DiagResult[]> {
   `, { pid });
   const d18Sigs = d18.length;
   const d18MissingRisk = d18.filter(r => !r.sig.includes('compositeRisk') || !r.sig.includes('riskTier'));
-  const d18Healthy = d18Sigs <= 3 && d18MissingRisk.length === 0;
   results.push({
     id: 'D18', question: 'Do all Function nodes have consistent property schemas?',
     answer: `${d18Sigs} distinct key signatures. ${d18MissingRisk.length} signatures missing compositeRisk/riskTier${d18Sigs > 3 ? ' — too many variants, enrichment is inconsistent' : ''}`,
-    healthy: d18Healthy,
+    healthy: d18Sigs <= 3 && d18MissingRisk.length === 0,
+    nextStep: d18MissingRisk.length > 0
+      ? `${d18MissingRisk.length} Function node groups are missing compositeRisk/riskTier. Run npm run enrich:composite-risk to fill gaps. Inspect: cypher-shell -u neo4j -p codegraph "MATCH (f:Function {projectId: '${pid}'}) WHERE f.compositeRisk IS NULL RETURN f.name, f.filePath LIMIT 10".`
+      : d18Sigs > 3
+        ? `${d18Sigs} distinct property schemas — enrichment is running inconsistently. Run npm run rebuild-derived to normalize all Function properties.`
+        : `Property schemas are consistent. No action needed.`,
     detail: { signatures: d18Sigs, missingRisk: d18MissingRisk.length, top3: d18.slice(0, 3).map(r => ({ keys: r.sig.length, count: r.cnt })) },
   });
 
-  // D19: Risk Distribution Shape — is any single tier >80% (broken) or >60% (warn)?
+  // ─── D19: Risk distribution shape ────────────────────────────────
   const d19 = await query(`
     MATCH (f:Function {projectId: $pid})
     WHERE f.riskTier IS NOT NULL
@@ -422,14 +479,185 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     id: 'D19', question: 'Is the risk tier distribution healthy? (no single tier >60%)',
     answer: `${d19Status}. ${d19.map(r => `${r.tier}: ${r.pct}%`).join(', ')}. Dominant: ${d19Dominant} at ${d19MaxPct}%`,
     healthy: d19Healthy,
+    nextStep: d19MaxPct > 60
+      ? `${d19Dominant} tier dominates at ${d19MaxPct}%. Run npm run enrich:git-frequency && npm run enrich:temporal-coupling && npm run enrich:composite-risk to recalculate. If still >60%, check the composite risk formula in src/scripts/enrichment/create-composite-risk.ts — percentile bucketing may need retuning.`
+      : `Distribution is healthy. No action needed. Monitor after major code changes — a merge of many new files can skew toward LOW.`,
     detail: { maxPct: d19MaxPct, dominant: d19Dominant, distribution: d19 },
+  });
+
+  // ─── D20: Security × Risk × Coverage triple-cross ────────────────
+  const d20 = await query(`
+    MATCH (vr:VerificationRun {projectId: $pid})-[:FLAGS]->(f)
+    WHERE vr.ruleId CONTAINS 'security' OR vr.ruleId CONTAINS 'path-traversal'
+       OR vr.ruleId CONTAINS 'child-process' OR vr.ruleId CONTAINS 'unsafe-format'
+       OR vr.ruleId CONTAINS 'detect-non-literal'
+    AND f.riskTier = 'CRITICAL'
+    MATCH (sf:SourceFile {projectId: $pid})-[:CONTAINS]->(f)
+    OPTIONAL MATCH (sf)<-[:TESTED_BY]-(tf)
+    WITH count(DISTINCT f) AS secCritical,
+         sum(CASE WHEN tf IS NULL THEN 1 ELSE 0 END) AS secCriticalUntested,
+         collect(DISTINCT sf.name) AS files
+    RETURN secCritical, secCriticalUntested, files
+  `, { pid });
+  const d20r = d20[0] || { secCritical: 0, secCriticalUntested: 0, files: [] };
+  results.push({
+    id: 'D20', question: 'Are security-flagged CRITICAL functions tested? (RF1×RF2 cross-cut)',
+    answer: d20r.secCritical > 0
+      ? `${d20r.secCriticalUntested}/${d20r.secCritical} security-flagged CRITICAL functions are untested. Files: ${(d20r.files as string[]).slice(0, 5).join(', ')}`
+      : 'No security-flagged CRITICAL functions found',
+    healthy: d20r.secCriticalUntested === 0,
+    nextStep: d20r.secCriticalUntested > 0
+      ? `${d20r.secCriticalUntested} CRITICAL functions have Semgrep security findings AND zero test coverage. Files: ${(d20r.files as string[]).slice(0, 5).join(', ')}. Write tests for these files, then run npm run enrich:test-coverage. These are the highest-priority test targets in the codebase.`
+      : d20r.secCritical > 0
+        ? `All ${d20r.secCritical} security-flagged CRITICAL functions have test coverage. Run npm run verification:scan periodically to check for new security findings.`
+        : `No security-flagged CRITICAL functions. Run npm run verification:scan to refresh Semgrep findings.`,
+    detail: d20r,
+  });
+
+  // ─── D21: Confidence erosion early warning ───────────────────────
+  const d21 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.effectiveConfidence IS NOT NULL AND r.requiredConfidence IS NOT NULL
+    WITH r.sourceFamily AS family,
+         min(r.effectiveConfidence - r.requiredConfidence) AS minMargin,
+         count(r) AS vrCount,
+         sum(CASE WHEN (r.effectiveConfidence - 0.15) < r.requiredConfidence THEN 1 ELSE 0 END) AS wouldFlipAt15
+    RETURN family, vrCount,
+           round(minMargin * 1000) / 1000.0 AS minMargin,
+           wouldFlipAt15
+    ORDER BY minMargin
+  `, { pid });
+  const d21worst = d21.length > 0 ? d21[0] : { family: 'none', minMargin: 0, wouldFlipAt15: 0 };
+  const d21anyThin = d21.some(r => r.minMargin < 0.15);
+  results.push({
+    id: 'D21', question: 'How close are tool families to confidence debt? (erosion early warning)',
+    answer: d21.length > 0
+      ? d21.map(r => `${r.family}: margin=${r.minMargin}, ${r.wouldFlipAt15}/${r.vrCount} would flip at 15% decay`).join('. ')
+      : 'No VRs with effectiveConfidence and requiredConfidence',
+    healthy: !d21anyThin,
+    nextStep: d21anyThin
+      ? `${d21worst.family} has minimum margin of ${d21worst.minMargin} — a ${Math.round((1 - d21worst.minMargin / 0.15) * 100)}% TCF decay would trigger debt. Run npm run verification:scan to refresh SARIF data and re-run npm run tc:recompute. If margin stays thin, consider raising tool confidence in src/core/verification/sarif-importer.ts mapLevelToConfidence().`
+      : `All tool families have margin ≥0.15 above required confidence. No erosion risk. Run npm run tc:debt to see current debt dashboard.`,
+    detail: { families: d21 },
+  });
+
+  // ─── D22: Entrypoint → CRITICAL untested handler chain ───────────
+  const d22 = await query(`
+    MATCH (e:Entrypoint {projectId: $pid})-[:DISPATCHES_TO]->(f)
+    WHERE f.riskTier = 'CRITICAL'
+    MATCH (sf:SourceFile {projectId: $pid})-[:CONTAINS]->(f)
+    WHERE NOT (sf)<-[:TESTED_BY]-()
+    RETURN e.name AS entrypoint, e.kind AS kind, f.name AS handler, sf.name AS file
+    ORDER BY entrypoint
+  `, { pid });
+  results.push({
+    id: 'D22', question: 'Do user-facing entrypoints dispatch to untested CRITICAL code?',
+    answer: d22.length > 0
+      ? `${d22.length} entrypoint→CRITICAL untested chains: ${d22.slice(0, 5).map(r => `${r.entrypoint}→${r.handler} (${r.file})`).join(', ')}`
+      : 'No entrypoints dispatch to untested CRITICAL functions',
+    healthy: d22.length === 0,
+    nextStep: d22.length > 0
+      ? `${d22.length} user-facing commands route to CRITICAL untested code. Affected entrypoints: ${d22.slice(0, 5).map(r => r.entrypoint).join(', ')}. Write tests for ${[...new Set(d22.map(r => r.file))].slice(0, 3).join(', ')}, then run npm run enrich:test-coverage to create TESTED_BY edges.`
+      : `All entrypoints dispatch to tested or non-CRITICAL code. No action needed.`,
+    detail: { chains: d22 },
+  });
+
+  // ─── D23: Derived edge bloat ratio ───────────────────────────────
+  const d23 = await query(`
+    MATCH (s:GraphMetricsSnapshot)
+    RETURN s.timestamp AS ts, s.derivedEdgeRatio AS ratio, s.derivedEdgeCount AS derived, s.edgeCount AS total
+    ORDER BY s.timestamp DESC LIMIT 2
+  `);
+  const d23Latest = d23[0] || {};
+  const d23Prev = d23[1] || {};
+  const d23Ratio = d23Latest.ratio ? (d23Latest.ratio * 100).toFixed(1) : 'N/A';
+  const d23PrevRatio = d23Prev.ratio ? (d23Prev.ratio * 100).toFixed(1) : null;
+  const d23Delta = d23Prev.ratio && d23Latest.ratio ? ((d23Latest.ratio - d23Prev.ratio) * 100).toFixed(1) : null;
+  const d23Healthy = !d23Latest.ratio || d23Latest.ratio < 0.20;
+  results.push({
+    id: 'D23', question: 'Is the derived-to-canonical edge ratio healthy? (graph bloat detection)',
+    answer: d23Latest.ratio
+      ? `Derived edge ratio: ${d23Ratio}% (${d23Latest.derived}/${d23Latest.total}).${d23Delta ? ` Change from previous: ${d23Delta > '0' ? '+' : ''}${d23Delta}pp` : ''}`
+      : 'No GraphMetricsSnapshot nodes — cannot compute ratio',
+    healthy: d23Healthy,
+    nextStep: !d23Healthy
+      ? `Derived edge ratio is ${d23Ratio}% — above 20% threshold. Run npm run rebuild-derived to prune stale derived edges. Check enrichment scripts for edge duplication — each script should use MERGE, not CREATE, for derived edges.`
+      : d23Latest.ratio
+        ? `Derived ratio is ${d23Ratio}% — healthy (warn at 20%, alarm at 35%). Run npm run graph:metrics after each done-check to track trend.`
+        : `Run npm run graph:metrics to create the first snapshot, then run again after done-check to establish a trend.`,
+    detail: { latest: d23Latest, previous: d23Prev, delta: d23Delta },
+  });
+
+  // ─── D24: Governance trend regression ────────────────────────────
+  const d24 = await query(`
+    MATCH (m:GovernanceMetricSnapshot {projectId: $pid})
+    RETURN m.computedAt AS ts, m.interceptionRate AS intercept,
+           m.invariantViolations AS violations, m.gateFailures AS gateFails,
+           m.verificationRuns AS vrCount
+    ORDER BY m.computedAt DESC LIMIT 1
+  `, { pid });
+  const d24oldest = await query(`
+    MATCH (m:GovernanceMetricSnapshot {projectId: $pid})
+    RETURN m.computedAt AS ts, m.interceptionRate AS intercept,
+           m.invariantViolations AS violations, m.gateFailures AS gateFails
+    ORDER BY m.computedAt ASC LIMIT 1
+  `, { pid });
+  const d24count = await query(`MATCH (m:GovernanceMetricSnapshot {projectId: $pid}) RETURN count(m) AS cnt`, { pid });
+  const d24latest = d24[0] || {};
+  const d24first = d24oldest[0] || {};
+  const d24n = d24count[0]?.cnt || 0;
+  const d24regressed = d24latest.intercept !== undefined && d24first.intercept !== undefined
+    && (d24latest.intercept < d24first.intercept || (d24latest.violations || 0) > (d24first.violations || 0));
+  results.push({
+    id: 'D24', question: 'Is governance health trending stable or regressing?',
+    answer: d24n > 0
+      ? `${d24n} governance snapshots. Latest: intercept=${d24latest.intercept}, violations=${d24latest.violations}, gateFails=${d24latest.gateFails}. Earliest: intercept=${d24first.intercept}, violations=${d24first.violations}.${d24regressed ? ' REGRESSION DETECTED.' : ' No regression.'}`
+      : 'No GovernanceMetricSnapshot nodes — governance:metrics:snapshot has not run',
+    healthy: !d24regressed && d24n > 0,
+    nextStep: d24n === 0
+      ? `Run npm run governance:metrics:snapshot to create the first governance snapshot. It runs automatically as part of npm run done-check.`
+      : d24regressed
+        ? `Governance has regressed since first snapshot. Run npm run governance:metrics:integrity:verify for detailed comparison. Check npm run done-check output for which gate step is now failing.`
+        : `Governance is stable across ${d24n} snapshots. Run npm run governance:metrics:integrity:verify to confirm baseline integrity.`,
+    detail: { count: d24n, latest: d24latest, earliest: d24first, regressed: d24regressed },
+  });
+
+  // ─── D25: Snapshot cadence consistency ───────────────────────────
+  const d25gms = await query(`
+    MATCH (s:GraphMetricsSnapshot)
+    RETURN s.timestamp AS ts ORDER BY s.timestamp
+  `);
+  const d25int = await query(`
+    MATCH (s:IntegritySnapshot)
+    RETURN s.timestamp AS ts ORDER BY s.timestamp DESC LIMIT 1
+  `);
+  // Check JSONL files via snapshot count
+  const d25gmsCount = d25gms.length;
+  const d25gmsGap = d25gms.length >= 2
+    ? Math.round((new Date(d25gms[d25gms.length - 1].ts).getTime() - new Date(d25gms[d25gms.length - 2].ts).getTime()) / 3600000)
+    : null;
+  const d25intTs = d25int[0]?.ts;
+  const d25intAge = d25intTs
+    ? Math.round((Date.now() - new Date(d25intTs).getTime()) / 3600000)
+    : null;
+  const d25Healthy = d25gmsCount >= 2 && (d25gmsGap === null || d25gmsGap < 48);
+  results.push({
+    id: 'D25', question: 'Are snapshots being created consistently? (cadence gap detection)',
+    answer: `GraphMetricsSnapshot: ${d25gmsCount} nodes${d25gmsGap !== null ? `, last gap: ${d25gmsGap}h` : ''}. IntegritySnapshot in Neo4j: ${d25intTs ? `last ${d25intAge}h ago` : 'none found'}. JSONL files: check artifacts/integrity-snapshots/ for daily files.`,
+    healthy: d25Healthy,
+    nextStep: d25gmsCount < 2
+      ? `Only ${d25gmsCount} GraphMetricsSnapshot nodes. Run npm run done-check at least twice to establish a baseline for delta comparison. Each done-check creates one snapshot.`
+      : d25gmsGap !== null && d25gmsGap > 48
+        ? `${d25gmsGap}h gap between last two snapshots — exceeds 48h threshold. Ensure npm run done-check runs at least daily. Check if the watcher service is running: systemctl --user status codegraph-watcher.service.`
+        : `Snapshot cadence is consistent. Run npm run integrity:verify to compare latest JSONL snapshot against baseline. Run npm run graph:metrics to record a fresh GraphMetricsSnapshot.`,
+    detail: { gmsCount: d25gmsCount, gmsGapHours: d25gmsGap, intAge: d25intAge },
   });
 
   return results;
 }
 
 async function main() {
-  console.log('🔬 Self-Diagnosis — 19 Epistemological Health Checks\n');
+  console.log('🔬 Self-Diagnosis — 25 Epistemological Health Checks\n');
   console.log('   "Does the graph know what it doesn\'t know?"\n');
 
   try {
@@ -441,7 +669,8 @@ async function main() {
     for (const r of results) {
       const icon = r.healthy ? '✅' : '❌';
       console.log(`${icon} ${r.id}: ${r.question}`);
-      console.log(`   ${r.answer}\n`);
+      console.log(`   ${r.answer}`);
+      console.log(`   → ${r.nextStep}\n`);
 
       if (r.healthy) healthy++;
       else unhealthy++;
@@ -449,6 +678,17 @@ async function main() {
 
     console.log('═'.repeat(65));
     console.log(`📊 Health: ${healthy}/${results.length} checks pass, ${unhealthy} need attention`);
+
+    // JSON output for machine consumption
+    const jsonOutput = {
+      timestamp: new Date().toISOString(),
+      projectId: await getProjectId(),
+      healthy,
+      unhealthy,
+      total: results.length,
+      results,
+    };
+    console.log('\n' + JSON.stringify(jsonOutput));
 
     if (unhealthy === 0) {
       console.log('\n✅ Graph is self-aware — knows its own state, gaps, and limitations.');
