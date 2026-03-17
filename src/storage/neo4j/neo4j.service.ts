@@ -144,7 +144,12 @@ export const QUERIES = {
 
   CREATE_NODE: `
     UNWIND $nodes AS nodeData
-    CALL apoc.create.node(nodeData.labels, nodeData.properties) YIELD node
+    CALL apoc.merge.node(
+      nodeData.labels,
+      {id: nodeData.properties.id},
+      nodeData.properties,
+      nodeData.properties
+    ) YIELD node
     RETURN count(*) as created
   `,
 

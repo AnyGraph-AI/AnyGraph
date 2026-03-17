@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * self-diagnosis — 35 epistemological health checks.
+ * self-diagnosis — 36 epistemological health checks.
  * Tests what the graph knows about its own limitations.
  *
  * Each check answers: "Does the graph know what it doesn't know?"
@@ -919,11 +919,38 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     detail: { allSame: d35AllSame, occupiedBins: d34Occupied, totalVRs: d34Total },
   });
 
+  // ── D36: Embedding Coverage (nodes missing/failed embeddings) ──────
+  const d36 = await query(`
+    MATCH (n:CodeNode {projectId: $pid})
+    WHERE n.sourceCode IS NOT NULL
+    WITH count(n) AS total,
+         sum(CASE WHEN n.embeddingStatus = 'failed' THEN 1 ELSE 0 END) AS failed,
+         sum(CASE WHEN n:Embedded THEN 1 ELSE 0 END) AS embedded
+    RETURN total, failed, embedded, total - embedded - failed AS missing
+  `, { pid });
+  const d36Total = Number(d36[0]?.total ?? 0);
+  const d36Failed = Number(d36[0]?.failed ?? 0);
+  const d36Embedded = Number(d36[0]?.embedded ?? 0);
+  const d36Missing = Number(d36[0]?.missing ?? 0);
+  const d36Healthy = d36Failed === 0 && d36Missing < d36Total * 0.05;
+
+  results.push({
+    id: 'D36', question: 'Do all code nodes have embeddings? (semantic search coverage)',
+    answer: `${d36Embedded}/${d36Total} embedded, ${d36Failed} failed, ${d36Missing} missing. Coverage: ${d36Total > 0 ? ((d36Embedded / d36Total) * 100).toFixed(1) : 0}%.`,
+    healthy: d36Healthy,
+    nextStep: d36Failed > 0
+      ? `${d36Failed} nodes have embeddingStatus='failed' — embedding API error during import. These nodes are in the graph but invisible to NL search. Re-run embedding: cypher-shell -u neo4j -p codegraph "MATCH (n:CodeNode {projectId: '${pid}', embeddingStatus: 'failed'}) RETURN n.name, n.embeddingError LIMIT 10".`
+      : d36Missing > d36Total * 0.05
+        ? `${d36Missing} nodes have sourceCode but no embedding and no failure marker. These may predate the embedding pipeline. Re-run parse or a dedicated embedding enrichment script.`
+        : `Embedding coverage is good. ${d36Embedded}/${d36Total} nodes have embeddings for semantic search.`,
+    detail: { total: d36Total, embedded: d36Embedded, failed: d36Failed, missing: d36Missing },
+  });
+
   return results;
 }
 
 async function main() {
-  console.log('🔬 Self-Diagnosis — 35 Epistemological Health Checks\n');
+  console.log('🔬 Self-Diagnosis — 36 Epistemological Health Checks\n');
   console.log('   "Does the graph know what it doesn\'t know?"\n');
 
   try {
@@ -943,7 +970,7 @@ async function main() {
     }
 
     console.log('═'.repeat(65));
-    console.log(`📊 Health: ${healthy}/${results.length} checks pass (of 35), ${unhealthy} need attention`);
+    console.log(`📊 Health: ${healthy}/${results.length} checks pass (of 36), ${unhealthy} need attention`);
 
     // JSON output for machine consumption
     const jsonOutput = {
