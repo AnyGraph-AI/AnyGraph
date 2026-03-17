@@ -593,7 +593,7 @@ Before declaring any implementation task complete, run:
 npm run done-check
 ```
 
-`done-check` currently executes **55 steps** across build, normalization, verification, and integrity gates. Core stages include:
+`done-check` currently executes **57+ steps** across build, normalization, verification, and integrity gates. Core stages include:
 1. `npm run build`
 2. `npm run edges:normalize`
 3. `npm run plan:evidence:recompute`
@@ -604,7 +604,15 @@ npm run done-check
 8. `npm run plan:deps:verify`
 9. `npm run integrity:snapshot`
 10. `npm run integrity:verify`
-Plus 45 additional verification, governance, and audit sub-steps.
+Plus 47 additional verification, governance, and audit sub-steps.
+
+### Quick Health Commands (run anytime)
+```bash
+npm run probe-architecture   # 25 structural queries — instant graph health picture
+npm run self-diagnosis        # 10 epistemological checks — does the graph know its own gaps?
+npm run graph:metrics         # Record a GraphMetricsSnapshot node (tracks growth over time)
+npm run rebuild-derived       # Nuke + rebuild all derived edges and properties
+```
 
 Rules:
 - If gate fails, task is **not done**.

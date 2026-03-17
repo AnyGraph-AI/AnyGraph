@@ -94,6 +94,58 @@ node dist/mcp/mcp.server.js
 }
 ```
 
+## CLI Commands
+
+### Core
+
+| Command | What It Does |
+|---------|-------------|
+| `codegraph parse <dir>` | Parse TypeScript project. Auto-detects existing projectId (MERGE mode). `--fresh` for destructive wipe. |
+| `codegraph enrich [projectId]` | Run post-ingest enrichment pipeline |
+| `codegraph analyze <dir>` | Parse + enrich in one shot |
+| `codegraph serve` | Start MCP server (56 tools) |
+| `codegraph status` | Show Neo4j and project status |
+| `codegraph risk <target>` | Query blast radius for a function |
+| `codegraph probe` | **25 architecture queries** — risk, coupling, entrypoints, verification coverage, cross-layer analysis |
+| `codegraph diagnose` | **10 epistemological health checks** — does the graph know what it doesn't know? |
+
+### Governance Pipeline
+
+| Command | What It Does |
+|---------|-------------|
+| `npm run done-check` | Full 57-step pipeline: build → enrich → verify → integrity → TC → governance → metrics |
+| `npm run rebuild-derived` | Delete all derived edges + properties, re-run 12 enrichment scripts in dependency order |
+| `npm run probe-architecture` | Same as `codegraph probe` |
+| `npm run self-diagnosis` | Same as `codegraph diagnose` |
+| `npm run verification:scan` | Run Semgrep + ESLint, import SARIF as VerificationRun nodes |
+| `npm run graph:metrics` | Record GraphMetricsSnapshot node (tracks growth over time) |
+| `npm run integrity:snapshot` | Snapshot current invariant state |
+| `npm run integrity:verify` | Verify latest snapshot against baselines |
+
+### Enrichment Scripts (run individually or via done-check)
+
+| Category | Commands |
+|----------|---------|
+| **Structural** (post-parse) | `enrich:temporal-coupling`, `enrich:vr-scope`, `enrich:evidence-anchor`, `enrich:claim-project`, `enrich:evidence-project` |
+| **Git-derived** (needs repo) | `enrich:git-frequency`, `enrich:author-ownership` |
+| **On-demand** (expensive/batch) | `enrich:composite-risk`, `enrich:flags-edges`, `enrich:entrypoint-edges`, `enrich:state-fields`, `enrich:provenance` |
+
+### Graph History
+
+GraphMetricsSnapshot nodes track graph growth over time. Each `done-check` run creates a snapshot with:
+- `nodeCount`, `edgeCount`, `derivedEdgeCount`, `derivedEdgeRatio`
+- `avgDegree`, `maxDegree`, `maxDegreeNodeName`
+- `edgeTypeDistributionJson`, `labelDistributionJson`
+- `timestamp` (datetime)
+
+Query growth history:
+```bash
+cypher-shell -u neo4j -p codegraph "
+  MATCH (s:GraphMetricsSnapshot)
+  RETURN s.timestamp, s.nodeCount, s.edgeCount, s.derivedEdgeCount
+  ORDER BY s.timestamp"
+```
+
 ## Graph Schema
 
 ### Node Labels

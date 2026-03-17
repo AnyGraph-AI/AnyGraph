@@ -93,7 +93,7 @@ async function runDiagnosis(): Promise<DiagResult[]> {
   // 3. Are integrity snapshots fresh?
   const q3 = await query(`
     MATCH (s:GraphMetricsSnapshot)
-    RETURN s.timestamp AS ts, s.totalNodes AS nodes, s.totalEdges AS edges
+    RETURN s.timestamp AS ts, s.nodeCount AS nodes, s.edgeCount AS edges
     ORDER BY s.timestamp DESC LIMIT 1
   `);
   const lastSnapshot = q3[0]?.ts;
