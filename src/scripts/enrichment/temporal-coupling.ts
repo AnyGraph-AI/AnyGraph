@@ -39,7 +39,7 @@ const PROJECTS: Record<string, { path: string; id: string }> = {
   },
 };
 
-function mineCoChanges(repoPath: string): CoChangePair[] {
+export function mineCoChanges(repoPath: string): CoChangePair[] {
   // Get git log: each commit with its changed files
   const gitLog = execSync(
     `cd "${repoPath}" && git log --name-only --pretty=format:"COMMIT:%H:%aI" --diff-filter=AMRC -- '*.ts' '*.tsx'`,
@@ -114,7 +114,7 @@ function mineCoChanges(repoPath: string): CoChangePair[] {
   return pairs;
 }
 
-async function ingestCoChanges(pairs: CoChangePair[], projectId: string) {
+export async function ingestCoChanges(pairs: CoChangePair[], projectId: string) {
   const driver = neo4j.driver(
     process.env.NEO4J_URI || 'bolt://localhost:7687',
     neo4j.auth.basic(
@@ -239,7 +239,7 @@ async function ingestCoChanges(pairs: CoChangePair[], projectId: string) {
   }
 }
 
-async function main() {
+export async function main() {
   const arg = process.argv[2] || 'codegraph';
 
   let repoPath: string;
@@ -266,7 +266,9 @@ async function main() {
   console.log('\n✅ Temporal coupling analysis complete!');
 }
 
-main().catch(err => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/temporal-coupling.ts') || process.argv[1]?.endsWith('/temporal-coupling.js')) {
+  main().catch(err => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}

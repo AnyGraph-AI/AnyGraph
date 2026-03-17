@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../../..');
 
-function toNum(val: unknown): number {
+export function toNum(val: unknown): number {
   if (val === null || val === undefined) return 0;
   if (typeof val === 'number') return val;
   if (typeof val === 'bigint') return Number(val);
@@ -28,7 +28,7 @@ function toNum(val: unknown): number {
   return Number(val) || 0;
 }
 
-function fieldId(projectId: string, filePath: string, className: string | null, name: string): string {
+export function fieldId(projectId: string, filePath: string, className: string | null, name: string): string {
   const hash = createHash('sha256')
     .update([projectId, filePath, className ?? '__module__', name].join('::'))
     .digest('hex')
@@ -56,7 +56,7 @@ interface StateAccess {
   isWrite: boolean;
 }
 
-function extractMutableFields(project: Project): FieldData[] {
+export function extractMutableFields(project: Project): FieldData[] {
   const fields: FieldData[] = [];
 
   for (const sourceFile of project.getSourceFiles()) {
@@ -118,7 +118,7 @@ function extractMutableFields(project: Project): FieldData[] {
   return fields;
 }
 
-function extractStateAccess(project: Project, fields: FieldData[], projectId: string): StateAccess[] {
+export function extractStateAccess(project: Project, fields: FieldData[], projectId: string): StateAccess[] {
   const accesses: StateAccess[] = [];
   const fieldMap = new Map<string, FieldData>();
 

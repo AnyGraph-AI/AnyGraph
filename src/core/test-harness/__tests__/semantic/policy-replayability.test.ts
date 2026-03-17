@@ -36,6 +36,7 @@ function makePassingResults(): InvariantCheckResult[] {
     { invariantId: 'temporal_ordering', passed: true, violationCount: 0, counterexamples: [], message: 'OK' },
     { invariantId: 'trust_contribution_cap', passed: true, violationCount: 0, counterexamples: [], message: 'OK' },
     { invariantId: 'evidence_saturation', passed: true, violationCount: 0, counterexamples: [], message: 'OK' },
+    { invariantId: 'structural_drift_threshold', passed: true, violationCount: 0, counterexamples: [], message: 'OK' },
   ];
 }
 

@@ -12,40 +12,40 @@ interface RunRow {
   isDirty: boolean;
 }
 
-function toNum(value: unknown): number {
+export function toNum(value: unknown): number {
   const maybe = value as { toNumber?: () => number } | null | undefined;
   if (maybe?.toNumber) return maybe.toNumber();
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function toBool(value: unknown): boolean {
+export function toBool(value: unknown): boolean {
   if (value === true) return true;
   if (value === false) return false;
   return String(value).toLowerCase() === 'true';
 }
 
-function toStr(value: unknown): string {
+export function toStr(value: unknown): string {
   return value === null || value === undefined ? '' : String(value);
 }
 
-function round(value: number, digits = 4): number {
+export function round(value: number, digits = 4): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
 }
 
-function stableJson(input: Record<string, unknown>): string {
+export function stableJson(input: Record<string, unknown>): string {
   const keys = Object.keys(input).sort();
   const out: Record<string, unknown> = {};
   for (const key of keys) out[key] = input[key];
   return JSON.stringify(out);
 }
 
-function sha256(input: string): string {
+export function sha256(input: string): string {
   return createHash('sha256').update(input).digest('hex');
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const projectId = process.argv[2] ?? 'proj_c0d3e9a1f200';
   const planProjectId = process.argv[3] ?? 'plan_codegraph';
   const snapshotWindow = process.argv[4] ?? 'all';
@@ -286,12 +286,14 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error(
-    JSON.stringify({
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    }),
-  );
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/governance-metrics-snapshot.ts') || process.argv[1]?.endsWith('/governance-metrics-snapshot.js')) {
+  main().catch((error) => {
+    console.error(
+      JSON.stringify({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    process.exit(1);
+  });
+}

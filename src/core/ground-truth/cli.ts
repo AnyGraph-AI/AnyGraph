@@ -23,7 +23,7 @@ import type {
   EvidenceCoverageValue,
 } from './types.js';
 
-async function main() {
+export async function main() {
   const args = process.argv.slice(2);
   const projectIdx = args.indexOf('--project');
   const depthIdx = args.indexOf('--depth');
@@ -48,7 +48,7 @@ async function main() {
   }
 }
 
-function printOutput(output: GroundTruthOutput, verbose: boolean): void {
+export function printOutput(output: GroundTruthOutput, verbose: boolean): void {
   const { panel1, panel2, panel3, meta } = output;
 
   console.log('═══════════════════════════════════════════════════════');
@@ -257,7 +257,9 @@ function printOutput(output: GroundTruthOutput, verbose: boolean): void {
   console.log('\n═══════════════════════════════════════════════════════\n');
 }
 
-main().catch(err => {
-  console.error('Ground truth hook failed:', err);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/ground-truth/cli.ts') || process.argv[1]?.endsWith('/ground-truth/cli.js')) {
+  main().catch(err => {
+    console.error('Ground truth hook failed:', err);
+    process.exit(1);
+  });
+}
