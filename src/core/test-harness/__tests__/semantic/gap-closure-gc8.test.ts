@@ -5,82 +5,69 @@
  * CodeGraph's TypeScriptParser has ~20 mutable class properties.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { execSync } from 'child_process';
 import { createEphemeralGraph, type EphemeralGraphRuntime } from '../../ephemeral-graph.js';
+import { Neo4jService } from '../../../../storage/neo4j/neo4j.service.js';
 
 describe('[GC-8] Generalized State Tracking', () => {
   describe('Integration — live graph', () => {
-    it('[GC-8] Field nodes exist for TypeScriptParser', () => {
-      const { execSync: exec } = require('child_process');
-      const out = exec(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH (f:Field {projectId: 'proj_c0d3e9a1f200', className: 'TypeScriptParser'})
-          RETURN count(f) AS cnt" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      const cnt = parseInt(out.split('\n').pop()!);
-      expect(cnt).toBeGreaterThanOrEqual(15); // TypeScriptParser has ~20 mutable props
+    let neo4j: Neo4jService;
+
+    beforeAll(() => { neo4j = new Neo4jService(); });
+    afterAll(async () => { await neo4j.close(); });
+
+    function toNum(val: unknown): number {
+      const v = val as any;
+      return typeof v?.toNumber === 'function' ? v.toNumber() : Number(v);
+    }
+
+    it('[GC-8] Field nodes exist for TypeScriptParser', async () => {
+      const rows = await neo4j.run(
+        `MATCH (f:Field {projectId: 'proj_c0d3e9a1f200', className: 'TypeScriptParser'})
+         RETURN count(f) AS cnt`,
+      );
+      expect(toNum(rows[0]?.cnt)).toBeGreaterThanOrEqual(15);
     });
 
-    it('[GC-8] Field nodes include module-scope variables', () => {
-      const { execSync: exec } = require('child_process');
-      const out = exec(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH (f:Field {projectId: 'proj_c0d3e9a1f200'})
-          WHERE f.fieldKind = 'module-var'
-          RETURN count(f) AS cnt" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      const cnt = parseInt(out.split('\n').pop()!);
-      expect(cnt).toBeGreaterThan(0);
+    it('[GC-8] Field nodes include module-scope variables', async () => {
+      const rows = await neo4j.run(
+        `MATCH (f:Field {projectId: 'proj_c0d3e9a1f200'})
+         WHERE f.fieldKind = 'module-var'
+         RETURN count(f) AS cnt`,
+      );
+      expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
     });
 
-    it('[GC-8] READS_STATE edges exist', () => {
-      const { execSync: exec } = require('child_process');
-      const out = exec(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH ()-[r:READS_STATE]->(f:Field {projectId: 'proj_c0d3e9a1f200'})
-          RETURN count(r) AS cnt" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      const cnt = parseInt(out.split('\n').pop()!);
-      expect(cnt).toBeGreaterThan(0);
+    it('[GC-8] READS_STATE edges exist', async () => {
+      const rows = await neo4j.run(
+        `MATCH ()-[r:READS_STATE]->(f:Field {projectId: 'proj_c0d3e9a1f200'})
+         RETURN count(r) AS cnt`,
+      );
+      expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
     });
 
-    it('[GC-8] WRITES_STATE edges exist', () => {
-      const { execSync: exec } = require('child_process');
-      const out = exec(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH ()-[r:WRITES_STATE]->(f:Field {projectId: 'proj_c0d3e9a1f200'})
-          RETURN count(r) AS cnt" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      const cnt = parseInt(out.split('\n').pop()!);
-      expect(cnt).toBeGreaterThan(0);
+    it('[GC-8] WRITES_STATE edges exist', async () => {
+      const rows = await neo4j.run(
+        `MATCH ()-[r:WRITES_STATE]->(f:Field {projectId: 'proj_c0d3e9a1f200'})
+         RETURN count(r) AS cnt`,
+      );
+      expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
     });
 
-    it('[GC-8] parsedNodes field is read by multiple methods', () => {
-      const { execSync: exec } = require('child_process');
-      const out = exec(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH (fn)-[:READS_STATE]->(f:Field {className: 'TypeScriptParser', name: 'parsedNodes'})
-          RETURN count(fn) AS readers" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      const readers = parseInt(out.split('\n').pop()!);
-      expect(readers).toBeGreaterThanOrEqual(2);
+    it('[GC-8] parsedNodes field is read by multiple methods', async () => {
+      const rows = await neo4j.run(
+        `MATCH (fn)-[:READS_STATE]->(f:Field {className: 'TypeScriptParser', name: 'parsedNodes'})
+         RETURN count(fn) AS readers`,
+      );
+      expect(toNum(rows[0]?.readers)).toBeGreaterThanOrEqual(2);
     });
 
-    it('[GC-8] state access query: what state could this function affect?', () => {
-      const { execSync: exec } = require('child_process');
-      const out = exec(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH (fn {name: 'clearParsedData'})-[r:WRITES_STATE|READS_STATE]->(f:Field)
-          RETURN type(r) AS access, f.name AS field
-          ORDER BY access, field" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      expect(out.split('\n').length).toBeGreaterThan(1);
+    it('[GC-8] state access query: what state could this function affect?', async () => {
+      const rows = await neo4j.run(
+        `MATCH (fn {name: 'clearParsedData'})-[r:WRITES_STATE|READS_STATE]->(f:Field)
+         RETURN type(r) AS access, f.name AS field
+         ORDER BY access, field`,
+      );
+      expect(rows.length).toBeGreaterThan(0);
     });
   });
 

@@ -5,83 +5,70 @@
  * CodeGraph has 56 MCP tool registrations and 7 CLI commands.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { execSync } from 'child_process';
 import { createEphemeralGraph, type EphemeralGraphRuntime } from '../../ephemeral-graph.js';
+import { Neo4jService } from '../../../../storage/neo4j/neo4j.service.js';
 
 describe('[GC-7] Entrypoint Dispatch Edges', () => {
   describe('Integration — live graph', () => {
-    it('[GC-7] Entrypoint nodes exist after parse', () => {
-      const out = execSync(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH (e:Entrypoint {projectId: 'proj_c0d3e9a1f200'})
-          RETURN count(e) AS cnt" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      const cnt = parseInt(out.split('\n').pop()!);
-      // Should have MCP tool + CLI command entrypoints
-      expect(cnt).toBeGreaterThan(0);
+    let neo4j: Neo4jService;
+
+    beforeAll(() => { neo4j = new Neo4jService(); });
+    afterAll(async () => { await neo4j.close(); });
+
+    function toNum(val: unknown): number {
+      const v = val as any;
+      return typeof v?.toNumber === 'function' ? v.toNumber() : Number(v);
+    }
+
+    it('[GC-7] Entrypoint nodes exist after parse', async () => {
+      const rows = await neo4j.run(
+        `MATCH (e:Entrypoint {projectId: 'proj_c0d3e9a1f200'}) RETURN count(e) AS cnt`,
+      );
+      expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
     });
 
-    it('[GC-7] MCP tool entrypoints have tool: prefix', () => {
-      const out = execSync(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH (e:Entrypoint {projectId: 'proj_c0d3e9a1f200'})
-          WHERE e.name STARTS WITH 'tool:'
-          RETURN count(e) AS cnt" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      const cnt = parseInt(out.split('\n').pop()!);
-      expect(cnt).toBeGreaterThan(0);
+    it('[GC-7] MCP tool entrypoints have tool: prefix', async () => {
+      const rows = await neo4j.run(
+        `MATCH (e:Entrypoint {projectId: 'proj_c0d3e9a1f200'})
+         WHERE e.name STARTS WITH 'tool:'
+         RETURN count(e) AS cnt`,
+      );
+      expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
     });
 
-    it('[GC-7] CLI command entrypoints have command: prefix', () => {
-      const out = execSync(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH (e:Entrypoint {projectId: 'proj_c0d3e9a1f200'})
-          WHERE e.name STARTS WITH 'command:'
-          RETURN count(e) AS cnt" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      const cnt = parseInt(out.split('\n').pop()!);
-      expect(cnt).toBeGreaterThan(0);
+    it('[GC-7] CLI command entrypoints have command: prefix', async () => {
+      const rows = await neo4j.run(
+        `MATCH (e:Entrypoint {projectId: 'proj_c0d3e9a1f200'})
+         WHERE e.name STARTS WITH 'command:'
+         RETURN count(e) AS cnt`,
+      );
+      expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
     });
 
-    it('[GC-7] DISPATCHES_TO edges link Entrypoint → Function', () => {
-      const out = execSync(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH (e:Entrypoint {projectId: 'proj_c0d3e9a1f200'})-[r:DISPATCHES_TO]->(fn:Function)
-          RETURN count(r) AS cnt" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      const cnt = parseInt(out.split('\n').pop()!);
-      expect(cnt).toBeGreaterThan(0);
+    it('[GC-7] DISPATCHES_TO edges link Entrypoint → Function', async () => {
+      const rows = await neo4j.run(
+        `MATCH (e:Entrypoint {projectId: 'proj_c0d3e9a1f200'})-[r:DISPATCHES_TO]->(fn:Function)
+         RETURN count(r) AS cnt`,
+      );
+      expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
     });
 
-    it('[GC-7] DISPATCHES_TO edges have derived=true', () => {
-      const out = execSync(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH ()-[r:DISPATCHES_TO]->()
-          WHERE r.derived = true
-          RETURN count(r) AS cnt" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      const cnt = parseInt(out.split('\n').pop()!);
-      expect(cnt).toBeGreaterThan(0);
+    it('[GC-7] DISPATCHES_TO edges have derived=true', async () => {
+      const rows = await neo4j.run(
+        `MATCH ()-[r:DISPATCHES_TO]->() WHERE r.derived = true RETURN count(r) AS cnt`,
+      );
+      expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
     });
 
-    it('[GC-7] blast radius query includes DISPATCHES_TO', () => {
-      // Verify DISPATCHES_TO participates in multi-hop traversal
-      const out = execSync(
-        `cypher-shell -u neo4j -p codegraph "
-          MATCH (e:Entrypoint {projectId: 'proj_c0d3e9a1f200'})-[:DISPATCHES_TO]->(fn:Function)
-          OPTIONAL MATCH (fn)-[:CALLS*1..2]->(downstream:Function)
-          WITH e, fn, collect(DISTINCT downstream.name) AS reachable
-          RETURN e.name AS entrypoint, fn.name AS handler, size(reachable) AS downstream
-          ORDER BY downstream DESC LIMIT 3" 2>/dev/null`,
-        { encoding: 'utf-8' },
-      ).trim();
-      // Should return rows — entrypoints that dispatch to functions with downstream calls
-      expect(out.split('\n').length).toBeGreaterThan(1); // header + at least 1 data row
+    it('[GC-7] blast radius query includes DISPATCHES_TO', async () => {
+      const rows = await neo4j.run(
+        `MATCH (e:Entrypoint {projectId: 'proj_c0d3e9a1f200'})-[:DISPATCHES_TO]->(fn:Function)
+         OPTIONAL MATCH (fn)-[:CALLS*1..2]->(downstream:Function)
+         WITH e, fn, collect(DISTINCT downstream.name) AS reachable
+         RETURN e.name AS entrypoint, fn.name AS handler, size(reachable) AS downstream
+         ORDER BY downstream DESC LIMIT 3`,
+      );
+      expect(rows.length).toBeGreaterThan(0);
     });
   });
 
