@@ -106,8 +106,8 @@ node dist/mcp/mcp.server.js
 | `codegraph serve` | Start MCP server (57 tools) |
 | `codegraph status` | Show Neo4j and project status |
 | `codegraph risk <target>` | Query blast radius for a function |
-| `codegraph probe` | **25 architecture queries** — risk, coupling, entrypoints, verification coverage, cross-layer analysis |
-| `codegraph diagnose` | **10 epistemological health checks** — does the graph know what it doesn't know? |
+| `codegraph probe` | **43 architecture queries** — risk, coupling, entrypoints, verification coverage, shadow divergence, cross-layer analysis |
+| `codegraph diagnose` | **33 health checks** with next-step guidance — does the graph know what it doesn't know? |
 
 ### Governance Pipeline
 
