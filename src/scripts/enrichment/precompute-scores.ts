@@ -273,8 +273,8 @@ export async function enrichPrecomputeScores(
     // We need per-function coverage. Let's query that separately.
     const fnCoverageResult = await session.run(
       `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})-[:CONTAINS]->(f:CodeNode:Function {projectId: $projectId})
-       OPTIONAL MATCH (sf)<-[:TESTED_BY]-(tb)
-       OPTIONAL MATCH (sf)<-[:ANALYZED]-(az)
+       OPTIONAL MATCH (sf)-[:TESTED_BY]->(tb)
+       OPTIONAL MATCH (sf)-[:ANALYZED]->(az)
        WITH f.id AS fnId, sf.id AS sfId,
             count(DISTINCT tb) + count(DISTINCT az) AS coverageEdges
        RETURN sfId, fnId, coverageEdges > 0 AS isCovered`,
