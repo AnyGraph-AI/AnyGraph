@@ -56,13 +56,14 @@ async function main(): Promise<void> {
 
   try {
     const runRowsRaw = await neo4j.run(
-      `MATCH (r:VerificationRun {projectId: $projectId})-[:EMITS_GATE_DECISION]->(g:GateDecision {projectId: $projectId})
-       MATCH (r)-[:CAPTURED_COMMIT]->(c:CommitSnapshot {projectId: $projectId})
+      `MATCH (r:VerificationRun {projectId: $projectId})
+       OPTIONAL MATCH (r)-[:EMITS_GATE_DECISION]->(g:GateDecision {projectId: $projectId})
+       OPTIONAL MATCH (r)-[:CAPTURED_COMMIT]->(c:CommitSnapshot {projectId: $projectId})
        OPTIONAL MATCH (r)-[:CAPTURED_WORKTREE]->(w:WorkingTreeSnapshot {projectId: $projectId})
        RETURN r.id AS runId,
               r.ranAt AS ranAt,
-              g.result AS result,
-              c.headSha AS headSha,
+              coalesce(g.result, 'warn') AS result,
+              coalesce(c.headSha, '') AS headSha,
               coalesce(w.isDirty, true) AS isDirty
        ORDER BY r.ranAt ASC`,
       { projectId },
@@ -78,6 +79,8 @@ async function main(): Promise<void> {
 
     const verificationRuns = runs.length;
     const gateFailures = runs.filter((r) => r.result === 'fail').length;
+    const latestRunWithCommit = [...runs].reverse().find((r) => r.headSha && r.headSha.length > 0);
+    const commitRef = latestRunWithCommit?.headSha ?? null;
 
     let failuresResolvedBeforeCommit = 0;
     let recoveryRunDistanceTotal = 0;
@@ -164,6 +167,7 @@ async function main(): Promise<void> {
       `MERGE (m:CodeNode:GovernanceMetricSnapshot {id: $snapshotId})
        SET m.projectId = $projectId,
            m.coreType = 'GovernanceMetricSnapshot',
+           m.commitRef = $commitRef,
            m.timestamp = $timestamp,
            m.computedAt = $computedAt,
            m.snapshotWindow = $snapshotWindow,
@@ -186,6 +190,7 @@ async function main(): Promise<void> {
       {
         snapshotId,
         projectId,
+        commitRef,
         timestamp: computedAt,
         computedAt,
         snapshotWindow,
@@ -249,6 +254,7 @@ async function main(): Promise<void> {
       snapshotId,
       projectId,
       planProjectId,
+      commitRef,
       timestamp: computedAt,
       snapshotWindow,
       schemaVersion,

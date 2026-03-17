@@ -698,8 +698,12 @@ export class GroundTruthRuntime {
       // Query last governance metrics
       const govRows = await this.neo4j.run(
         `MATCH (g:GovernanceMetricSnapshot)
-         RETURN g.commitRef AS commit, g.gateFailures AS gateFailures,
-                g.verificationRuns AS tcCoverage, g.timestamp AS ts
+         OPTIONAL MATCH (g)-[:DERIVED_FROM_COMMIT]->(c:CommitSnapshot)
+         WITH g, collect(c.headSha) AS commitHeads
+         RETURN coalesce(g.commitRef, head([h IN commitHeads WHERE h IS NOT NULL])) AS commit,
+                g.gateFailures AS gateFailures,
+                g.verificationRuns AS tcCoverage,
+                g.timestamp AS ts
          ORDER BY g.timestamp DESC LIMIT 1`,
       );
 

@@ -5,6 +5,7 @@
  *   npm run ground-truth -- --project proj_c0d3e9a1f200
  *   npm run ground-truth -- --project proj_c0d3e9a1f200 --depth full
  *   npm run ground-truth -- --project proj_c0d3e9a1f200 --depth full --verbose
+ *   npm run ground-truth -- --project proj_c0d3e9a1f200 --agent watson
  */
 
 import { Neo4jService } from '../../storage/neo4j/neo4j.service.js';
@@ -26,10 +27,12 @@ async function main() {
   const args = process.argv.slice(2);
   const projectIdx = args.indexOf('--project');
   const depthIdx = args.indexOf('--depth');
+  const agentIdx = args.indexOf('--agent');
   const verbose = args.includes('--verbose') || args.includes('-v');
 
   const projectId = projectIdx >= 0 ? args[projectIdx + 1] : 'proj_c0d3e9a1f200';
   const depthArg = depthIdx >= 0 ? args[depthIdx + 1] : 'medium';
+  const agentId = agentIdx >= 0 ? args[agentIdx + 1] : undefined;
   const depth: CheckTier = depthArg === 'full' ? 'heavy' : (depthArg as CheckTier);
 
   // F2: Share single Neo4jService across pack + runtime (no triple connection)
@@ -38,7 +41,7 @@ async function main() {
   const runtime = new GroundTruthRuntime(pack, neo4j);
 
   try {
-    const output = await runtime.run({ projectId, depth });
+    const output = await runtime.run({ projectId, depth, agentId });
     printOutput(output, verbose);
   } finally {
     await neo4j.close();
