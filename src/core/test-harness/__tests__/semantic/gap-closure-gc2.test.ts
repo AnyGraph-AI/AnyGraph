@@ -11,7 +11,7 @@
  * 5. "What verification touched this file?" is a single-hop query
  * 6. Idempotent — running twice produces same edge count
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import {
   extractAnalyzedPairs,
@@ -199,105 +199,88 @@ describe('[GC-2] ANALYZED edge contract', () => {
 });
 
 // ------------------------------------------------------------------
-// Integration: real graph data shape validation
+// Integration: real graph data shape validation (Neo4j driver)
 // ------------------------------------------------------------------
+import { Neo4jService } from '../../../../storage/neo4j/neo4j.service.js';
+
 describe('[GC-2] Integration — live graph data shape', () => {
+  let neo4j: Neo4jService;
+
+  beforeAll(() => {
+    neo4j = new Neo4jService();
+  });
+
+  afterAll(async () => {
+    await neo4j.close();
+  });
+
+  function toNum(val: unknown): number {
+    const v = val as any;
+    return typeof v?.toNumber === 'function' ? v.toNumber() : Number(v);
+  }
+
   it('AnalysisScope nodes have includedPaths arrays', async () => {
-    // Validate the assumption that includedPaths exists
-    const { execSync } = await import('child_process');
-    const output = execSync(
-      `cypher-shell -u neo4j -p codegraph "MATCH (s:AnalysisScope) WHERE s.includedPaths IS NOT NULL RETURN count(s) AS cnt" 2>/dev/null`,
-      { encoding: 'utf-8' }
-    ).trim();
-    // Parse "cnt\n831" format
-    const lines = output.split('\n');
-    const count = parseInt(lines[lines.length - 1]);
-    expect(count).toBeGreaterThan(0);
+    const rows = await neo4j.run(
+      `MATCH (s:AnalysisScope) WHERE s.includedPaths IS NOT NULL RETURN count(s) AS cnt`,
+    );
+    expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
   });
 
   it('includedPaths entries start with file://', async () => {
-    const { execSync } = await import('child_process');
-    const output = execSync(
-      `cypher-shell -u neo4j -p codegraph "MATCH (s:AnalysisScope) WHERE s.includedPaths IS NOT NULL WITH s LIMIT 1 RETURN s.includedPaths[0] AS first" 2>/dev/null`,
-      { encoding: 'utf-8' }
-    ).trim();
-    const lines = output.split('\n');
-    const firstPath = lines[lines.length - 1].replace(/"/g, '');
-    expect(firstPath).toMatch(/^file:\/\//);
+    const rows = await neo4j.run(
+      `MATCH (s:AnalysisScope) WHERE s.includedPaths IS NOT NULL WITH s LIMIT 1 RETURN s.includedPaths[0] AS first`,
+    );
+    expect(rows[0]?.first).toMatch(/^file:\/\//);
   });
 
   it('stripping file:// from includedPaths matches SourceFile.filePath format', async () => {
-    const { execSync } = await import('child_process');
-    // Get one includedPath and one SourceFile path
-    const scopeOut = execSync(
-      `cypher-shell -u neo4j -p codegraph "MATCH (s:AnalysisScope) WHERE s.includedPaths IS NOT NULL WITH s LIMIT 1 RETURN s.includedPaths[0] AS uri" 2>/dev/null`,
-      { encoding: 'utf-8' }
-    ).trim();
-    const uri = scopeOut.split('\n').pop()!.replace(/"/g, '');
+    const scopeRows = await neo4j.run(
+      `MATCH (s:AnalysisScope) WHERE s.includedPaths IS NOT NULL WITH s LIMIT 1 RETURN s.includedPaths[0] AS uri`,
+    );
+    const uri = scopeRows[0]?.uri as string;
     const stripped = stripFileUri(uri);
 
-    // Verify a SourceFile exists with that exact path
-    const sfOut = execSync(
-      `cypher-shell -u neo4j -p codegraph "MATCH (sf:SourceFile {filePath: '${stripped}'}) RETURN count(sf) AS cnt" 2>/dev/null`,
-      { encoding: 'utf-8' }
-    ).trim();
-    const count = parseInt(sfOut.split('\n').pop()!);
-    expect(count).toBeGreaterThanOrEqual(1);
+    const sfRows = await neo4j.run(
+      `MATCH (sf:SourceFile {filePath: $path}) RETURN count(sf) AS cnt`,
+      { path: stripped },
+    );
+    expect(toNum(sfRows[0]?.cnt)).toBeGreaterThanOrEqual(1);
   });
 
   // --- FLAGS edge tests (GC-2 Task 2) ---
 
   it('[GC-2] VRs with targetFilePath have FLAGS edges to Functions', async () => {
-    const { execSync } = await import('child_process');
-    const out = execSync(
-      `cypher-shell -u neo4j -p codegraph "
-        MATCH (vr:VerificationRun)-[r:FLAGS]->(fn:Function)
-        RETURN count(r) AS cnt" 2>/dev/null`,
-      { encoding: 'utf-8' },
-    ).trim();
-    const cnt = parseInt(out.split('\n').pop()!);
-    expect(cnt).toBeGreaterThan(0);
+    const rows = await neo4j.run(
+      `MATCH (vr:VerificationRun)-[r:FLAGS]->(fn:Function) RETURN count(r) AS cnt`,
+    );
+    expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
   });
 
   it('[GC-2] FLAGS edges have derived=true and source tag', async () => {
-    const { execSync } = await import('child_process');
-    const out = execSync(
-      `cypher-shell -u neo4j -p codegraph "
-        MATCH ()-[r:FLAGS]->()
-        WHERE r.derived = true AND r.source = 'flags-enrichment'
-        RETURN count(r) AS cnt" 2>/dev/null`,
-      { encoding: 'utf-8' },
-    ).trim();
-    const cnt = parseInt(out.split('\n').pop()!);
-    expect(cnt).toBeGreaterThan(0);
+    const rows = await neo4j.run(
+      `MATCH ()-[r:FLAGS]->() WHERE r.derived = true AND r.source = 'flags-enrichment' RETURN count(r) AS cnt`,
+    );
+    expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
   });
 
   it('[GC-2] FLAGS edges carry ruleId from source VR', async () => {
-    const { execSync } = await import('child_process');
-    const out = execSync(
-      `cypher-shell -u neo4j -p codegraph "
-        MATCH (vr:VerificationRun)-[r:FLAGS]->(fn:Function)
-        WHERE r.ruleId IS NOT NULL AND r.ruleId = vr.ruleId
-        RETURN count(r) AS cnt" 2>/dev/null`,
-      { encoding: 'utf-8' },
-    ).trim();
-    const cnt = parseInt(out.split('\n').pop()!);
-    expect(cnt).toBeGreaterThan(0);
+    const rows = await neo4j.run(
+      `MATCH (vr:VerificationRun)-[r:FLAGS]->(fn:Function)
+       WHERE r.ruleId IS NOT NULL AND r.ruleId = vr.ruleId
+       RETURN count(r) AS cnt`,
+    );
+    expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
   });
 
   it('[GC-2] FLAGS + ANALYZED together answer "what verified this function?"', async () => {
-    const { execSync } = await import('child_process');
-    const out = execSync(
-      `cypher-shell -u neo4j -p codegraph "
-        MATCH (fn:Function {projectId: 'proj_c0d3e9a1f200'})
-        WHERE (fn)<-[:FLAGS]-(:VerificationRun)
-        OPTIONAL MATCH (fn)<-[:CONTAINS]-(sf:SourceFile)<-[:ANALYZED]-(avr:VerificationRun)
-        WITH fn, count(DISTINCT avr) AS analyzedBy
-        WHERE analyzedBy > 0
-        RETURN count(fn) AS bothCoveredFunctions" 2>/dev/null`,
-      { encoding: 'utf-8' },
-    ).trim();
-    const cnt = parseInt(out.split('\n').pop()!);
-    expect(cnt).toBeGreaterThanOrEqual(0);
+    const rows = await neo4j.run(
+      `MATCH (fn:Function {projectId: 'proj_c0d3e9a1f200'})
+       WHERE (fn)<-[:FLAGS]-(:VerificationRun)
+       OPTIONAL MATCH (fn)<-[:CONTAINS]-(sf:SourceFile)<-[:ANALYZED]-(avr:VerificationRun)
+       WITH fn, count(DISTINCT avr) AS analyzedBy
+       WHERE analyzedBy > 0
+       RETURN count(fn) AS bothCoveredFunctions`,
+    );
+    expect(toNum(rows[0]?.bothCoveredFunctions)).toBeGreaterThanOrEqual(0);
   });
 });
