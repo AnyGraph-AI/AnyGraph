@@ -189,9 +189,26 @@ export class GraphGeneratorHandler {
           batchesUsed: Math.ceil(texts.length / EMBEDDING_BATCH_CONFIG.maxBatchSize),
         });
       } catch (error) {
-        // DON'T silently continue - propagate the error so user knows what's wrong
-        await debugLog('Embedding failed', { error: error instanceof Error ? error.message : String(error) });
-        throw error;
+        // Embedding failure is non-fatal: import nodes without embeddings rather than
+        // losing them entirely. The delete-before-import pattern in incremental-parse
+        // means a throw here causes DATA LOSS (old nodes deleted, new nodes never created).
+        const errMsg = error instanceof Error ? error.message : String(error);
+        console.error(`[GraphGenerator] Embedding failed (non-fatal, importing without embeddings): ${errMsg}`);
+        await debugLog('Embedding failed (non-fatal)', { error: errMsg, nodeCount: nodesNeedingEmbedding.length });
+
+        // Import all nodes without embeddings — they're still fully queryable via Cypher
+        nodesNeedingEmbedding.forEach((item) => {
+          nodeResults[item.index] = {
+            ...item.node,
+            labels: item.node.labels,
+            properties: {
+              ...this.flattenProperties(item.node.properties),
+              embedding: null,
+              embeddingStatus: 'failed',
+              embeddingError: errMsg.slice(0, 200),
+            },
+          };
+        });
       }
     }
 

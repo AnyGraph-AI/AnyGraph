@@ -496,7 +496,7 @@ export const DEFAULTS = {
   maxResultsDisplayed: 30,
   codeSnippetLength: 500, // Reduced from 1000 to control output size
   chainSnippetLength: 700,
-  maxEmbeddingChars: 30000, // ~7500 tokens, under 8192 limit for text-embedding-3-large
+  maxEmbeddingChars: 24000, // ~8000 tokens at 3.0 chars/token, under 8192 limit for text-embedding-3-large
 } as const;
 
 // Parsing Configuration
