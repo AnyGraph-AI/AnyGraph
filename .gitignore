@@ -171,3 +171,4 @@ neo4j-apoc-schema.json
 neo4j-apoc-schema.json
 godspeed-fork-parse.json
 .enforcement-log
+godspeed-clean-graph.json

@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * self-diagnosis — 25 epistemological health checks.
+ * self-diagnosis — 35 epistemological health checks.
  * Tests what the graph knows about its own limitations.
  *
  * Each check answers: "Does the graph know what it doesn't know?"
@@ -855,11 +855,75 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     detail: { totalInvariants: d33Total, scopes: d33CoveredScopes, nodeLabels: d33Labels },
   });
 
+  // ── D34: Confidence Entropy Health ──────────────────────────────────
+  const d34VRs = await query(`
+    MATCH (vr:VerificationRun {projectId: $pid})
+    WHERE vr.effectiveConfidence IS NOT NULL
+    RETURN vr.effectiveConfidence AS ec
+  `, { pid });
+  
+  // Compute entropy inline (same algorithm as confidence-analytics.ts)
+  const d34BinCount = 10;
+  const d34Bins = new Array(d34BinCount).fill(0);
+  for (const row of d34VRs) {
+    const ec = typeof row.ec === 'number' ? row.ec : Number(row.ec);
+    const idx = Math.min(Math.floor(Math.max(0, Math.min(1, ec)) * d34BinCount), d34BinCount - 1);
+    d34Bins[idx]++;
+  }
+  let d34Entropy = 0;
+  let d34Occupied = 0;
+  const d34Total = d34VRs.length;
+  if (d34Total > 1) {
+    for (const count of d34Bins) {
+      if (count > 0) {
+        d34Occupied++;
+        const p = count / d34Total;
+        d34Entropy -= p * Math.log2(p);
+      }
+    }
+  }
+  const d34MaxEntropy = Math.log2(d34BinCount);
+  const d34Normalized = d34MaxEntropy > 0 ? d34Entropy / d34MaxEntropy : 0;
+  // Degenerate = all in one bin (H ≈ 0). Healthy = some spread (normalized > 0.2)
+  const d34Healthy = d34Total === 0 || d34Normalized > 0.2;
+  
+  results.push({
+    id: 'D34', question: 'Is confidence entropy healthy? (distribution not degenerate)',
+    answer: `${d34Total} VRs, entropy H=${d34Entropy.toFixed(3)} (normalized ${(d34Normalized * 100).toFixed(1)}%), ${d34Occupied}/${d34BinCount} bins occupied. Distribution: [${d34Bins.join(', ')}].`,
+    healthy: d34Healthy,
+    nextStep: d34Total === 0
+      ? 'No VRs with effectiveConfidence — run `npm run verification:scan` then `npm run tc:recompute`.'
+      : d34Normalized <= 0.2
+        ? `Confidence distribution is degenerate (${d34Occupied} bins occupied). This means the TC pipeline isn't producing meaningful variance. Run fresh scans from different tools, or wait for evidence to age past defaultValidityHours (168h) for TCF decay to add variance.`
+        : `Entropy is healthy at ${(d34Normalized * 100).toFixed(1)}%. Monitor for collapse — if this drops below 20% in a single period, investigate gaming or tool failure.`,
+    detail: { totalVRs: d34Total, entropy: d34Entropy, normalized: d34Normalized, occupied: d34Occupied, bins: d34Bins },
+  });
+
+  // ── D35: Confidence Entropy Trend (collapse/spike detection) ──────
+  // Compare current entropy with a baseline expectation
+  // If all VRs have EC=1.0, that's the degenerate state (D26 also catches this via shadow)
+  const d35AllSame = d34Occupied <= 1 && d34Total > 10;
+  const d35Healthy = !d35AllSame;
+  
+  results.push({
+    id: 'D35', question: 'Is confidence entropy showing collapse? (abrupt uniformity)',
+    answer: d34Total <= 1
+      ? 'Insufficient VRs for trend analysis.'
+      : d35AllSame
+        ? `COLLAPSE: All ${d34Total} VRs concentrated in ${d34Occupied} bin(s). Entropy ≈ 0. The TC pipeline is producing identical confidence for everything — no discrimination.`
+        : `${d34Occupied} occupied bins across ${d34Total} VRs. No collapse detected.`,
+    healthy: d35Healthy,
+    nextStep: d35AllSame
+      ? 'Entropy collapse detected. Root causes: (1) All evidence is new (TCF=1.0 everywhere — wait for aging), (2) Single tool dominance (one sourceFamily providing all VRs), (3) Anti-gaming cap too generous. Check D26 (shadow degeneracy) and D28 (source-family dominance) for corroboration.'
+      : 'Entropy stable. Record current entropy in GraphMetricsSnapshot for trend tracking. Alert if normalizedEntropy drops >50% between consecutive snapshots.',
+    detail: { allSame: d35AllSame, occupiedBins: d34Occupied, totalVRs: d34Total },
+  });
+
   return results;
 }
 
 async function main() {
-  console.log('🔬 Self-Diagnosis — 33 Epistemological Health Checks\n');
+  console.log('🔬 Self-Diagnosis — 35 Epistemological Health Checks\n');
   console.log('   "Does the graph know what it doesn\'t know?"\n');
 
   try {
@@ -879,7 +943,7 @@ async function main() {
     }
 
     console.log('═'.repeat(65));
-    console.log(`📊 Health: ${healthy}/${results.length} checks pass, ${unhealthy} need attention`);
+    console.log(`📊 Health: ${healthy}/${results.length} checks pass (of 35), ${unhealthy} need attention`);
 
     // JSON output for machine consumption
     const jsonOutput = {

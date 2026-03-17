@@ -269,6 +269,316 @@ export function computeOverrideEntropy(
 }
 
 // ============================================================================
+// CONFIDENCE ENTROPY (RF-10 Task 1)
+// ============================================================================
+
+export interface ConfidenceEntropyConfig {
+  /** Number of fixed bins for the histogram (default: 10) */
+  binCount?: number;
+  /** Minimum confidence value for binning (default: 0.0) */
+  minConfidence?: number;
+  /** Maximum confidence value for binning (default: 1.0) */
+  maxConfidence?: number;
+}
+
+export interface ConfidenceEntropyResult {
+  /** Shannon entropy H = -Σ p log2(p) */
+  entropy: number;
+  /** H / log2(binCount) — normalized to [0, 1] */
+  normalizedEntropy: number;
+  /** Maximum possible entropy = log2(binCount) */
+  maxEntropy: number;
+  /** Number of bins in histogram */
+  binCount: number;
+  /** Number of non-empty bins */
+  occupiedBins: number;
+  /** Total VRs processed */
+  totalVRs: number;
+  /** Per-bin counts */
+  binDistribution: number[];
+}
+
+const DEFAULT_ENTROPY_CONFIG: Required<ConfidenceEntropyConfig> = {
+  binCount: 10,
+  minConfidence: 0.0,
+  maxConfidence: 1.0,
+};
+
+/**
+ * Compute Shannon entropy of confidence distribution.
+ *
+ * Uses fixed-boundary binning: bins are always [min, min+step), [min+step, min+2*step), ..., [max-step, max].
+ * This is stable — bin boundaries don't shift with data distribution.
+ *
+ * H = 0 means all VRs in one bin (degenerate).
+ * H = log2(bins) means uniform (maximum uncertainty).
+ * Collapse = abrupt H drop. Spike = abrupt H rise.
+ */
+export function computeConfidenceEntropy(
+  vrs: Array<{ effectiveConfidence: number }>,
+  config?: ConfidenceEntropyConfig
+): ConfidenceEntropyResult {
+  const { binCount, minConfidence, maxConfidence } = { ...DEFAULT_ENTROPY_CONFIG, ...config };
+  const maxEntropy = binCount > 1 ? Math.log2(binCount) : 0;
+
+  if (vrs.length === 0) {
+    return {
+      entropy: 0,
+      normalizedEntropy: 0,
+      maxEntropy,
+      binCount,
+      occupiedBins: 0,
+      totalVRs: 0,
+      binDistribution: new Array(binCount).fill(0),
+    };
+  }
+
+  if (vrs.length === 1) {
+    const bins = new Array(binCount).fill(0);
+    const binWidth = (maxConfidence - minConfidence) / binCount;
+    const idx = Math.min(Math.floor((Math.max(minConfidence, Math.min(maxConfidence, vrs[0].effectiveConfidence)) - minConfidence) / binWidth), binCount - 1);
+    bins[idx] = 1;
+    return {
+      entropy: 0,
+      normalizedEntropy: 0,
+      maxEntropy,
+      binCount,
+      occupiedBins: 1,
+      totalVRs: 1,
+      binDistribution: bins,
+    };
+  }
+
+  // Fixed-boundary binning
+  const bins = new Array(binCount).fill(0);
+  const binWidth = (maxConfidence - minConfidence) / binCount;
+
+  for (const vr of vrs) {
+    // Clamp to [min, max]
+    const clamped = Math.max(minConfidence, Math.min(maxConfidence, vr.effectiveConfidence));
+    let idx = Math.floor((clamped - minConfidence) / binWidth);
+    // Edge case: value exactly at maxConfidence goes to last bin
+    if (idx >= binCount) idx = binCount - 1;
+    bins[idx]++;
+  }
+
+  // Shannon entropy
+  const total = vrs.length;
+  let entropy = 0;
+  let occupiedBins = 0;
+
+  for (const count of bins) {
+    if (count > 0) {
+      occupiedBins++;
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+  }
+
+  return {
+    entropy,
+    normalizedEntropy: maxEntropy > 0 ? entropy / maxEntropy : 0,
+    maxEntropy,
+    binCount,
+    occupiedBins,
+    totalVRs: total,
+    binDistribution: bins,
+  };
+}
+
+// ============================================================================
+// ENTROPY ANOMALY DETECTION (RF-10 Task 2)
+// ============================================================================
+
+export interface EntropySnapshot {
+  timestamp: string;
+  entropy: number;
+  normalizedEntropy: number;
+}
+
+export interface EntropyAnomalyConfig {
+  /** Relative drop threshold for collapse detection (default: 0.5 = 50% drop) */
+  collapseDropThreshold?: number;
+  /** Relative rise threshold for spike detection (default: 0.5 = 50% rise) */
+  spikeRiseThreshold?: number;
+  /** Absolute normalized entropy floor for collapse (default: 0.15) */
+  collapseAbsoluteFloor?: number;
+}
+
+export interface EntropyAnomalyResult {
+  collapse: boolean;
+  spike: boolean;
+  alert: string | null;
+  /** The drop or rise ratio (latest vs previous) */
+  changeRatio: number | null;
+}
+
+const DEFAULT_ANOMALY_CONFIG: Required<EntropyAnomalyConfig> = {
+  collapseDropThreshold: 0.5,
+  spikeRiseThreshold: 0.5,
+  collapseAbsoluteFloor: 0.15,
+};
+
+/**
+ * Detect entropy collapse (abrupt drop) or spike (abrupt rise).
+ *
+ * Collapse: latest entropy < previous × (1 - threshold), OR normalized < absolute floor.
+ * Spike: latest entropy > previous × (1 + threshold).
+ */
+export function detectEntropyAnomaly(
+  history: EntropySnapshot[],
+  config?: EntropyAnomalyConfig
+): EntropyAnomalyResult {
+  const { collapseDropThreshold, spikeRiseThreshold, collapseAbsoluteFloor } =
+    { ...DEFAULT_ANOMALY_CONFIG, ...config };
+
+  if (history.length < 2) {
+    return { collapse: false, spike: false, alert: null, changeRatio: null };
+  }
+
+  // Sort by timestamp, take last two
+  const sorted = [...history].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const prev = sorted[sorted.length - 2];
+  const curr = sorted[sorted.length - 1];
+
+  let collapse = false;
+  let spike = false;
+  const alerts: string[] = [];
+
+  if (prev.entropy > 0) {
+    const ratio = (prev.entropy - curr.entropy) / prev.entropy;
+    
+    // Collapse: entropy dropped by more than threshold
+    if (ratio >= collapseDropThreshold) {
+      collapse = true;
+      alerts.push(`Entropy collapse: ${prev.entropy.toFixed(2)} → ${curr.entropy.toFixed(2)} (${(ratio * 100).toFixed(0)}% drop)`);
+    }
+
+    // Spike: entropy rose by more than threshold  
+    const riseRatio = (curr.entropy - prev.entropy) / prev.entropy;
+    if (riseRatio >= spikeRiseThreshold) {
+      spike = true;
+      alerts.push(`Entropy spike: ${prev.entropy.toFixed(2)} → ${curr.entropy.toFixed(2)} (${(riseRatio * 100).toFixed(0)}% rise)`);
+    }
+  }
+
+  // Absolute floor check for collapse
+  if (!collapse && curr.normalizedEntropy < collapseAbsoluteFloor && prev.normalizedEntropy >= collapseAbsoluteFloor) {
+    collapse = true;
+    alerts.push(`Entropy collapse below absolute floor: normalized ${curr.normalizedEntropy.toFixed(2)} < ${collapseAbsoluteFloor}`);
+  }
+
+  const changeRatio = prev.entropy > 0 ? (curr.entropy - prev.entropy) / prev.entropy : null;
+
+  return {
+    collapse,
+    spike,
+    alert: alerts.length > 0 ? alerts.join('; ') : null,
+    changeRatio,
+  };
+}
+
+// ============================================================================
+// ENTROPY-COLLUSION-OVERRIDE CORRELATION (RF-10 Task 3)
+// ============================================================================
+
+export interface AntiGamingEvent {
+  timestamp: string;
+  type: string;
+  sourceFamily: string;
+}
+
+export interface EntropyCorrelation {
+  type: 'collapse_with_gaming' | 'spike_with_overrides' | 'collapse_with_overrides';
+  anomalyTimestamp: string;
+  relatedEvents: Array<{ timestamp: string; description: string }>;
+  severity: 'warning' | 'critical';
+}
+
+export interface EntropyCorrelationResult {
+  correlations: EntropyCorrelation[];
+  anomalyDetected: boolean;
+}
+
+/**
+ * Correlate entropy anomalies with concurrent anti-gaming triggers and override events.
+ *
+ * Time window: events within 7 days before the anomaly period are considered concurrent.
+ */
+export function correlateEntropyAnomalies(
+  entropyHistory: EntropySnapshot[],
+  antiGamingEvents: AntiGamingEvent[],
+  overrideEvents: OverrideEvent[],
+  windowDays: number = 7
+): EntropyCorrelationResult {
+  const anomaly = detectEntropyAnomaly(entropyHistory);
+
+  if (!anomaly.collapse && !anomaly.spike) {
+    return { correlations: [], anomalyDetected: false };
+  }
+
+  // Get anomaly time window
+  const sorted = [...entropyHistory].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const anomalyTime = new Date(sorted[sorted.length - 1].timestamp);
+  const windowStart = new Date(anomalyTime.getTime() - windowDays * 24 * 60 * 60 * 1000);
+
+  const correlations: EntropyCorrelation[] = [];
+
+  // Check anti-gaming events in window
+  const concurrentGaming = antiGamingEvents.filter(e => {
+    const t = new Date(e.timestamp);
+    return t >= windowStart && t <= anomalyTime;
+  });
+
+  // Check override events in window
+  const concurrentOverrides = overrideEvents.filter(e => {
+    const t = new Date(e.timestamp);
+    return t >= windowStart && t <= anomalyTime;
+  });
+
+  if (anomaly.collapse && concurrentGaming.length > 0) {
+    correlations.push({
+      type: 'collapse_with_gaming',
+      anomalyTimestamp: sorted[sorted.length - 1].timestamp,
+      relatedEvents: concurrentGaming.map(e => ({
+        timestamp: e.timestamp,
+        description: `${e.type} on ${e.sourceFamily}`,
+      })),
+      severity: 'critical',
+    });
+  }
+
+  if (anomaly.spike && concurrentOverrides.length > 0) {
+    correlations.push({
+      type: 'spike_with_overrides',
+      anomalyTimestamp: sorted[sorted.length - 1].timestamp,
+      relatedEvents: concurrentOverrides.map(e => ({
+        timestamp: e.timestamp,
+        description: `${e.overrideType} on ${e.invariantId}: ${e.reason}`,
+      })),
+      severity: 'warning',
+    });
+  }
+
+  if (anomaly.collapse && concurrentOverrides.length > 0) {
+    correlations.push({
+      type: 'collapse_with_overrides',
+      anomalyTimestamp: sorted[sorted.length - 1].timestamp,
+      relatedEvents: concurrentOverrides.map(e => ({
+        timestamp: e.timestamp,
+        description: `${e.overrideType} on ${e.invariantId}: ${e.reason}`,
+      })),
+      severity: 'critical',
+    });
+  }
+
+  return {
+    correlations,
+    anomalyDetected: true,
+  };
+}
+
+// ============================================================================
 // POLICY EFFECTIVENESS
 // ============================================================================
 
