@@ -15,3 +15,4 @@ export * from './confidence-debt.js';
 export * from './anti-gaming.js';
 export * from './calibration.js';
 export * from './promotion-policy.js';
+export * from './structural-drift.js';

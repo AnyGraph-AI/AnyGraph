@@ -253,6 +253,22 @@ RETURN t.name, evidenceCount`,
     counterexampleSchema: { requiredFields: ['taskId', 'evidenceCount', 'maxExpected'] },
     description: 'Suspiciously high evidence density may indicate false linking',
   },
+  {
+    invariantId: 'structural_drift_threshold',
+    class: InvariantClass.HEURISTIC,
+    scope: InvariantScope.PROJECT,
+    enforcementMode: EnforcementMode.ENFORCED,
+    requiredEvidence: 'Structural metrics (degree moments, clustering, path length) compared against baseline',
+    freshnessPolicy: 'recheck after parse/enrichment runs',
+    waiverable: false,
+    owner: 'governance',
+    reviewCadence: 'daily',
+    diagnosticQueryTemplate: `MATCH (p:Project {projectId: $projectId})
+WHERE p.structuralDriftFlag = true AND coalesce(p.structuralDriftSuppressed, false) = false
+RETURN p.projectId, p.structuralDriftFlag, p.structuralDriftReason`,
+    counterexampleSchema: { requiredFields: ['projectId', 'driftFlag', 'driftReason'] },
+    description: 'Unexplained structural drift beyond threshold must block governance gate',
+  },
 ];
 
 // ── RF-9 Formalized Invariants ──────────────────────────────────────
