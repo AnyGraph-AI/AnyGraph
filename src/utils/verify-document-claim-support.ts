@@ -12,6 +12,10 @@ async function main(): Promise<void> {
            toLower(coalesce(c.statement,'')) CONTAINS 'document layer complete'
            OR toLower(coalesce(c.statement,'')) CONTAINS 'document complete'
          )
+         // Exclude meta-governance tasks ABOUT document-complete wording/assertion rules.
+         // These are implementation tasks, not claims that the document layer itself is complete.
+         AND NOT toLower(coalesce(c.statement,'')) CONTAINS 'fail claim generation for'
+         AND NOT toLower(coalesce(c.statement,'')) CONTAINS 'forbidden wording rule'
        RETURN c.claimId AS claimId,
               c.statement AS statement,
               coalesce(c.supportGrade, 'missing') AS supportGrade,

@@ -72,14 +72,14 @@ export const CORE_CONSTRAINTS: ConstraintDefinition[] = [
   },
   {
     name: 'unique_task',
-    cypher: 'CREATE CONSTRAINT unique_task IF NOT EXISTS FOR (n:Task) REQUIRE (n.projectId, n.name) IS UNIQUE',
-    rationale: 'No duplicate task names within a plan project',
+    cypher: 'CREATE CONSTRAINT unique_task IF NOT EXISTS FOR (n:Task) REQUIRE (n.id) IS UNIQUE',
+    rationale: 'Task identity is stable ID (project+file+section+ordinal), not task name',
     severity: 'critical',
   },
   {
     name: 'unique_milestone',
-    cypher: 'CREATE CONSTRAINT unique_milestone IF NOT EXISTS FOR (n:Milestone) REQUIRE (n.projectId, n.name) IS UNIQUE',
-    rationale: 'No duplicate milestone names within a plan project',
+    cypher: 'CREATE CONSTRAINT unique_milestone IF NOT EXISTS FOR (n:Milestone) REQUIRE (n.id) IS UNIQUE',
+    rationale: 'Milestone identity is stable ID, allowing duplicate names in different contexts',
     severity: 'critical',
   },
   {

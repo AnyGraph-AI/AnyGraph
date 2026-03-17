@@ -150,7 +150,8 @@ async function ingestCoChanges(pairs: CoChangePair[], projectId: string) {
         WHERE s2.filePath ENDS WITH pair.file2 OR s2.name = pair.file2
         AND s1 <> s2
         MERGE (s1)-[r:CO_CHANGES_WITH]-(s2)
-        SET r.coChangeCount = pair.coChangeCount,
+        SET r.projectId = $pid,
+            r.coChangeCount = pair.coChangeCount,
             r.commits = pair.commits,
             r.lastCoChange = pair.lastCoChange,
             r.couplingStrength = CASE 

@@ -166,7 +166,9 @@ async function main() {
         await session.run(`
           MATCH (sf:SourceFile {filePath: $filePath, projectId: $pid})
           MATCH (a:Author {id: $authorId})
-          MERGE (sf)-[:OWNED_BY]->(a)
+          MERGE (sf)-[r:OWNED_BY]->(a)
+          ON CREATE SET r.projectId = $pid, r.derived = true, r.source = 'author-ownership'
+          ON MATCH SET r.projectId = $pid
         `, { filePath, pid: project.id, authorId });
       }
     }

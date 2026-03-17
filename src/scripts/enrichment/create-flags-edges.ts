@@ -57,11 +57,13 @@ export async function enrichFlagsEdges(driver: Driver): Promise<{
        ON CREATE SET
          r.derived = true,
          r.source = 'flags-enrichment',
+         r.projectId = vr.projectId,
          r.startLine = vr.startLine,
          r.endLine = vr.endLine,
          r.ruleId = vr.ruleId,
          r.timestamp = datetime()
        ON MATCH SET
+         r.projectId = vr.projectId,
          r.startLine = vr.startLine,
          r.endLine = vr.endLine,
          r.timestamp = datetime()

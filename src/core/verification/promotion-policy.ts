@@ -37,11 +37,14 @@ export interface PromotionPolicyConfig {
   mode: PolicyMode;
   /** Whether to actually promote shadow→production when enforced. Default: false */
   enableEnforcement: boolean;
+  /** Minimum required Brier improvement (brierProd - brierShadow) to be eligible. Default: 0 */
+  minBrierImprovement?: number;
 }
 
 const DEFAULT_CONFIG: PromotionPolicyConfig = {
   mode: 'advisory',
   enableEnforcement: false,
+  minBrierImprovement: 0,
 };
 
 // ── Decision Hash ───────────────────────────────────────────────────
@@ -52,8 +55,9 @@ function hashDecision(
   eligible: boolean,
   brierProd: number,
   brierShadow: number,
+  minBrierImprovement: number,
 ): string {
-  const payload = JSON.stringify({ projectId, mode, eligible, brierProd, brierShadow });
+  const payload = JSON.stringify({ projectId, mode, eligible, brierProd, brierShadow, minBrierImprovement });
   return createHash('sha256').update(payload).digest('hex').slice(0, 32);
 }
 
@@ -73,26 +77,33 @@ export function evaluatePromotion(
   config: PromotionPolicyConfig = DEFAULT_CONFIG,
 ): PromotionDecision {
   const now = new Date().toISOString();
-  const eligible = inputs.calibrationPass && inputs.governancePass && inputs.antiGamingPass;
+  const minImprovement = config.minBrierImprovement ?? 0;
+  const brierImprovement = inputs.brierProd - inputs.brierShadow;
+  const improvementPass = brierImprovement >= minImprovement;
+  const eligible = inputs.calibrationPass && inputs.governancePass && inputs.antiGamingPass && improvementPass;
 
   let promoted = false;
   let reason: string;
 
   switch (config.mode) {
     case 'advisory':
-      reason = eligible ? 'Eligible (advisory mode — no promotion)' : 'Not eligible';
+      reason = eligible
+        ? `Eligible (advisory mode — no promotion, improvement=${brierImprovement.toFixed(4)} >= ${minImprovement.toFixed(4)})`
+        : `Not eligible (improvement=${brierImprovement.toFixed(4)} < required ${minImprovement.toFixed(4)} or gate failure)`;
       break;
     case 'assisted':
-      reason = eligible ? 'Eligible (assisted mode — human decision required)' : 'Not eligible';
+      reason = eligible
+        ? `Eligible (assisted mode — human decision required, improvement=${brierImprovement.toFixed(4)} >= ${minImprovement.toFixed(4)})`
+        : `Not eligible (improvement=${brierImprovement.toFixed(4)} < required ${minImprovement.toFixed(4)} or gate failure)`;
       break;
     case 'enforced':
       if (eligible && config.enableEnforcement) {
         promoted = true;
-        reason = 'Promoted (enforced mode)';
+        reason = `Promoted (enforced mode, improvement=${brierImprovement.toFixed(4)} >= ${minImprovement.toFixed(4)})`;
       } else if (eligible) {
-        reason = 'Eligible but enforcement disabled';
+        reason = `Eligible but enforcement disabled (improvement=${brierImprovement.toFixed(4)} >= ${minImprovement.toFixed(4)})`;
       } else {
-        reason = 'Not eligible for promotion';
+        reason = `Not eligible for promotion (improvement=${brierImprovement.toFixed(4)} < required ${minImprovement.toFixed(4)} or gate failure)`;
       }
       break;
   }
@@ -100,6 +111,7 @@ export function evaluatePromotion(
   const decisionHash = hashDecision(
     inputs.projectId, config.mode, eligible,
     inputs.brierProd, inputs.brierShadow,
+    minImprovement,
   );
 
   return {

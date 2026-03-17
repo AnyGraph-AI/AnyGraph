@@ -82,7 +82,8 @@ export async function enrichEvidenceAnchors(
             substring(e.id, apoc.text.indexOf(e.id, 'proj_')) AS codeNodeId
        MATCH (cn:CodeNode {id: codeNodeId})
        MERGE (e)-[r:ANCHORED_TO]->(cn)
-       ON CREATE SET r.derived = true, r.source = 'evidence-anchor', r.created = datetime()
+       ON CREATE SET r.derived = true, r.source = 'evidence-anchor', r.created = datetime(), r.projectId = coalesce(e.projectId, cn.projectId)
+       ON MATCH SET r.projectId = coalesce(e.projectId, cn.projectId)
        RETURN count(r) AS anchored`,
       { projectId: projectId ?? null },
     );
@@ -98,7 +99,8 @@ export async function enrichEvidenceAnchors(
        ${filterClause}
        MATCH (cn:CodeNode {symbolHash: e.symbolHash})
        MERGE (e)-[r:ANCHORED_TO]->(cn)
-       ON CREATE SET r.derived = true, r.source = 'evidence-anchor-symbolhash', r.created = datetime()
+       ON CREATE SET r.derived = true, r.source = 'evidence-anchor-symbolhash', r.created = datetime(), r.projectId = coalesce(e.projectId, cn.projectId)
+       ON MATCH SET r.projectId = coalesce(e.projectId, cn.projectId)
        RETURN count(r) AS anchored`,
       { projectId: projectId ?? null },
     );

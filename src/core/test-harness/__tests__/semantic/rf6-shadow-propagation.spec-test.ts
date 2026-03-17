@@ -20,13 +20,48 @@ import { Neo4jService } from '../../../../storage/neo4j/neo4j.service.js';
 
 describe('RF-6: Shadow Signed Propagation (Advisory Only)', () => {
   let neo4j: Neo4jService;
-  const projectId = 'proj_c0d3e9a1f200';
+  const projectId = '__rf6_fixture_project__';
 
-  beforeAll(() => {
+  beforeAll(async () => {
     neo4j = new Neo4jService();
+
+    // Self-contained fixture: do NOT depend on ambient live graph state.
+    await neo4j.run(
+      `MATCH (r:VerificationRun {projectId: $pid}) DETACH DELETE r`,
+      { pid: projectId },
+    );
+
+    await neo4j.run(
+      `UNWIND $runs AS run
+       MERGE (r:VerificationRun {id: run.id, projectId: $pid})
+       SET r.effectiveConfidence = run.effectiveConfidence,
+           r.timeConsistencyFactor = run.timeConsistencyFactor,
+           r.retroactivePenalty = run.retroactivePenalty`,
+      {
+        pid: projectId,
+        runs: [
+          { id: 'rf6:r1', effectiveConfidence: 0.90, timeConsistencyFactor: 1.00, retroactivePenalty: 1.00 },
+          { id: 'rf6:r2', effectiveConfidence: 0.70, timeConsistencyFactor: 0.80, retroactivePenalty: 1.00 },
+          { id: 'rf6:r3', effectiveConfidence: 0.60, timeConsistencyFactor: 0.60, retroactivePenalty: 0.90 },
+        ],
+      },
+    );
+
+    await neo4j.run(
+      `MATCH (r1:VerificationRun {id: 'rf6:r1', projectId: $pid}),
+             (r2:VerificationRun {id: 'rf6:r2', projectId: $pid}),
+             (r3:VerificationRun {id: 'rf6:r3', projectId: $pid})
+       MERGE (r1)-[:PRECEDES]->(r2)
+       MERGE (r2)-[:PRECEDES]->(r3)`,
+      { pid: projectId },
+    );
   });
 
   afterAll(async () => {
+    await neo4j.run(
+      `MATCH (r:VerificationRun {projectId: $pid}) DETACH DELETE r`,
+      { pid: projectId },
+    );
     await neo4j.close();
   });
 

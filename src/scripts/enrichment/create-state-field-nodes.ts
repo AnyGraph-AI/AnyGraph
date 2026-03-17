@@ -251,7 +251,8 @@ export async function enrichStateFieldNodes(driver: Driver): Promise<{
           `MATCH (field:Field {id: $fieldId})
            MATCH (cls:Class {projectId: $projectId, name: $className, filePath: $filePath})
            MERGE (cls)-[r:HAS_FIELD]->(field)
-           ON CREATE SET r.derived = true, r.source = 'state-field-enrichment'`,
+           ON CREATE SET r.derived = true, r.source = 'state-field-enrichment', r.projectId = $projectId
+           ON MATCH SET r.projectId = $projectId`,
           { fieldId: fId, projectId, className: f.className, filePath: f.filePath },
         );
       } else {
@@ -259,7 +260,8 @@ export async function enrichStateFieldNodes(driver: Driver): Promise<{
           `MATCH (field:Field {id: $fieldId})
            MATCH (sf:SourceFile {projectId: $projectId, filePath: $filePath})
            MERGE (sf)-[r:CONTAINS]->(field)
-           ON CREATE SET r.derived = true, r.source = 'state-field-enrichment'`,
+           ON CREATE SET r.derived = true, r.source = 'state-field-enrichment', r.projectId = $projectId
+           ON MATCH SET r.projectId = $projectId`,
           { fieldId: fId, projectId, filePath: f.filePath },
         );
       }

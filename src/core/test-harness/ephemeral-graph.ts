@@ -180,8 +180,10 @@ async function setupTestSchema(
   const constraints = [
     'CREATE CONSTRAINT test_source_file IF NOT EXISTS FOR (n:SourceFile) REQUIRE (n.projectId, n.filePath) IS UNIQUE',
     'CREATE CONSTRAINT test_function IF NOT EXISTS FOR (n:Function) REQUIRE (n.projectId, n.name, n.filePath) IS UNIQUE',
-    'CREATE CONSTRAINT test_task IF NOT EXISTS FOR (n:Task) REQUIRE (n.projectId, n.name) IS UNIQUE',
-    'CREATE CONSTRAINT test_milestone IF NOT EXISTS FOR (n:Milestone) REQUIRE (n.projectId, n.name) IS UNIQUE',
+    // Task/Milestone identity is stable ID, not (projectId, name).
+    // Name uniqueness is invalid because duplicate task names across milestones are legitimate.
+    'CREATE CONSTRAINT test_task IF NOT EXISTS FOR (n:Task) REQUIRE (n.id) IS UNIQUE',
+    'CREATE CONSTRAINT test_milestone IF NOT EXISTS FOR (n:Milestone) REQUIRE (n.id) IS UNIQUE',
   ];
 
   for (const constraint of constraints) {

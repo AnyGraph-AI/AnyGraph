@@ -242,8 +242,11 @@ export async function enrichEntrypointEdges(driver: Driver): Promise<{
          ON CREATE SET
            r.derived = true,
            r.source = 'entrypoint-enrichment',
+           r.projectId = $projectId,
            r.framework = $framework,
            r.kind = $kind
+         ON MATCH SET
+           r.projectId = $projectId
          RETURN count(r) AS cnt`,
         {
           epId,
@@ -270,9 +273,12 @@ export async function enrichEntrypointEdges(driver: Driver): Promise<{
            ON CREATE SET
              r.derived = true,
              r.source = 'entrypoint-enrichment',
+             r.projectId = $projectId,
              r.framework = $framework,
              r.kind = $kind,
              r.matchedBy = 'handlerName'
+           ON MATCH SET
+             r.projectId = $projectId
            RETURN count(r) AS cnt`,
           {
             epId,
