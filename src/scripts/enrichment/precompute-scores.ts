@@ -362,6 +362,26 @@ export async function enrichPrecomputeScores(
     }
     console.log('[UI-0] Indexes ensured');
 
+    // ── Step 7: Store max values on Project node ───────────────
+    // Eliminates query-time computation for normalization.
+    // UI reads: normalized = sf.adjustedPain / project.maxAdjustedPain
+    if (fileUpdates.length > 0) {
+      const maxPainScore = Math.max(...fileUpdates.map((u) => u.painScore));
+      const maxAdjustedPain = Math.max(...fileUpdates.map((u) => u.adjustedPain));
+      const maxFragility = Math.max(...fileUpdates.map((u) => u.fragility));
+      const maxCentrality = Math.max(...fileUpdates.map((u) => u.centrality));
+
+      await session.run(
+        `MATCH (p:Project {projectId: $projectId})
+         SET p.maxPainScore = $maxPainScore,
+             p.maxAdjustedPain = $maxAdjustedPain,
+             p.maxFragility = $maxFragility,
+             p.maxCentrality = $maxCentrality`,
+        { projectId, maxPainScore, maxAdjustedPain, maxFragility, maxCentrality },
+      );
+      console.log(`[UI-0] Project maxima stored: painScore=${maxPainScore.toFixed(2)}, adjustedPain=${maxAdjustedPain.toFixed(2)}, fragility=${maxFragility.toFixed(2)}, centrality=${maxCentrality.toFixed(2)}`);
+    }
+
     return { functionsUpdated, filesUpdated };
   } finally {
     await session.close();

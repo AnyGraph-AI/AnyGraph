@@ -1,8 +1,8 @@
 /**
  * UI-0: Scoring normalization utilities
  *
- * Provides normalize(), getMaxPainScore(), getMaxAdjustedPain() for UI panels.
- * Results are cached per (projectId, batchKey) to avoid repeated Neo4j queries within a request.
+ * All max values are pre-stored on Project nodes during precompute.
+ * No query-time computation — pure property reads.
  */
 import type { Driver } from 'neo4j-driver';
 
@@ -20,26 +20,77 @@ export function normalize(value: number, max: number): number {
   return value / max;
 }
 
-// ─── Cache ─────────────────────────────────────────────────────
+// ─── Project maxima (pre-stored, single read) ──────────────────
 
-const cache = new Map<string, { value: number; ts: number }>();
-const CACHE_TTL_MS = 30_000; // 30 seconds
-
-function cacheKey(projectId: string, metric: string): string {
-  return `${projectId}:${metric}`;
+export interface ProjectMaxima {
+  maxPainScore: number;
+  maxAdjustedPain: number;
+  maxFragility: number;
+  maxCentrality: number;
 }
 
-function getCached(key: string): number | undefined {
-  const entry = cache.get(key);
-  if (entry && Date.now() - entry.ts < CACHE_TTL_MS) {
-    return entry.value;
+// In-memory cache: projectId → maxima (populated once per request batch)
+const cache = new Map<string, { value: ProjectMaxima; ts: number }>();
+const CACHE_TTL_MS = 30_000;
+
+/**
+ * Get all pre-stored maxima from the Project node.
+ * Single property read, no aggregation.
+ */
+export async function getProjectMaxima(
+  projectId: string,
+  driver: Driver,
+): Promise<ProjectMaxima> {
+  const cached = cache.get(projectId);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    return cached.value;
   }
-  cache.delete(key);
-  return undefined;
+  cache.delete(projectId);
+
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (p:Project {projectId: $projectId})
+       RETURN p.maxPainScore AS maxPainScore,
+              p.maxAdjustedPain AS maxAdjustedPain,
+              p.maxFragility AS maxFragility,
+              p.maxCentrality AS maxCentrality`,
+      { projectId },
+    );
+    const r = result.records[0];
+    const value: ProjectMaxima = {
+      maxPainScore: toNum(r?.get('maxPainScore') ?? 0),
+      maxAdjustedPain: toNum(r?.get('maxAdjustedPain') ?? 0),
+      maxFragility: toNum(r?.get('maxFragility') ?? 0),
+      maxCentrality: toNum(r?.get('maxCentrality') ?? 0),
+    };
+    cache.set(projectId, { value, ts: Date.now() });
+    return value;
+  } finally {
+    await session.close();
+  }
 }
 
-function setCache(key: string, value: number): void {
-  cache.set(key, { value, ts: Date.now() });
+/**
+ * Convenience: get max painScore for a project.
+ */
+export async function getMaxPainScore(
+  projectId: string,
+  driver: Driver,
+): Promise<number> {
+  const maxima = await getProjectMaxima(projectId, driver);
+  return maxima.maxPainScore;
+}
+
+/**
+ * Convenience: get max adjustedPain for a project.
+ */
+export async function getMaxAdjustedPain(
+  projectId: string,
+  driver: Driver,
+): Promise<number> {
+  const maxima = await getProjectMaxima(projectId, driver);
+  return maxima.maxAdjustedPain;
 }
 
 /**
@@ -47,62 +98,4 @@ function setCache(key: string, value: number): void {
  */
 export function clearScoringCache(): void {
   cache.clear();
-}
-
-// ─── Max queries ───────────────────────────────────────────────
-
-/**
- * Get the maximum painScore for SourceFiles in a project.
- * Cached per request batch (30s TTL).
- */
-export async function getMaxPainScore(
-  projectId: string,
-  driver: Driver,
-): Promise<number> {
-  const key = cacheKey(projectId, 'maxPainScore');
-  const cached = getCached(key);
-  if (cached !== undefined) return cached;
-
-  const session = driver.session();
-  try {
-    const result = await session.run(
-      `MATCH (sf:SourceFile {projectId: $projectId})
-       WHERE sf.painScore IS NOT NULL
-       RETURN max(sf.painScore) AS maxVal`,
-      { projectId },
-    );
-    const maxVal = toNum(result.records[0]?.get('maxVal') ?? 0);
-    setCache(key, maxVal);
-    return maxVal;
-  } finally {
-    await session.close();
-  }
-}
-
-/**
- * Get the maximum adjustedPain for SourceFiles in a project.
- * Cached per request batch (30s TTL).
- */
-export async function getMaxAdjustedPain(
-  projectId: string,
-  driver: Driver,
-): Promise<number> {
-  const key = cacheKey(projectId, 'maxAdjustedPain');
-  const cached = getCached(key);
-  if (cached !== undefined) return cached;
-
-  const session = driver.session();
-  try {
-    const result = await session.run(
-      `MATCH (sf:SourceFile {projectId: $projectId})
-       WHERE sf.adjustedPain IS NOT NULL
-       RETURN max(sf.adjustedPain) AS maxVal`,
-      { projectId },
-    );
-    const maxVal = toNum(result.records[0]?.get('maxVal') ?? 0);
-    setCache(key, maxVal);
-    return maxVal;
-  } finally {
-    await session.close();
-  }
 }
