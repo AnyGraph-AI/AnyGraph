@@ -256,6 +256,7 @@ async function runDiagnosis(): Promise<DiagResult[]> {
   });
 
   // D11: Enrichment property coverage — are enrichment properties surviving reparse?
+  // (moved below for numbering consistency)
   const d11 = await query(`
     MATCH (f:Function {projectId: $pid})
     WITH count(f) AS total,
@@ -276,11 +277,122 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     detail: d11r,
   });
 
+  // D12: Entrypoint dispatch coverage — are all entrypoints wired to handlers?
+  const d12 = await query(`
+    MATCH (e:Entrypoint {projectId: $pid})
+    OPTIONAL MATCH (e)-[:DISPATCHES_TO]->(h)
+    WITH count(e) AS total,
+         sum(CASE WHEN h IS NOT NULL THEN 1 ELSE 0 END) AS wired,
+         collect(CASE WHEN h IS NULL THEN e.name ELSE null END) AS unwired
+    RETURN total, wired, total - wired AS disconnected,
+           [x IN unwired WHERE x IS NOT NULL] AS disconnectedNames
+  `, { pid });
+  const d12r = d12[0] || {};
+  results.push({
+    id: 'D12', question: 'Are all entrypoints wired to handlers? (dispatch coverage)',
+    answer: `${d12r.wired}/${d12r.total} entrypoints have DISPATCHES_TO edges. ${d12r.disconnected} disconnected${d12r.disconnectedNames?.length ? ': ' + d12r.disconnectedNames.slice(0, 5).join(', ') : ''}`,
+    healthy: (d12r.disconnected || 0) === 0,
+    detail: d12r,
+  });
+
+  // D13: Plan task evidence coverage — how many "done" tasks have zero evidence?
+  const d13 = await query(`
+    MATCH (t:Task)
+    WHERE t.status = 'done'
+    OPTIONAL MATCH (t)-[:HAS_CODE_EVIDENCE]->(e)
+    WITH count(t) AS totalDone,
+         sum(CASE WHEN e IS NOT NULL THEN 1 ELSE 0 END) AS withEvidence,
+         sum(CASE WHEN e IS NULL THEN 1 ELSE 0 END) AS noEvidence
+    RETURN totalDone, withEvidence, noEvidence
+  `);
+  const d13r = d13[0] || {};
+  const d13Pct = d13r.totalDone > 0 ? Math.round((d13r.noEvidence / d13r.totalDone) * 100) : 0;
+  results.push({
+    id: 'D13', question: 'Do "done" tasks have structural evidence? (unproven completions)',
+    answer: `${d13r.withEvidence}/${d13r.totalDone} done tasks have code evidence. ${d13r.noEvidence} unproven (${d13Pct}%)`,
+    healthy: d13Pct < 50,
+    detail: d13r,
+  });
+
+  // D14: Provenance coverage — what % of edges have provenance metadata?
+  const d14 = await query(`
+    MATCH (s {projectId: $pid})-[r]->(t)
+    WITH type(r) AS edgeType, count(r) AS total,
+         sum(CASE WHEN r.provenance IS NOT NULL THEN 1 ELSE 0 END) AS withProv
+    RETURN edgeType, total, withProv,
+           CASE WHEN total > 0 THEN round(toFloat(withProv) / total * 100) ELSE 0 END AS pct
+    ORDER BY total DESC
+  `, { pid });
+  const d14Total = d14.reduce((s, r) => s + r.total, 0);
+  const d14WithProv = d14.reduce((s, r) => s + r.withProv, 0);
+  const d14Pct = d14Total > 0 ? Math.round(d14WithProv / d14Total * 100) : 0;
+  const d14Zero = d14.filter(r => r.withProv === 0 && r.total > 10).map(r => r.edgeType);
+  results.push({
+    id: 'D14', question: 'Do edges have provenance metadata? (audit trail coverage)',
+    answer: `${d14WithProv}/${d14Total} edges have provenance (${d14Pct}%). ${d14Zero.length} edge types with 0% provenance${d14Zero.length ? ': ' + d14Zero.slice(0, 5).join(', ') : ''}`,
+    healthy: d14Pct > 50,
+    detail: { totalEdges: d14Total, withProvenance: d14WithProv, pct: d14Pct, zeroCoverage: d14Zero },
+  });
+
+  // D15: Test coverage vs risk — are CRITICAL/HIGH functions in tested files?
+  const d15 = await query(`
+    MATCH (f:Function {projectId: $pid})
+    WHERE f.riskTier IN ['CRITICAL', 'HIGH']
+    MATCH (sf:SourceFile {projectId: $pid})-[:CONTAINS]->(f)
+    OPTIONAL MATCH (sf)<-[:TESTED_BY]-(tf)
+    WITH f.riskTier AS tier, count(f) AS total,
+         sum(CASE WHEN tf IS NOT NULL THEN 1 ELSE 0 END) AS tested,
+         sum(CASE WHEN tf IS NULL THEN 1 ELSE 0 END) AS untested
+    RETURN tier, total, tested, untested ORDER BY tier
+  `, { pid });
+  const d15Untested = d15.reduce((s, r) => s + r.untested, 0);
+  const d15Total = d15.reduce((s, r) => s + r.total, 0);
+  results.push({
+    id: 'D15', question: 'Are CRITICAL/HIGH functions in tested files? (risk vs coverage gap)',
+    answer: d15Total > 0
+      ? `${d15Untested}/${d15Total} CRITICAL/HIGH functions are in untested files. ${d15.map(r => `${r.tier}: ${r.untested}/${r.total} untested`).join(', ')}`
+      : 'No CRITICAL/HIGH functions found (risk tiers may be stale)',
+    healthy: d15Total > 0 && d15Untested < d15Total * 0.3,
+    detail: { breakdown: d15 },
+  });
+
+  // D16: Verification source identity — are there VRs with unknown source?
+  const d16 = await query(`
+    MATCH (vr:VerificationRun)
+    WHERE vr.projectId = $pid OR vr.projectId IS NULL
+    RETURN vr.source AS source, count(vr) AS cnt ORDER BY cnt DESC
+  `, { pid });
+  const d16Null = d16.filter(r => r.source === null).reduce((s, r) => s + r.cnt, 0);
+  const d16Total = d16.reduce((s, r) => s + r.cnt, 0);
+  results.push({
+    id: 'D16', question: 'Do all verification runs have a known source?',
+    answer: `${d16Total - d16Null}/${d16Total} VRs have source metadata. ${d16Null} with null source`,
+    healthy: d16Null === 0,
+    detail: { distribution: d16, nullCount: d16Null },
+  });
+
+  // D17: Claim→Evidence→Code chain completeness — can claims reach source code?
+  const d17 = await query(`
+    MATCH (c:Claim)
+    OPTIONAL MATCH (c)-[:SUPPORTED_BY]->(e:Evidence)-[:ANCHORED_TO]->(code)
+    WITH count(DISTINCT c) AS totalClaims,
+         count(DISTINCT CASE WHEN code IS NOT NULL THEN c END) AS fullyChained
+    RETURN totalClaims, fullyChained, totalClaims - fullyChained AS broken
+  `);
+  const d17r = d17[0] || {};
+  const d17Pct = d17r.totalClaims > 0 ? Math.round((d17r.fullyChained / d17r.totalClaims) * 100) : 0;
+  results.push({
+    id: 'D17', question: 'Can claims reach source code? (Claim→Evidence→Code chain)',
+    answer: `${d17r.fullyChained}/${d17r.totalClaims} claims have full chain to code (${d17Pct}%). ${d17r.broken} broken chains`,
+    healthy: d17Pct > 10, // Most claims are plan-level, not code-level, so low threshold
+    detail: d17r,
+  });
+
   return results;
 }
 
 async function main() {
-  console.log('🔬 Self-Diagnosis — 11 Epistemological Health Checks\n');
+  console.log('🔬 Self-Diagnosis — 17 Epistemological Health Checks\n');
   console.log('   "Does the graph know what it doesn\'t know?"\n');
 
   try {

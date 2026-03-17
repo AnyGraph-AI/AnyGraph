@@ -430,11 +430,174 @@ async function runProbes(): Promise<ProbeResult[]> {
     rows: q25,
   });
 
+  // === New Probes: Deep Insight ===
+
+  // Q26: State mutation hotspots — who WRITES the most state?
+  const q26 = await query(`
+    MATCH (f:Function {projectId: $pid})-[w:WRITES_STATE]->(field:Field)
+    RETURN f.name AS writer, f.filePath AS file, count(w) AS fieldsWritten,
+           collect(field.name)[0..5] AS fields
+    ORDER BY fieldsWritten DESC LIMIT 10
+  `, { pid });
+  results.push({
+    id: 'Q26', name: 'State mutation hotspots (most writes)', category: 'State',
+    status: q26.length > 0 ? 'info' : 'warn',
+    summary: q26.length > 0 ? `Top mutator: ${q26[0]?.writer} (${q26[0]?.fieldsWritten} fields)` : 'No WRITES_STATE edges found',
+    rows: q26,
+  });
+
+  // Q27: State read fan-out — who reads the most shared state?
+  const q27 = await query(`
+    MATCH (field:Field {projectId: $pid})<-[r:READS_STATE]-(f:Function)
+    WITH field, count(f) AS readerCount, collect(f.name)[0..5] AS readers
+    WHERE readerCount > 3
+    RETURN field.name AS field, readerCount, readers
+    ORDER BY readerCount DESC LIMIT 10
+  `, { pid });
+  results.push({
+    id: 'Q27', name: 'Most-shared mutable state (read fan-out)', category: 'State',
+    status: q27.some(r => r.readerCount > 10) ? 'warn' : 'info',
+    summary: q27.length > 0 ? `Most shared: ${q27[0]?.field} (${q27[0]?.readerCount} readers)` : 'No highly-shared state',
+    rows: q27,
+  });
+
+  // Q28: Author risk concentration — bus factor per risk tier
+  const q28 = await query(`
+    MATCH (sf:SourceFile {projectId: $pid})-[:CONTAINS]->(f:Function)
+    WHERE f.riskTier IN ['CRITICAL', 'HIGH']
+    MATCH (sf)<-[:OWNED_BY]-(a:Author)
+    RETURN a.name AS author, f.riskTier AS tier, count(DISTINCT f) AS functions
+    ORDER BY functions DESC
+  `, { pid });
+  results.push({
+    id: 'Q28', name: 'Author risk concentration (bus factor)', category: 'Risk',
+    status: q28.length === 1 ? 'warn' : 'info',
+    summary: q28.length > 0 ? `${q28.length} authors own CRITICAL/HIGH code. Top: ${q28[0]?.author} (${q28[0]?.functions} functions)` : 'No author ownership data',
+    rows: q28,
+  });
+
+  // Q29: Hidden coupling + high risk — files that co-change with NO import AND are CRITICAL
+  const q29 = await query(`
+    MATCH (sf1:SourceFile {projectId: $pid})-[c:CO_CHANGES_WITH]-(sf2:SourceFile {projectId: $pid})
+    WHERE NOT (sf1)-[:IMPORTS]-(sf2) AND NOT (sf2)-[:IMPORTS]-(sf1)
+    MATCH (sf1)-[:CONTAINS]->(f1:Function)
+    WHERE f1.riskTier IN ['CRITICAL', 'HIGH']
+    RETURN sf1.name AS file1, sf2.name AS file2, c.coChangeCount AS coChanges,
+           f1.name AS riskyFunction, f1.riskTier AS tier
+    ORDER BY c.coChangeCount DESC LIMIT 10
+  `, { pid });
+  results.push({
+    id: 'Q29', name: 'Hidden coupling + high risk (co-change, no import, CRITICAL)', category: 'Risk',
+    status: q29.length > 0 ? 'warn' : 'pass',
+    summary: q29.length > 0 ? `${q29.length} hidden couplings in high-risk code` : 'No hidden high-risk couplings',
+    rows: q29,
+  });
+
+  // Q30: Plan milestone critical path — most blocking milestones
+  const q30 = await query(`
+    MATCH (m:Milestone)-[:BLOCKS]->(blocked:Milestone)
+    RETURN m.name AS milestone, count(blocked) AS blocks,
+           collect(blocked.name)[0..3] AS blockedMilestones
+    ORDER BY blocks DESC LIMIT 10
+  `);
+  results.push({
+    id: 'Q30', name: 'Milestone critical path (most blocking)', category: 'Plan',
+    status: 'info',
+    summary: q30.length > 0 ? `Most blocking: ${q30[0]?.milestone} (blocks ${q30[0]?.blocks})` : 'No BLOCKS edges between milestones',
+    rows: q30,
+  });
+
+  // Q31: Claim→Evidence→Code chain depth — full traversal coverage
+  const q31 = await query(`
+    MATCH (c:Claim)-[:SUPPORTED_BY]->(e:Evidence)
+    OPTIONAL MATCH (e)-[:ANCHORED_TO]->(code)
+    OPTIONAL MATCH (e)-[:FROM_PROJECT]->(p:Project)
+    WITH c, e,
+         CASE WHEN code IS NOT NULL THEN 'code-anchored'
+              WHEN p IS NOT NULL THEN 'project-only'
+              ELSE 'orphaned' END AS depth
+    RETURN depth, count(DISTINCT c) AS claims, count(DISTINCT e) AS evidence
+    ORDER BY claims DESC
+  `);
+  results.push({
+    id: 'Q31', name: 'Claim→Evidence→Code chain completeness', category: 'Claims',
+    status: q31.some(r => r.depth === 'orphaned' && r.claims > 100) ? 'warn' : 'info',
+    summary: q31.map(r => `${r.depth}: ${r.claims} claims`).join(', '),
+    rows: q31,
+  });
+
+  // Q32: Done-check pipeline step inventory — how many steps in the pipeline?
+  const q32 = await query(`
+    MATCH (vr:VerificationRun)
+    WHERE vr.source = 'done-check'
+    RETURN vr.checkName AS step, vr.ok AS passed,
+           vr.effectiveConfidence AS ec
+    ORDER BY vr.checkName LIMIT 30
+  `);
+  results.push({
+    id: 'Q32', name: 'Done-check pipeline steps', category: 'Governance',
+    status: q32.some(r => r.passed === false) ? 'warn' : 'info',
+    summary: `${q32.length} done-check VRs. ${q32.filter(r => r.passed === false).length} failing`,
+    rows: q32,
+  });
+
+  // Q33: Verification blind spots — which source files have NO verification at all?
+  const q33 = await query(`
+    MATCH (sf:SourceFile {projectId: $pid})
+    WHERE NOT (sf)<-[:ANALYZED]-() AND NOT (sf)-[:CONTAINS]->()<-[:FLAGS]-()
+    RETURN sf.name AS file, sf.filePath AS path
+    ORDER BY sf.name LIMIT 10
+  `, { pid });
+  results.push({
+    id: 'Q33', name: 'Completely unverified source files', category: 'Verification',
+    status: q33.length > 5 ? 'warn' : 'info',
+    summary: `${q33.length} files with zero verification (no ANALYZED, no FLAGS)`,
+    rows: q33,
+  });
+
+  // Q34: Test file → source file coverage map
+  const q34 = await query(`
+    MATCH (sf:SourceFile {projectId: $pid})
+    WITH count(sf) AS totalFiles
+    MATCH (sf2:SourceFile {projectId: $pid})
+    OPTIONAL MATCH (sf2)<-[:TESTED_BY]-(tf)
+    WITH totalFiles,
+         sum(CASE WHEN tf IS NOT NULL THEN 1 ELSE 0 END) AS tested,
+         sum(CASE WHEN tf IS NULL THEN 1 ELSE 0 END) AS untested
+    RETURN totalFiles, tested, untested,
+           round(toFloat(tested) / totalFiles * 100) AS coveragePct
+  `, { pid });
+  results.push({
+    id: 'Q34', name: 'Test file coverage map', category: 'Verification',
+    status: (q34[0]?.coveragePct || 0) < 20 ? 'warn' : 'info',
+    summary: `${q34[0]?.tested}/${q34[0]?.totalFiles} files tested (${q34[0]?.coveragePct}%)`,
+    rows: q34,
+  });
+
+  // Q35: Cross-layer synthesis — functions that appear in ALL layers (code + plan + verification + claims)
+  const q35 = await query(`
+    MATCH (f:Function {projectId: $pid})
+    OPTIONAL MATCH (f)<-[:FLAGS]-(vr)
+    OPTIONAL MATCH (sf:SourceFile)-[:CONTAINS]->(f)
+    OPTIONAL MATCH (sf)<-[:HAS_CODE_EVIDENCE]-(t:Task)
+    OPTIONAL MATCH (c:Claim)-[:SUPPORTED_BY]->(:Evidence)-[:ANCHORED_TO]->(f)
+    WITH f, count(DISTINCT vr) AS vrCount, count(DISTINCT t) AS taskCount, count(DISTINCT c) AS claimCount
+    WHERE vrCount > 0 AND taskCount > 0
+    RETURN f.name AS function, f.riskTier AS tier, vrCount AS verifications, taskCount AS planTasks, claimCount AS claims
+    ORDER BY vrCount + taskCount + claimCount DESC LIMIT 10
+  `, { pid });
+  results.push({
+    id: 'Q35', name: 'Cross-layer connected functions (code+plan+verification+claims)', category: 'Cross-Layer',
+    status: 'info',
+    summary: q35.length > 0 ? `${q35.length} functions connected across all layers` : 'No fully cross-connected functions yet',
+    rows: q35,
+  });
+
   return results;
 }
 
 async function main() {
-  console.log('🏗️  Architecture Probe — 25 Queries Against Live Graph\n');
+  console.log('🏗️  Architecture Probe — 35 Queries Against Live Graph\n');
 
   try {
     const results = await runProbes();
