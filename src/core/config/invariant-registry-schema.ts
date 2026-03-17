@@ -255,8 +255,83 @@ RETURN t.name, evidenceCount`,
   },
 ];
 
+// ── RF-9 Formalized Invariants ──────────────────────────────────────
+
+export const RF9_INVARIANTS: InvariantDefinition[] = [
+  {
+    invariantId: 'provenance_acyclicity',
+    class: InvariantClass.STRUCTURAL,
+    scope: InvariantScope.PROJECT,
+    enforcementMode: EnforcementMode.ENFORCED,
+    requiredEvidence: 'No cycles in SUPPORTED_BY or DERIVED_FROM chains',
+    freshnessPolicy: 'recheck after evidence ingestion',
+    waiverable: false,
+    owner: 'governance',
+    reviewCadence: 'on-ingest',
+    diagnosticQueryTemplate: `MATCH path = (a)-[:SUPPORTED_BY|DERIVED_FROM*2..5]->(a)
+RETURN count(path) AS cycles`,
+    counterexampleSchema: { requiredFields: ['cyclePath', 'nodeIds'] },
+    description: 'Provenance graph must remain acyclic — cycles indicate circular evidence dependency',
+  },
+  {
+    invariantId: 'temporal_ordering',
+    class: InvariantClass.STRUCTURAL,
+    scope: InvariantScope.PROJECT,
+    enforcementMode: EnforcementMode.ENFORCED,
+    requiredEvidence: 'validFrom <= validTo and supersededAt >= observedAt on all VRs',
+    freshnessPolicy: 'recheck after VR creation or update',
+    waiverable: false,
+    owner: 'governance',
+    reviewCadence: 'on-ingest',
+    diagnosticQueryTemplate: `MATCH (r:VerificationRun {projectId: $projectId})
+WHERE (r.validFrom IS NOT NULL AND r.validTo IS NOT NULL AND r.validFrom > r.validTo)
+   OR (r.supersededAt IS NOT NULL AND r.observedAt IS NOT NULL AND r.supersededAt < r.observedAt)
+RETURN r.id AS id, r.validFrom AS validFrom, r.validTo AS validTo, r.supersededAt AS supersededAt, r.observedAt AS observedAt`,
+    counterexampleSchema: { requiredFields: ['vrId', 'validFrom', 'validTo', 'supersededAt', 'observedAt'] },
+    description: 'Temporal fields must be ordered: validFrom <= validTo, supersededAt >= observedAt',
+  },
+  {
+    invariantId: 'trust_contribution_cap',
+    class: InvariantClass.HEURISTIC,
+    scope: InvariantScope.PROJECT,
+    enforcementMode: EnforcementMode.ADVISORY,
+    requiredEvidence: 'No source family exceeds configured cap in aggregate confidence',
+    freshnessPolicy: 'recheck after anti-gaming enforcement',
+    waiverable: true,
+    owner: 'governance',
+    reviewCadence: 'weekly',
+    diagnosticQueryTemplate: `MATCH (r:VerificationRun {projectId: $projectId})
+WHERE r.sourceFamily IS NOT NULL AND r.effectiveConfidence IS NOT NULL
+WITH r.sourceFamily AS fam, avg(r.effectiveConfidence) AS avgConf, count(r) AS cnt
+WHERE avgConf > 0.85
+RETURN fam, avgConf, cnt`,
+    counterexampleSchema: { requiredFields: ['sourceFamily', 'avgConfidence', 'cap'] },
+    description: 'Source-family contribution must not exceed configured cap in aggregate rollups',
+  },
+  {
+    invariantId: 'evidence_saturation',
+    class: InvariantClass.HEURISTIC,
+    scope: InvariantScope.TASK,
+    enforcementMode: EnforcementMode.ADVISORY,
+    requiredEvidence: 'No claim has both support and contradiction exceeding saturation threshold',
+    freshnessPolicy: 'recheck on evidence change',
+    waiverable: true,
+    owner: 'governance',
+    reviewCadence: 'weekly',
+    diagnosticQueryTemplate: `MATCH (c:Claim)
+OPTIONAL MATCH (c)-[:SUPPORTED_BY]->(sup)
+OPTIONAL MATCH (c)-[:CONTRADICTED_BY]->(con)
+WITH c, count(DISTINCT sup) AS supports, count(DISTINCT con) AS contradictions
+WHERE supports > 10 AND contradictions > 10
+RETURN c.statement AS claim, supports, contradictions`,
+    counterexampleSchema: { requiredFields: ['claimId', 'supports', 'contradictions', 'threshold'] },
+    description: 'Conflicting support/contradiction saturation indicates unresolved evidence conflict',
+  },
+];
+
 /** Full registry (combined) */
 export const INVARIANT_REGISTRY: InvariantDefinition[] = [
   ...HARD_INVARIANTS,
   ...ADVISORY_INVARIANTS,
+  ...RF9_INVARIANTS,
 ];

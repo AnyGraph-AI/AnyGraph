@@ -32,6 +32,10 @@ function makePassingResults(): InvariantCheckResult[] {
     { invariantId: 'stale_recommendation_inputs', passed: true, violationCount: 0, counterexamples: [], message: 'OK' },
     { invariantId: 'confidence_below_threshold', passed: true, violationCount: 0, counterexamples: [], message: 'OK' },
     { invariantId: 'suspicious_evidence_density', passed: true, violationCount: 0, counterexamples: [], message: 'OK' },
+    { invariantId: 'provenance_acyclicity', passed: true, violationCount: 0, counterexamples: [], message: 'OK' },
+    { invariantId: 'temporal_ordering', passed: true, violationCount: 0, counterexamples: [], message: 'OK' },
+    { invariantId: 'trust_contribution_cap', passed: true, violationCount: 0, counterexamples: [], message: 'OK' },
+    { invariantId: 'evidence_saturation', passed: true, violationCount: 0, counterexamples: [], message: 'OK' },
   ];
 }
 
