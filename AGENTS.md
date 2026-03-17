@@ -1,699 +1,300 @@
-# AnythingGraph — Agent Instructions
+# AnythingGraph — Agent Reference
 
-## What This Is
+## ⚠️ Read WORKFLOW.md First
 
-AnythingGraph (repo: codegraph) is a **universal reasoning graph**. It ingests code, plans, corpora, and documents into Neo4j, cross-references across domains, generates claims with evidence, detects drift, and self-audits. Code parsing was the proof of concept — the architecture handles any structured knowledge.
-
-**Current state** (v0.1.0): ~16,500 nodes, ~25,000 edges, 8 projects, 56 MCP tools, 636 tests across 40 suites, and 6 operational layers.
-
-**Six layers**: Code (3 projects) → Plans (4 projects) → Governance (1 project) → Claims (~490) → Reasoning (~490 hypotheses) → Self-Audit.
-
-Every function, task, claim, and entity is a node. Every call, evidence link, and dependency is an edge.
-**Query the graph before you edit. That's the entire point.**
+`WORKFLOW.md` is the step-by-step operating procedure for every task.
+This file is reference material — schema, tools, commands. Look things up here mid-task.
 
 ---
 
 ## Connection
 
-```bash
-cypher-shell -u neo4j -p codegraph "YOUR CYPHER QUERY"
-```
-- URI: `bolt://localhost:7687`
-- Browser: `http://localhost:7474`
-- Auth: `neo4j` / `codegraph`
-- APOC plugin installed (416 functions)
-- Vector index: `embedded_nodes_idx` (cosine, 3072 dims)
+- **Bolt:** `bolt://localhost:7687`
+- **Browser:** `http://localhost:7474`
+- **Auth:** `neo4j` / `codegraph`
+- **CLI:** `cypher-shell -u neo4j -p codegraph "YOUR QUERY"`
+- **APOC:** installed (416 functions)
 
 ---
 
 ## Graph Schema
 
-### Node Label Model
+### Node Labels
 
-Code nodes use **multi-label**: `CodeNode:TypeScript:Function`, `CodeNode:TypeScript:Method`, etc. The `kind` property on `CodeNode` provides the discriminator.
+Code nodes use multi-labels: `CodeNode:TypeScript:Function`, `CodeNode:SourceFile:TypeScript`, etc.
 
-| Label Pattern | What It Represents |
-|--------------|-------------------|
+| Label Pattern | What |
+|--------------|------|
 | `CodeNode:TypeScript:Function` | Named function |
 | `CodeNode:TypeScript:Method` | Class method |
 | `CodeNode:TypeScript:Class` | Class declaration |
-| `CodeNode:TypeScript:Interface` | Interface declaration |
+| `CodeNode:TypeScript:Interface` | Interface |
 | `CodeNode:TypeScript:Variable` | const/let/var |
 | `CodeNode:TypeScript:TypeAlias` | `type X = ...` |
-| `CodeNode:TypeScript:Property` | Class property |
-| `CodeNode:TypeScript:Parameter` | Function parameter |
-| `CodeNode:TypeScript:Import` | Import statement |
-| `CodeNode:TypeScript:Enum` | Enum declaration |
-| `CodeNode:TypeScript:Constructor` | Class constructor |
 | `CodeNode:SourceFile:TypeScript` | A `.ts` file |
-| `CodeNode:Entrypoint` | Framework registration (command, callback, event) |
-| `CodeNode:Task` / `CodeNode:Milestone` / `CodeNode:Decision` | Plan nodes |
-| `CodeNode:VerificationRun` / `CodeNode:GateDecision` | Governance nodes |
-| `CodeNode:GovernanceMetricSnapshot` / `CodeNode:MetricSurface` | Metrics nodes |
-| `Project` | Top-level project with stats |
-| `IntegritySnapshot` / `MetricResult` | Integrity tracking |
+| `CodeNode:TestFile` | Test file (from enrichment, not parser) |
+| `CodeNode:Entrypoint` | MCP tool, CLI command, event handler |
+| `CodeNode:Field` | State field (from state enrichment) |
+| `CodeNode:Task` / `Milestone` / `Decision` | Plan nodes |
+| `CodeNode:VerificationRun` | SARIF/done-check finding |
+| `CodeNode:GateDecision` / `AdvisoryGateDecision` | Gate records |
+| `CodeNode:GovernanceMetricSnapshot` | Governance metrics |
+| `Project` | Top-level project |
 | `Claim` / `Evidence` / `Hypothesis` | Claims layer |
-| `IRNode:Entity` / `IRNode:Site` / `IRNode:Artifact` | IR nodes |
-
-Framework-specific labels (added when `.codegraph.yml` specifies a framework):
-`CallbackQueryHandler`, `CommandHandler`, `EventHandler`, `Middleware`, `BotFactory`
 
 ### Edge Types
 
 **Code structure:**
-| Edge | Meaning | Key Properties |
-|------|---------|---------------|
-| `CALLS` | Function invocation | `conditional`, `conditionalKind`, `isAsync`, `crossFile`, `resolutionKind` |
-| `CONTAINS` | Parent → child | — |
-| `IMPORTS` | File-level import | `dynamic` |
-| `RESOLVES_TO` | Import → canonical declaration | — |
-| `REGISTERED_BY` | Handler → entrypoint | — |
-| `READS_STATE` / `WRITES_STATE` | Function → state field | — |
-| `POSSIBLE_CALL` | Dynamic dispatch | `confidence`, `reason` |
-| `OWNED_BY` | SourceFile → Author | — |
-| `BELONGS_TO_LAYER` | SourceFile → ArchitectureLayer | — |
-| `HAS_PARAMETER` / `HAS_MEMBER` | Structural containment | — |
-| `EXTENDS` / `IMPLEMENTS` | Inheritance | — |
-| `ORIGINATES_IN` | Unresolved reference → source | — |
+`CALLS`, `CONTAINS`, `IMPORTS`, `RESOLVES_TO`, `HAS_PARAMETER`, `HAS_MEMBER`, `EXTENDS`, `IMPLEMENTS`, `POSSIBLE_CALL`, `READS_STATE`, `WRITES_STATE`, `OWNED_BY`, `BELONGS_TO_LAYER`, `REGISTERED_BY`, `CO_CHANGES_WITH`
 
-**Plans & governance:** `PART_OF`, `DEPENDS_ON`, `HAS_CODE_EVIDENCE`, `TARGETS`, `NEXT_STAGE`, `READS_PLAN_FIELD`, `MUTATES_TASK_FIELD`, `EMITS_NODE_TYPE`, `EMITS_EDGE_TYPE`
+**Plans & evidence:**
+`PART_OF`, `DEPENDS_ON`, `BLOCKS`, `HAS_CODE_EVIDENCE`, `TARGETS`
 
-**Claims:** `SUPPORTED_BY`, `CONTRADICTED_BY`, `WITNESSES`, `PROVES`, `ANCHORS`
+**Verification:**
+`TESTED_BY`, `ANALYZED`, `FLAGS`, `ANCHORED_TO`, `SPANS_PROJECT`, `FROM_PROJECT`
 
-**Governance provenance:** `MEASURED`, `DERIVED_FROM_PROOF`, `DERIVED_FROM_RUN`, `DERIVED_FROM_COMMIT`, `DERIVED_FROM_GATE`, `AFFECTS_COMMIT`, `CAPTURED_COMMIT`, `CAPTURED_WORKTREE`, `EMITS_GATE_DECISION`, `BASED_ON_RUN`, `GENERATED_ARTIFACT`, `USED_BY`
+**Claims:**
+`SUPPORTED_BY`, `CONTRADICTED_BY`, `WITNESSES`
 
-### Key Node Properties
-| Property | Type | On | Meaning |
-|----------|------|-----|---------|
-| `name` | string | all | Declaration name |
-| `filePath` | string | all | Absolute file path |
-| `startLine` / `endLine` | int | all | Source location |
-| `sourceCode` | string | all | Full source text |
-| `kind` | string | CodeNode | Discriminator: Function, Method, Class, Variable, etc. |
-| `isExported` | bool | CodeNode | Exported from module? |
-| `isInnerFunction` | bool | CodeNode | Declared inside another function? |
-| `riskLevel` | float | CodeNode | Pre-computed risk score |
-| `riskTier` | string | CodeNode | LOW / MEDIUM / HIGH / CRITICAL |
-| `fanInCount` | int | CodeNode | How many things call this |
-| `fanOutCount` | int | CodeNode | How many things this calls |
-| `lineCount` | int | CodeNode | Lines of code |
-| `gitChangeFrequency` | float | SourceFile/CodeNode | 0.0-1.0, how often this changes |
-| `authorEntropy` | int | SourceFile | Number of distinct git authors |
-| `primaryAuthor` | string | SourceFile | Author with most lines (git blame) |
-| `ownershipPct` | int | SourceFile | % of lines owned by primary author |
-| `architectureLayer` | string | SourceFile | Inferred layer name |
-| `registrationKind` | string | CodeNode/Entrypoint | command, callback, event, middleware |
-| `registrationTrigger` | string | CodeNode/Entrypoint | Trigger pattern (e.g., 'start', 'home_buy') |
-| `sourceKind` | string | edges | Provenance: 'typeChecker', 'frameworkExtractor', 'heuristic', 'postIngest', 'gitMining' |
-| `confidence` | float | edges | 0.0-1.0 confidence of the edge derivation |
+**Governance provenance:**
+`MEASURED`, `DERIVED_FROM_RUN`, `DERIVED_FROM_GATE`, `CAPTURED_COMMIT`, `CAPTURED_WORKTREE`, `EMITS_GATE_DECISION`, `GENERATED_ARTIFACT`
 
-### CALLS Edge Properties
-| Property | Type | Meaning |
-|----------|------|---------|
-| `conditional` | bool | Inside if/switch/ternary/catch? |
-| `conditionalKind` | string | 'if', 'switch', 'ternary', 'catch', 'logical' |
-| `isAsync` | bool | Is the call awaited? |
-| `crossFile` | bool | Caller and callee in different files? |
-| `resolutionKind` | string | 'internal' (direct) or 'fluent' (method chain) |
+### Key Properties
+
+| Property | On | Meaning |
+|----------|-----|---------|
+| `riskTier` | Function | LOW / MEDIUM / HIGH / CRITICAL |
+| `compositeRisk` | Function | 0.0–1.0 weighted score |
+| `fanInCount` / `fanOutCount` | Function | Caller/callee counts |
+| `effectiveConfidence` | VerificationRun | TC pipeline output |
+| `shadowEffectiveConfidence` | VerificationRun | Shadow lane output |
+| `gitChangeFrequency` | SourceFile | 0.0–1.0, churn signal |
+| `sourceFamily` | VerificationRun | Tool that produced it (ESLint, Semgrep, done-check) |
+| `projectId` | most nodes | Project discriminator |
+| `derived` | edges | `true` = layer-2 cached edge |
 
 ---
 
-## Pre-Edit Gate
+## MCP Tools (57)
 
-**Before editing ANY function, call `pre_edit_check` (MCP) or run this:**
-```cypher
-MATCH (f:Function {name: 'FUNCTION_NAME'})
-RETURN f.riskTier, f.riskLevel, f.fanInCount
-```
+If MCP server is running (`node dist/mcp/mcp.server.js`):
 
-| Verdict | When | Action |
-|---------|------|--------|
-| 🔴 SIMULATE_FIRST | CRITICAL/HIGH risk or fanIn > 15 | MUST call `simulate_edit` with modified content before writing |
-| ⚠️ PROCEED_WITH_CAUTION | MEDIUM risk or fanIn 5-15 | Check callers list, proceed carefully |
-| ✅ SAFE | LOW risk and fanIn < 5 | Edit freely |
+**Core:** `preEditCheck`, `simulateEdit`, `impactAnalysis`, `searchCodebase`, `naturalLanguageToCypher`, `traverseFromNode`
 
-**This is not optional.** The graph exists to prevent blind edits.
+**Code quality:** `detectDeadCode`, `detectDuplicateCode`, `detect_hotspots`, `state_impact`, `registration_map`
 
----
+**Enforcement:** `enforceEdit` — RF-2 gate, returns ALLOW/BLOCK/REQUIRE_APPROVAL
 
-## Risk Tiers
+**Session:** `listProjects`, `saveSessionBookmark`, `restoreSessionBookmark`, `saveSessionNote`, `recallSessionNotes`, `session_context_summary`
 
-Pre-computed on every Function/Method node via `fanIn × fanOut × log(complexity) × (1 + gitChangeFreq)`:
+**Swarm (8):** `swarmPostTask`, `swarmClaimTask`, `swarmCompleteTask`, `swarmGetTasks`, `swarmMessage`, `swarmPheromone`, `swarmSense`, `swarmGraphRefresh`
 
-| Tier | riskLevel | Action Required |
-|------|-----------|-----------------|
-| CRITICAL | > 500 | Check ALL callers. Plan changes across full dependency chain. |
-| HIGH | 100-500 | Check dependents before editing. |
-| MEDIUM | 10-100 | Normal caution. |
-| LOW | < 10 | Leaf functions, utilities. Safe to edit. |
+**Plans (6):** `plan_status`, `plan_drift`, `plan_gaps`, `plan_query`, `plan_priority`, `plan_next_tasks`
 
-`riskLevel` incorporates temporal coupling and author entropy: `base × (1 + temporalCoupling × 0.1) × (1 + (authorEntropy-1) × 0.15)`
+**Claims (6):** `claim_status`, `evidence_for`, `contradictions`, `hypotheses`, `claim_generate`, `claim_chain_path`
 
----
+**Verification (4):** `verification_dashboard`, `explainability_paths`, `confidence_debt_dashboard`, `import_sarif`
 
-## Essential Queries
+**Governance (4):** `commit_audit_status`, `governance_metrics_status`, `parser_contract_status`, `recommendation_proof_status`
 
-### Before editing a function:
-```cypher
-MATCH (f:Function {name: 'FUNCTION_NAME'})
-OPTIONAL MATCH (caller)-[r:CALLS]->(f)
-RETURN f.riskTier, f.riskLevel, f.fanInCount, f.fanOutCount, f.filePath,
-       collect(DISTINCT caller.name) AS calledBy
-```
+**Ground truth:** `groundTruth` — three-panel mirror (Graph State / Agent State / Delta)
 
-### Blast radius — what breaks if I change this:
-```cypher
-MATCH (f:Function {name: 'FUNCTION_NAME'})
-OPTIONAL MATCH (caller)-[:CALLS]->(f)
-OPTIONAL MATCH (f)-[:CALLS]->(callee)
-OPTIONAL MATCH (f)-[:READS_STATE]->(r:Field)
-OPTIONAL MATCH (f)-[:WRITES_STATE]->(w:Field)
-RETURN f.name, f.riskTier, f.riskLevel,
-       collect(DISTINCT caller.name) AS calledBy,
-       collect(DISTINCT callee.name) AS calls,
-       collect(DISTINCT r.name) AS readsState,
-       collect(DISTINCT w.name) AS writesState
-```
+**Self-audit:** `self_audit` — generate/apply verification questions
 
-### Who owns this file:
-```cypher
-MATCH (sf:SourceFile {name: 'FILENAME.ts'})-[:OWNED_BY]->(a:Author)
-RETURN a.name AS owner, sf.ownershipPct AS pct, sf.authorEntropy AS authors
-```
+**Utility:** `hello`, `testNeo4jConnection`, `cleanupSession`, `swarmCleanup`
 
-### Architecture layer violations:
-```cypher
-MATCH (sf1:SourceFile)-[:IMPORTS]->(sf2:SourceFile)
-WHERE sf1.architectureLayer IS NOT NULL AND sf2.architectureLayer IS NOT NULL
-RETURN sf1.architectureLayer AS from, sf2.architectureLayer AS to,
-       sf1.filePath AS importer, sf2.filePath AS imported
-```
+**Parsing:** `parseTypescriptProject`, `checkParseStatus`, `startWatchProject`, `stopWatchProject`, `listWatchers`
 
-### Hidden dependencies (temporal coupling):
-```cypher
-MATCH (a:SourceFile {projectId: 'PID'})-[r:CO_CHANGES_WITH]->(b)
-WHERE NOT (a)-[:IMPORTS]->(b) AND NOT (b)-[:IMPORTS]->(a)
-RETURN a.filePath, b.filePath, r.coChangeCount
-ORDER BY r.coChangeCount DESC LIMIT 10
-```
-
-### Cross-layer call flow:
-```cypher
-MATCH (sf1:SourceFile {projectId: 'PID'})-[:CONTAINS]->(caller)-[:CALLS]->(callee)<-[:CONTAINS]-(sf2:SourceFile)
-WHERE sf1.architectureLayer <> sf2.architectureLayer
-RETURN sf1.architectureLayer AS fromLayer, sf2.architectureLayer AS toLayer, count(*) AS calls
-ORDER BY calls DESC
-```
-
-### Module-level state in a file:
-```cypher
-MATCH (s:SourceFile)-[:CONTAINS]->(v:Variable)
-WHERE s.name = 'FILENAME.ts'
-RETURN v.name, v.isExported, v.startLine
-ORDER BY v.startLine
-```
-
-### Riskiest functions:
-```cypher
-MATCH (f:Function)
-WHERE f.riskTier IN ['CRITICAL', 'HIGH']
-RETURN f.name, f.riskTier, f.riskLevel, f.fanInCount, f.filePath
-ORDER BY f.riskLevel DESC
-LIMIT 20
-```
-
-### Files affected by a change:
-```cypher
-MATCH (changed:SourceFile {name: 'FILENAME.ts'})
-MATCH (dep:SourceFile)-[:IMPORTS]->(changed)
-RETURN dep.name AS dependentFile
-```
-
-### State flow through a handler:
-```cypher
-MATCH (f:Function {name: 'HANDLER_NAME'})
-OPTIONAL MATCH (f)-[:READS_STATE]->(r:Field)
-OPTIONAL MATCH (f)-[:WRITES_STATE]->(w:Field)
-RETURN collect(DISTINCT r.name) AS reads, collect(DISTINCT w.name) AS writes
-```
-
-### Who reads/writes a state field:
-```cypher
-MATCH (f)-[e:WRITES_STATE|READS_STATE]->(field:Field {name: 'FIELD_NAME'})
-RETURN f.name, type(e) AS access, f.filePath
-```
-
-### Multi-author files (fragmented ownership):
-```cypher
-MATCH (sf:SourceFile {projectId: 'PID'})
-WHERE sf.authorEntropy > 1
-RETURN sf.filePath, sf.primaryAuthor, sf.ownershipPct, sf.authorEntropy
-ORDER BY sf.authorEntropy DESC
-```
-
-### Full project overview:
-```cypher
-MATCH (p:Project)
-RETURN p.name, p.projectId, p.nodeCount, p.edgeCount, p.status
-```
-
----
-
-## MCP Tools
-
-If the MCP server is running (`node codegraph/dist/mcp/mcp.server.js`), these tools are available:
-
-| Tool | Use For |
-|------|---------|
-**Core Analysis (6 tools)**
-| `pre_edit_check` | **ALWAYS call before editing a function.** Returns verdict + callers + state + coupling. |
-| `simulate_edit` | When pre_edit_check says SIMULATE_FIRST. Shows full graph delta before applying. |
-| `impact_analysis` | Deep blast radius with transitive dependents and risk scoring. |
-| `search_codebase` | Natural language code search (uses embeddings). |
-| `natural_language_to_cypher` | Ask structural questions in plain English. |
-| `traverse_from_node` | Walk the graph from a specific node. |
-
-**Code Quality (5 tools)**
-| `detect_dead_code` | Find unused exports. |
-| `detect_duplicate_code` | Find near-duplicates by normalized hash. |
-| `detect_hotspots` | Ranked list of functions with highest risk × change frequency. |
-| `state_impact` | Query state field access patterns. Shows readers/writers, detects race conditions. |
-| `registration_map` | Query framework entrypoints. "What happens when the user sends /buy?" |
-
-**Session & Project (5 tools)**
-| `list_projects` | Get project name and ID. |
-| `save_session_bookmark` / `restore_session_bookmark` | Cross-session continuity. |
-| `save_session_note` / `recall_session_notes` | Persistent notes. |
-| `session_context_summary` | Cold-start context from graph truth — run on session boot. |
-
-**Swarm Coordination (8 tools)**
-| `swarm_post_task` | Post refactoring task with dependencies and context. |
-| `swarm_claim_task` | Claim a pending task. Returns unread messages. |
-| `swarm_complete_task` | Complete/fail/request_review/approve/reject. |
-| `swarm_get_tasks` | Query tasks by status/agent/swarm. |
-| `swarm_message` | Agent-to-agent messaging (blocked/conflict/alert/handoff). |
-| `swarm_pheromone` | Deposit coordination signals on nodes. |
-| `swarm_sense` | Read pheromones near a node. |
-| `swarm_graph_refresh` | Re-parse changed files after edits. Workers MUST call before completing. |
-
-**Plan Tracking (5 tools)**
-| `plan_status` | Completion rates per plan project (done/planned/drift). |
-| `plan_drift` | Tasks with code evidence but unchecked boxes. |
-| `plan_gaps` | Planned tasks with zero evidence. |
-| `plan_query` | Free-form plan graph queries. |
-| `plan_priority` | Dynamic priority ranking — "what should I build next?" |
-
-**Claims & Reasoning (5 tools)**
-| `claim_status` | Overview of claims by domain and status. |
-| `evidence_for` | Evidence supporting/contradicting a specific claim. |
-| `contradictions` | Find contested or contradicted claims. |
-| `hypotheses` | Auto-generated investigation targets from evidence gaps. |
-| `claim_generate` | Run claim generation pipeline across all domains. |
-
-**Self-Audit (1 tool)**
-| `self_audit` | Summary / generate audit questions / apply verdicts. |
-
-**Project Parsing & Watching (5 tools)**
-| `parse_typescript_project` | Parse a TypeScript project into the graph. |
-| `check_parse_status` | Check status of a running parse job. |
-| `start_watch_project` | Start file watcher for incremental re-parse. |
-| `stop_watch_project` | Stop file watcher for a project. |
-| `list_watchers` | List active file watchers. |
-
-**Utility (4 tools)**
-| `hello` | Health check / server info. |
-| `test_neo4j_connection` | Verify Neo4j connectivity and version. |
-| `cleanup_session` | Clean up session state. |
-| `swarm_cleanup` | Clean up stale swarm pheromones/tasks. |
-
-**Additional Claims (1 tool)**
-| `claim_chain_path` | Trace evidence chain paths between claims and sources. |
-
-**Additional Plans (1 tool)**
-| `plan_next_tasks` | Recommended next tasks (with freshness guard). |
-
-**Verification & Trust (4 tools)**
-| `verification_dashboard` | Overview of verification runs, pass/fail rates, coverage. |
-| `explainability_paths` | Trace evidence chains from claims back to source. |
-| `confidence_debt_dashboard` | Track low-confidence edges and claims needing reinforcement. |
-| `import_sarif` | Import SARIF tool findings into the verification subsystem. |
-
-**Ground Truth (1 tool)**
-| `ground_truth` | Three-panel mirror (Graph State / Agent State / Delta). Call on boot, after compaction, before/after tasks. |
-
-**Governance (4 tools)**
-| `commit_audit_status` | Latest commit audit results from `artifacts/commit-audit/latest.json`. |
-| `governance_metrics_status` | Latest/trend governance observability snapshot. |
-| `parser_contract_status` | Parser contract verification status. |
-| `recommendation_proof_status` | Recommendation truth-health panel for a plan project. |
-
-MCP config for Claude Code (`.mcp.json` in project root):
+MCP config (`.mcp.json`):
 ```json
 {
   "mcpServers": {
     "codegraph": {
       "command": "node",
-      "args": ["/home/jonathan/.openclaw/workspace/codegraph/dist/mcp/mcp.server.js"]
+      "args": ["dist/mcp/mcp.server.js"]
     }
   }
 }
 ```
 
-**You don't need MCP to use the graph.** `cypher-shell` works from any terminal. MCP adds convenience tools.
+You don't need MCP. `cypher-shell` works. MCP adds convenience.
 
 ---
 
-## Operations
+## Commands
 
-### Parse + ingest a project:
+### Health (run anytime)
 ```bash
-cd codegraph && npx tsx src/scripts/entry/parse-and-ingest.ts
+npm run probe-architecture     # 43 structural queries
+npm run self-diagnosis          # 33 health checks with next-step guidance
+npm run done-check              # 57+ step integrity gate (MUST pass before declaring done)
+npm run rebuild-derived         # Nuke + rebuild all derived edges
+npm run graph:metrics           # Record GraphMetricsSnapshot node
 ```
 
-### Full post-ingest pipeline (17 steps):
+### Enrichment
 ```bash
-cd codegraph && bash scripts/post-ingest-all.sh
-```
-Steps: risk scoring → state edges → git frequency → temporal coupling → POSSIBLE_CALL → virtual dispatch → registration properties → project node → author ownership → architecture layers → riskLevel v2 promotion → provenance + confidence → unresolved reference nodes → audit subgraph → test coverage mapping → embeddings → evaluation (regression detection)
-
-### Run evaluation (regression detection):
-```bash
-cd codegraph && npx tsx run-evaluation.ts [projectId]
+npm run enrich:test-coverage    # Scan test files → TESTED_BY edges
+npm run verification:scan       # Semgrep + ESLint SARIF scan → VR nodes
 ```
 
-### Run tests:
+### Enforcement
 ```bash
-cd codegraph && npx vitest run tests/graph-integrity.test.ts
+codegraph enforce <files> --mode enforced   # Gate: ALLOW/BLOCK/REQUIRE_APPROVAL
+# Or: npx tsx src/scripts/entry/enforce-edit.ts <files> --mode enforced
 ```
 
-### Verify completeness:
+### Parse
 ```bash
-cd codegraph && npx tsx verify-completeness.ts
+codegraph parse .                          # MERGE mode, auto-detect projectId
+codegraph parse . --fresh                  # Destructive wipe + reparse
+codegraph parse . --project-id <ID>        # Explicit project
 ```
 
-### Compute reparse set (what files need reparsing if X changes):
+### Plan ingestion
 ```bash
-cd codegraph && npx tsx compute-reparse-set.ts FILENAME.ts
+npx tsx src/core/parsers/plan-parser.ts /path/to/plans --ingest --enrich
 ```
 
-### Edit simulation (preview changes before applying):
+### Verification pipeline
 ```bash
-cd codegraph && npx tsx edit-simulation.ts <file> <modified-file>
-```
-
-### Temporal coupling (mine co-change patterns from git):
-```bash
-cd codegraph && npx tsx temporal-coupling.ts codegraph
-```
-
-### Author ownership (git blame → OWNED_BY edges):
-```bash
-cd codegraph && npx tsx seed-author-ownership.ts codegraph
-```
-
-### Architecture layers (directory → layer classification + violation detection):
-```bash
-cd codegraph && npx tsx seed-architecture-layers.ts codegraph
-```
-
-### File watcher (incremental re-parse on save):
-```bash
-cd codegraph && npx tsx src/scripts/entry/watch.ts codegraph
-```
-
-### Start Neo4j (after reboot):
-```bash
-sudo neo4j start
+npm run verification:sarif:import -- <projectId> <sarifPath>
+npm run verification:scope:resolve -- <projectId>
+npm run verification:advisory:gate -- <projectId>
+npm run commit:audit:verify -- <baseRef> <headRef>
 ```
 
 ---
 
+## When to Use Graph vs Read Files
+
+| Situation | Use |
+|-----------|-----|
+| "What calls this function?" | Graph (`CALLS` edges) |
+| "What's the blast radius?" | Graph (blast radius query below) |
+| "What does this function do?" | Graph (`sourceCode` property — full source text on every node) |
+| "I need complex logic detail" | Read the file |
+| "What state does this touch?" | Graph (`READS_STATE`/`WRITES_STATE`) |
+| "Is this used anywhere?" | Graph (dead code query below) |
+| "Who reviews changes here?" | Graph (`OWNED_BY` → Author) |
+| "What layer? Am I creating a violation?" | Graph (`architectureLayer`) |
+| "What files co-change with this?" | Graph (`CO_CHANGES_WITH`) |
+
 ---
 
-## Plan Tracking
+## Reference Queries
 
-Plans are parsed from markdown files in `plans/` into Task/Milestone/Sprint/Decision nodes.
-
-### Cross-domain evidence
+### Blast radius
 ```cypher
--- What plan tasks have code evidence?
-MATCH (t:Task)-[:HAS_CODE_EVIDENCE]->(sf)
-RETURN t.name, t.status, sf.name, t.projectId
-ORDER BY t.projectId
-
--- Drift: planned but code exists
-MATCH (t:Task {status: 'planned'})
-WHERE t.hasCodeEvidence = true
-RETURN t.name, t.projectId
-
--- Milestone completion
-MATCH (t:Task)-[:PART_OF]->(m:Milestone)
-WITH m, count(t) AS total, sum(CASE WHEN t.status='done' THEN 1 ELSE 0 END) AS done
-RETURN m.name, done, total, round(toFloat(done)/total*100) + '%'
-ORDER BY m.projectId
+MATCH (f:Function {name: $name, projectId: $pid})
+OPTIONAL MATCH (caller)-[:CALLS]->(f)
+OPTIONAL MATCH (f)-[:CALLS]->(callee)
+RETURN f.riskTier, collect(DISTINCT caller.name) AS calledBy, collect(DISTINCT callee.name) AS calls
 ```
 
-### Plan↔Code links
-| Plan Project | Code Project |
-|-------------|-------------|
-| `plan_codegraph` | `proj_c0d3e9a1f200` |
-| `plan_plan_graph` | `proj_c0d3e9a1f200` |
-
----
-
-## Claims & Reasoning
-
-The claim layer generates domain-agnostic assertions with evidence.
-
-### Claim types
-| Type | Domain | What It Claims |
-|------|--------|---------------|
-| `edit_safety` | code | "Function X is high-risk (level Y, Z callers)" |
-| `task_completion` | plan | "Task X is complete" (with code evidence) |
-| `plan_drift` | plan | "Task X may be complete but isn't checked off" |
-| `cross_cutting_impact` | cross | "Editing X invalidates evidence for Y plan tasks" |
-| `bottleneck` | plan | "Sprint X is 41% complete — 23 remaining" |
-| `temporal_coupling` | code | "A and B change together (8 co-commits)" |
-| `coverage_gap` | code | "High-risk functions without test coverage" |
-
-**Current totals**: ~490 claims, ~790 evidence nodes, ~490 open hypotheses (mostly "no structural evidence" and "no test coverage" findings).
-
-### Key queries
+### State flow
 ```cypher
--- Cross-cutting: what plan tasks break if I edit this file?
-MATCH (c:Claim {claimType: 'cross_cutting_impact'})
-RETURN c.statement, c.taskCount ORDER BY c.taskCount DESC
+MATCH (f:Function {name: $name})-[e:READS_STATE|WRITES_STATE]->(field:Field)
+RETURN type(e) AS access, field.name AS field
+```
 
--- Bottlenecks
-MATCH (c:Claim {claimType: 'bottleneck'})
-RETURN c.statement, c.completionRate ORDER BY c.completionRate ASC
+### Hidden dependencies (temporal coupling)
+```cypher
+MATCH (a:SourceFile {projectId: $pid})-[r:CO_CHANGES_WITH]->(b)
+WHERE NOT (a)-[:IMPORTS]->(b) AND NOT (b)-[:IMPORTS]->(a)
+RETURN a.name, b.name, r.coChangeCount ORDER BY r.coChangeCount DESC LIMIT 10
+```
 
--- All claims about a project
-MATCH (c:Claim {projectId: 'proj_c0d3e9a1f200'})
-RETURN c.claimType, c.status, c.confidence, c.statement
-ORDER BY c.confidence ASC LIMIT 20
+### Cross-layer calls
+```cypher
+MATCH (sf1:SourceFile {projectId: $pid})-[:CONTAINS]->(c1)-[:CALLS]->(c2)<-[:CONTAINS]-(sf2)
+WHERE sf1.architectureLayer <> sf2.architectureLayer
+RETURN sf1.architectureLayer AS from, sf2.architectureLayer AS to, count(*) AS calls
+ORDER BY calls DESC
+```
+
+### Guaranteed vs conditional callers
+```cypher
+MATCH (caller)-[c:CALLS]->(f:Function {name: $name, projectId: $pid})
+RETURN caller.name, c.conditional, c.conditionalKind, caller.filePath
+ORDER BY c.conditional
+```
+Unconditional (`conditional=false`) = WILL break. Conditional = MIGHT break.
+
+### Read source code from graph (no file open needed)
+```cypher
+MATCH (f:Function {name: $name, projectId: $pid}) RETURN f.sourceCode
+```
+
+### Dead code (exported, never called)
+```cypher
+MATCH (f:Function {projectId: $pid})
+WHERE f.isExported = true AND NOT ()-[:CALLS]->(f) AND NOT (f)<-[:REGISTERED_BY]-()
+RETURN f.name, f.filePath
+```
+
+### God functions (>200 lines)
+```cypher
+MATCH (f:Function {projectId: $pid}) WHERE f.lineCount > 200
+RETURN f.name, f.lineCount, f.riskTier, f.filePath ORDER BY f.lineCount DESC
+```
+
+### Project overview
+```cypher
+MATCH (p:Project) RETURN p.name, p.projectId, p.nodeCount, p.edgeCount
 ```
 
 ---
 
-## Self-Audit
+## Risk Tiers
 
-The graph generates verification questions about its own state.
+| Tier | compositeRisk | What It Means |
+|------|---------------|---------------|
+| CRITICAL | top quartile | Core infrastructure. Check ALL callers. Full dependency chain. |
+| HIGH | 50-75th pctile | Widely used. Check dependents before editing. |
+| MEDIUM | 25-50th pctile | Normal caution. |
+| LOW | bottom quartile | Leaf functions, utilities. Safe to edit. |
 
-**Flow**: `getDriftItems()` → `buildAuditQuestions()` → agent verifies → `applyVerdict()` → graph updates
+---
 
-**Verdicts**: `CONFIRMED` (check box, keep evidence), `FALSE_POSITIVE` (remove evidence, record in node), `PARTIAL` (flag for review)
+## Multi-Project Awareness
 
-**Audit memory**: Tasks with `auditVerdict='FALSE_POSITIVE'` are skipped on re-ingest. Verdicts survive plan re-parsing.
+**Always filter by `projectId`.** The graph contains multiple projects:
 
 ```cypher
--- What's been audited?
-MATCH (t:Task) WHERE t.auditVerdict IS NOT NULL
-RETURN t.auditVerdict, count(t), collect(t.name)[..3]
+// WRONG — queries across all projects
+MATCH (f:Function {name: 'run'}) RETURN f
+
+// RIGHT — scoped
+MATCH (f:Function {name: 'run', projectId: 'proj_c0d3e9a1f200'}) RETURN f
 ```
+
+---
+
+## Architecture
+
+**Six layers:** Code (TypeScript parsing) → Plans (task/milestone tracking) → Governance (verification runs) → Claims (domain-agnostic assertions) → Reasoning (hypotheses from evidence gaps) → Self-Audit
+
+**Parser tiers:** Tier 0 = compiler (ts-morph for TS), Tier 1 = workspace-semantic (Pyright for Python), Tier 2 = structural (tree-sitter fallback)
+
+**IR layer:** `src/core/ir/` — schema + materializer exist. Current TS parser writes Neo4j directly. IR becomes primary path for multi-language.
+
+**Playbooks:**
+- **Claim refresh:** `claim_generate` → `claims:cross:synthesize` → `claim_chain_path`
+- **Plan refresh:** `plan:refresh` → `edges:normalize` → `plan:evidence:recompute`
+- **Embedding tuning:** `plan:embedding:match --threshold=0.75 --limit=3` → `embedding:fp:verify` → target FP < 5%
+- **Failure recovery:** `PLAN_FRESHNESS_GUARD_FAILED` → run `plan:refresh`. `invariant_proof_completeness` fail → run `verification:proof:record`. Neo4j auth issues → check `.env`.
 
 ---
 
 ## Rules
 
-1. **ALWAYS run pre_edit_check** before editing any function. No exceptions.
-2. **If verdict is SIMULATE_FIRST**, call simulate_edit before writing. No shortcuts.
-3. **Check module-level variables** before adding state — it might already exist.
-4. **fanInCount > 10 = widely used.** Signature changes affect many callers.
-5. **Check READS_STATE/WRITES_STATE** before touching session/state handling.
-6. **Inner functions** (`isInnerFunction=true`) are helpers inside parent functions — they have their own call graphs.
-7. **Check architectureLayer** before adding cross-layer dependencies. Don't create new violations.
-8. **100% coverage** — every declaration in the source is in the graph. If it's not in the graph, it's not in the code.
-9. **Check cross-cutting claims** before editing high-risk files. Plan tasks may depend on them.
-10. **Self-audit verdicts are permanent.** Don't re-create evidence for tasks marked FALSE_POSITIVE.
-
----
-
-## End-to-End Execution Loop (Mandatory)
-
-When asked "what next?", run this loop in order:
-
-**Graph-order discipline rule:** if a proposed next step is not present as a Task node in the plan graph, add it to the appropriate plan markdown first, re-ingest plans, then execute. Do not perform off-graph follow-on work except emergency break/fix.
-
-1. **Ground truth check** (on session boot, after compaction, or before new task)
-   - `ground_truth` — three-panel mirror (graph state, agent state, delta)
-   - Review Panel 3 deltas before proceeding — are you grounded or drifting?
-   - If critical findings exist, resolve before doing anything else
-
-2. **State snapshot**
-   - `session_context_summary` (cold-start from graph truth)
-   - `plan_status`
-   - `plan_priority`
-   - `self_audit` summary
-
-3. **Choose work by unblock value**
-   - Highest priority tasks first (downstream unblock score)
-   - Prefer tasks with existing evidence for rapid closure
-
-4. **Implement with safety gate**
-   - `pre_edit_check` before edits
-   - `simulate_edit` when verdict requires it
-
-5. **Refresh graph state**
-   - Reparse / watcher refresh
-   - Confirm node/edge updates visible
-
-6. **Reconcile plan truth**
-   - `plan_drift` + `self_audit` verdicts
-   - Update checkboxes for confirmed completions
-
-7. **Close the loop**
-   - Re-run `ground_truth` (verify no new deltas)
-   - Re-run `plan_priority` and `plan_status`
-   - Commit code + plan + docs together
-
-If this loop is skipped, the graph drifts from reality.
-
-## Definition of Done (Per Task)
-A task is only "done" when all are true:
-- Implementation exists in graph-linked evidence
-- Plan status is checked/updated
-- Drift for that task is resolved or audited
-- Priority recalculation reflects new state
-- Changes are committed
-
-## Dependency Hygiene
-For dynamic prioritization to work, dependencies must be explicit:
-- encode milestone/task dependencies via `BLOCKS` / `DEPENDS_ON`
-- for ordered milestone families (`DL-*`, `GM-*`), every non-starter task must have task-level `DEPENDS_ON`
-- if a task must be dependency-free by design, mark it explicitly with `NO_DEPENDS_OK(reason|expires:YYYY-MM-DD)`
-- re-ingest plans after dependency edits
-- verify dependency edges in Neo4j before trusting ranking
-- run `plan:deps:verify` (and gate on it) before declaring ordering-safe execution
-
-## Integrity Gate (Mandatory Before Declaring Done)
-Before declaring any implementation task complete, run:
-
-```bash
-npm run done-check
-```
-
-`done-check` currently executes **57+ steps** across build, normalization, verification, and integrity gates. Core stages include:
-1. `npm run build`
-2. `npm run edges:normalize`
-3. `npm run plan:evidence:recompute`
-4. `npm run registry:reconcile`
-5. `npm run registry:verify`
-6. `npm run edges:verify`
-7. `npm run parser:contracts:verify`
-8. `npm run plan:deps:verify`
-9. `npm run integrity:snapshot`
-10. `npm run integrity:verify`
-Plus 47 additional verification, governance, and audit sub-steps.
-
-### Quick Health Commands (run anytime)
-```bash
-npm run probe-architecture   # 25 structural queries — instant graph health picture
-npm run self-diagnosis        # 10 epistemological checks — does the graph know its own gaps?
-npm run graph:metrics                          # Record a GraphMetricsSnapshot node (tracks growth over time)
-npm run governance:metrics:snapshot            # Record GovernanceMetricSnapshot (governance health over time)
-npm run governance:metrics:integrity:verify    # Verify governance metrics against baselines
-npm run verification:status:dashboard          # TC pipeline dashboard — per-family confidence stats
-npm run verification:recommendation:mismatch   # VG-6: detect recommended tasks already marked done
-npm run rebuild-derived                        # Nuke + rebuild all derived edges and properties
-```
-
-Rules:
-- If gate fails, task is **not done**.
-- Record gate failure in plan/task notes and continue remediation.
-- Do not mark plan checkboxes complete without integrity evidence artifact (command output + commit).
-- Temporary threshold overrides must be explicit and documented in commit message (no silent relaxations).
-
-Strict rollout commands:
-- `npm run done-check:strict:smoke` (strict dependency mode, advisory document/metrics enforcement; includes capture-only runtime proof)
-- `npm run done-check:strict:full` (strict dependency + fail-closed document/metrics enforcement; includes capture-only runtime proof)
-- Dev-only override for dirty worktree capture: `VERIFICATION_CAPTURE_ALLOW_DIRTY=true`
-- GM-8 closure guard: `plan:deps:verify` fails when a GM-8 task is `done` without `HAS_CODE_EVIDENCE`.
-- Runbook: `docs/GOVERNANCE_STRICT_ROLLOUT.md`
-
-### IR Parity Gate (Required for IR pipeline changes)
-When touching parser/IR/materializer paths, also run:
-
-```bash
-npm run ir:parity
-```
-
-Checkpoint/resume options:
-- `npm run ir:parity:resume` (resume + retry failed targets)
-- `npm run ir:parity -- --force-target=<name>` to run a single target (e.g. `codegraph`)
-- `npm run ir:parity -- --fresh` to ignore prior state and start clean
-
-### Verification Pipeline (SARIF → Scope → Gate → Runtime Truth)
-
-The verification subsystem ingests tool findings, enforces governance, and captures execution proof in the graph.
-
-**Recommendation freshness rule (VG-6):** before running `plan_priority` or `plan_next_tasks`, re-ingest plans if there were markdown edits in `plans/` (`npx tsx src/core/parsers/plan-parser.ts /home/jonathan/.openclaw/workspace/plans --ingest --enrich`). MCP tools now hard-fail with `PLAN_FRESHNESS_GUARD_FAILED` when plan ingest is stale unless `allowStale=true`.
-
-**Governance freshness source rule:** `governance:stale:verify` uses the newest runtime evidence timestamp from either `VerificationRun.ranAt` or `GovernanceMetricSnapshot.timestamp`.
-
-**Commands (in pipeline order):**
-```bash
-# 1. Import SARIF findings into VerificationRun + AdjudicationRecord + AnalysisScope nodes
-npm run verification:sarif:import -- <projectId> <sarifPath>
-
-# 2. Scope-aware resolver: recompute scope, downgrade clean runs, enforce UNKNOWN_FOR, detect contradictions
-npm run verification:scope:resolve -- <projectId>
-
-# 3. Exception enforcement: waiver policy (dual approval, expiry, ticket linkage, truth/gate separation)
-npm run verification:exception:enforce -- <projectId>
-
-# 4. Advisory gate: compute advisory decisions, persist decision logs + replayability hashes
-npm run verification:advisory:gate -- <projectId> [policyBundleId]
-
-# 5. Runtime truth capture:
-#    - canonical strict path: use done-check strict scripts (they chain capture-only)
-#    - explicit capture-only path (after another gate run):
-npm run verification:done-check:capture:only -- [projectId] [policyBundleId]
-#    - legacy wrapper (runs done-check + capture):
-npm run verification:done-check:capture -- [projectId] [policyBundleId]
-
-# 6. Commit audit: invariant checks over a commit range (schema, edge taxonomy, deps, parser contracts, coverage drift)
-npm run commit:audit:verify -- <baseRef> <headRef>
-```
-
-**Graph nodes produced:**
-- `VerificationRun` — tool finding with attestation, provenance, lifecycle state
-- `AdjudicationRecord` — suppression/waiver with policy compliance fields
-- `AnalysisScope` — scope completeness metadata
-- `AdvisoryGateDecision` — deterministic gate decision with replay hash
-- `GateDecision` — runtime gate pass/fail with decision hash
-- `CommitSnapshot` — HEAD sha + branch at execution time
-- `WorkingTreeSnapshot` — dirty flag + diff hash at execution time
-- `Artifact` — integrity snapshot file hash
-
-**Key edges:**
-- `CAPTURED_COMMIT`, `CAPTURED_WORKTREE`, `EMITS_GATE_DECISION`, `BASED_ON_RUN`, `GENERATED_ARTIFACT`
-- `ADVISES_ON` (advisory gate → verification run)
-- `ADJUDICATES` (adjudication → verification run)
-- `HAS_SCOPE` (verification run → analysis scope)
-
-**MCP tools:**
-- `commit_audit_status` — shows latest commit audit results from `artifacts/commit-audit/latest.json`
-- `recommendation_proof_status` — recommendation truth-health panel (`freshness`, `done_vs_proven`, `mismatch_rate`) for a plan project
-- `governance_metrics_status` — latest/trend governance observability snapshot (`verificationRuns`, `gateFailures`, `failuresResolvedBeforeCommit`, `regressionsAfterMerge`, `interceptionRate`)
-- `ground_truth` — three-panel mirror (Graph State | Agent State | Delta). Call on boot, after compaction, and before/after tasks. Shows plan status, integrity, SessionBookmark, and computed deltas with exact/derived/predicted tiers.
+1. **Follow WORKFLOW.md.** Every task, every time.
+2. **Query the graph, don't trust recall.** Your context window lies. The graph doesn't.
+3. **Filter by `projectId` in every query.** Never query across projects accidentally.
+4. **All new edges must have `{derived: true}`** — layer-2 cached derived edges.
+5. **Source change → `npm run build` → restart watcher.** Runtime reads `dist/`, not `src/`.
+6. **Don't weaken tests to match bugged code.** If a test fails and the code is wrong, flag it and wait.
+7. **`npm run done-check` must exit 0** before any task is declared done.
+8. **907 tests, 60 suites.** Full suite in ~17s. No excuses for skipping.
+9. **Use `sourceCode` property** to read function implementations from graph before opening files.

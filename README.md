@@ -488,14 +488,14 @@ codegraph/
 ├── docs/                       # Architecture docs, audit reports
 ├── skills/swarm/               # Multi-agent coordinator + worker protocols
 ├── AGENTS.md                   # Agent instructions for editing this codebase
-├── SKILL.md                    # Universal agent skill for any tracked project
+├── WORKFLOW.md                  # Step-by-step task execution procedure
 └── CLAUDE.md                   # Claude Code / ACP agent instructions
 ```
 
 ## Agent Workflows
 
 - **Editing this codebase:** Read `AGENTS.md`
-- **Editing any AnythingGraph-tracked project:** Read `SKILL.md`
+- **Editing any AnythingGraph-tracked project:** Read `WORKFLOW.md` (procedure) + `AGENTS.md` (reference)
 - **Using Claude Code / ACP:** Read `CLAUDE.md`
 - **Multi-agent refactoring:** Read `skills/swarm/COORDINATOR.md` + `skills/swarm/WORKER.md`
 
