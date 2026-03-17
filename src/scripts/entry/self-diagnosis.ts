@@ -255,11 +255,32 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     detail: { reportedNodes, actualNodes, reportedEdges, actualEdges, nodeDrift, edgeDrift },
   });
 
+  // D11: Enrichment property coverage — are enrichment properties surviving reparse?
+  const d11 = await query(`
+    MATCH (f:Function {projectId: $pid})
+    WITH count(f) AS total,
+         sum(CASE WHEN f.compositeRisk IS NOT NULL THEN 1 ELSE 0 END) AS hasCompositeRisk,
+         sum(CASE WHEN f.riskTier IS NOT NULL THEN 1 ELSE 0 END) AS hasRiskTier,
+         sum(CASE WHEN f.commitCountRaw IS NOT NULL THEN 1 ELSE 0 END) AS hasGitFreq,
+         sum(CASE WHEN f.temporalCoupling IS NOT NULL THEN 1 ELSE 0 END) AS hasTempCoupling
+    RETURN total, hasCompositeRisk, hasRiskTier, hasGitFreq, hasTempCoupling
+  `, { pid });
+  const d11r = d11[0] || {};
+  const d11Total = d11r.total || 1;
+  const d11CoveragePct = Math.round((d11r.hasCompositeRisk || 0) / d11Total * 100);
+  const d11Healthy = d11CoveragePct > 95; // >95% of functions should retain enrichment props
+  results.push({
+    id: 'D11', question: 'Are enrichment properties surviving reparse? (property clobber detection)',
+    answer: `${d11r.hasCompositeRisk}/${d11Total} functions have compositeRisk (${d11CoveragePct}%). riskTier: ${d11r.hasRiskTier}, gitFreq: ${d11r.hasGitFreq}, tempCoupling: ${d11r.hasTempCoupling}`,
+    healthy: d11Healthy,
+    detail: d11r,
+  });
+
   return results;
 }
 
 async function main() {
-  console.log('🔬 Self-Diagnosis — 10 Epistemological Health Checks\n');
+  console.log('🔬 Self-Diagnosis — 11 Epistemological Health Checks\n');
   console.log('   "Does the graph know what it doesn\'t know?"\n');
 
   try {
@@ -278,7 +299,7 @@ async function main() {
     }
 
     console.log('═'.repeat(65));
-    console.log(`📊 Health: ${healthy}/10 checks pass, ${unhealthy} need attention`);
+    console.log(`📊 Health: ${healthy}/${results.length} checks pass, ${unhealthy} need attention`);
 
     if (unhealthy === 0) {
       console.log('\n✅ Graph is self-aware — knows its own state, gaps, and limitations.');
