@@ -388,11 +388,48 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     detail: d17r,
   });
 
+  // D18: Property Schema Consistency — do all Function nodes have the same property shape?
+  const d18 = await query(`
+    MATCH (f:Function {projectId: $pid})
+    WITH apoc.coll.sort(keys(f)) AS sig, count(*) AS cnt
+    RETURN sig, cnt ORDER BY cnt DESC
+  `, { pid });
+  const d18Sigs = d18.length;
+  const d18MissingRisk = d18.filter(r => !r.sig.includes('compositeRisk') || !r.sig.includes('riskTier'));
+  const d18Healthy = d18Sigs <= 3 && d18MissingRisk.length === 0;
+  results.push({
+    id: 'D18', question: 'Do all Function nodes have consistent property schemas?',
+    answer: `${d18Sigs} distinct key signatures. ${d18MissingRisk.length} signatures missing compositeRisk/riskTier${d18Sigs > 3 ? ' — too many variants, enrichment is inconsistent' : ''}`,
+    healthy: d18Healthy,
+    detail: { signatures: d18Sigs, missingRisk: d18MissingRisk.length, top3: d18.slice(0, 3).map(r => ({ keys: r.sig.length, count: r.cnt })) },
+  });
+
+  // D19: Risk Distribution Shape — is any single tier >80% (broken) or >60% (warn)?
+  const d19 = await query(`
+    MATCH (f:Function {projectId: $pid})
+    WHERE f.riskTier IS NOT NULL
+    WITH f.riskTier AS tier, count(f) AS cnt
+    WITH collect({tier: tier, cnt: cnt}) AS tiers, sum(cnt) AS total
+    UNWIND tiers AS t
+    RETURN t.tier AS tier, t.cnt AS cnt, round(toFloat(t.cnt) / total * 100, 1) AS pct, total
+    ORDER BY t.cnt DESC
+  `, { pid });
+  const d19MaxPct = d19.length > 0 ? Math.max(...d19.map(r => r.pct)) : 0;
+  const d19Dominant = d19.length > 0 ? d19[0].tier : 'none';
+  const d19Healthy = d19MaxPct <= 60;
+  const d19Status = d19MaxPct > 80 ? 'FAIL — scoring pipeline broken' : d19MaxPct > 60 ? 'WARN — distribution skewed' : 'Healthy spread';
+  results.push({
+    id: 'D19', question: 'Is the risk tier distribution healthy? (no single tier >60%)',
+    answer: `${d19Status}. ${d19.map(r => `${r.tier}: ${r.pct}%`).join(', ')}. Dominant: ${d19Dominant} at ${d19MaxPct}%`,
+    healthy: d19Healthy,
+    detail: { maxPct: d19MaxPct, dominant: d19Dominant, distribution: d19 },
+  });
+
   return results;
 }
 
 async function main() {
-  console.log('🔬 Self-Diagnosis — 17 Epistemological Health Checks\n');
+  console.log('🔬 Self-Diagnosis — 19 Epistemological Health Checks\n');
   console.log('   "Does the graph know what it doesn\'t know?"\n');
 
   try {
