@@ -83,6 +83,7 @@ async function main() {
       'enrich:flags-edges',
       'enrich:entrypoint-edges',
       'enrich:state-fields',
+      'enrich:precompute-scores',
     ];
 
     for (const script of scripts) {

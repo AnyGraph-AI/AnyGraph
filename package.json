@@ -100,6 +100,8 @@
     "enrich:evaluated-edges": "node --loader ts-node/esm src/scripts/enrichment/create-evaluated-edges.ts",
     "enrich:flags-edges": "node --loader ts-node/esm src/scripts/enrichment/create-flags-edges.ts",
     "enrich:composite-risk": "node --loader ts-node/esm src/scripts/enrichment/composite-risk-scoring.ts",
+    "graph:precompute-scores": "node --loader ts-node/esm src/scripts/entry/precompute-scores.ts",
+    "enrich:precompute-scores": "node --loader ts-node/esm src/scripts/entry/precompute-scores.ts",
     "verify:grc-self-defense": "node --loader ts-node/esm src/scripts/verify/verify-grc-self-defense.ts",
     "rebuild-derived": "node --loader ts-node/esm src/scripts/entry/rebuild-derived.ts",
     "graph:metrics": "node --loader ts-node/esm src/scripts/entry/graph-metrics.ts",
