@@ -19,6 +19,7 @@ import { createHash } from 'crypto';
 export interface InfluencePath {
   pathHash: string;
   pathWeight: number;
+  rank: number;       // 1-indexed rank within its claim (by pathWeight desc)
   direction: 'support' | 'contradiction';
   hops: string[]; // ordered node IDs forming the path
   claimId: string;
@@ -110,6 +111,7 @@ export async function discoverExplainabilityPaths(
     const path: InfluencePath = {
       pathHash: computePathHash(hops, direction),
       pathWeight: weight,
+      rank: 0, // assigned after top-k sort
       direction,
       hops,
       claimId,
@@ -129,6 +131,8 @@ export async function discoverExplainabilityPaths(
   for (const [, paths] of byClaim) {
     paths.sort((a, b) => b.pathWeight - a.pathWeight);
     const kept = paths.slice(0, config.topK);
+    // Assign rank (1-indexed, per claim)
+    kept.forEach((p, i) => { p.rank = i + 1; });
     pathsToCreate.push(...kept);
     skipped += paths.length - kept.length;
   }
@@ -138,6 +142,7 @@ export async function discoverExplainabilityPaths(
     const batch = pathsToCreate.map(p => ({
       pathHash: p.pathHash,
       pathWeight: p.pathWeight,
+      rank: p.rank,
       direction: p.direction,
       hopCount: p.hops.length,
       hopsJson: JSON.stringify(p.hops),
@@ -149,6 +154,7 @@ export async function discoverExplainabilityPaths(
       `UNWIND $batch AS b
        MERGE (ip:InfluencePath {pathHash: b.pathHash, projectId: $projectId})
        SET ip.pathWeight = b.pathWeight,
+           ip.rank = b.rank,
            ip.direction = b.direction,
            ip.hopCount = b.hopCount,
            ip.hopsJson = b.hopsJson,
@@ -208,6 +214,7 @@ export async function queryExplainabilityPaths(
     return {
       pathHash: ip.pathHash,
       pathWeight: ip.pathWeight,
+      rank: ip.rank ?? 0,
       direction: ip.direction,
       hops: JSON.parse(ip.hopsJson ?? '[]'),
       claimId: ip.claimId,
