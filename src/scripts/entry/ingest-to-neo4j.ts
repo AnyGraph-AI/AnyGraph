@@ -77,8 +77,8 @@ async function main() {
 
         await session.run(`
           UNWIND $props AS p
-          CREATE (n:${labelStr})
-          SET n = p
+          MERGE (n:${labelStr} {id: p.id})
+          SET n += p
         `, { props });
 
         nodeCount += batch.length;
@@ -114,8 +114,8 @@ async function main() {
           UNWIND $edges AS ed
           MATCH (src:CodeNode {id: ed.sourceId})
           MATCH (tgt:CodeNode {id: ed.targetId})
-          CREATE (src)-[r:${safeType}]->(tgt)
-          SET r = ed.props
+          MERGE (src)-[r:${safeType}]->(tgt)
+          SET r += ed.props
         `, { edges: edgeData });
 
         edgeCount += batch.length;
