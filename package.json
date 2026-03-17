@@ -103,6 +103,8 @@
     "verify:grc-self-defense": "node --loader ts-node/esm src/scripts/verify/verify-grc-self-defense.ts",
     "rebuild-derived": "node --loader ts-node/esm src/scripts/entry/rebuild-derived.ts",
     "graph:metrics": "node --loader ts-node/esm src/scripts/entry/graph-metrics.ts",
+    "probe-architecture": "npx tsx src/scripts/entry/probe-architecture.ts",
+    "self-diagnosis": "npx tsx src/scripts/entry/self-diagnosis.ts",
     "enrich:provenance": "node --loader ts-node/esm src/scripts/enrichment/add-provenance.ts",
     "edges:verify": "node --loader ts-node/esm src/scripts/verify/verify-edge-tagging.ts",
     "plan:evidence:recompute": "node --loader ts-node/esm src/scripts/tools/recompute-plan-evidence-flags.ts",

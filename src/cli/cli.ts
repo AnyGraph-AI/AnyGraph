@@ -753,6 +753,20 @@ program
   .description('Show Neo4j and project status')
   .action(runStatus);
 
+program
+  .command('probe')
+  .description('Run 25 architecture queries against the live graph')
+  .action(async () => {
+    await import('../scripts/entry/probe-architecture.js');
+  });
+
+program
+  .command('diagnose')
+  .description('Run 10 epistemological health checks (self-diagnosis)')
+  .action(async () => {
+    await import('../scripts/entry/self-diagnosis.js');
+  });
+
 async function main() {
   try {
     await program.parseAsync();
