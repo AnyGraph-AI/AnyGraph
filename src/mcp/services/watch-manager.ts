@@ -726,7 +726,9 @@ class WatchManager {
         SET fn.fanInCount = fanIn, fn.fanOutCount = fanOut
       `, { projectId });
       
-      // 2. Recompute riskLevel
+      // 2. Recompute riskLevel (v1 — base risk only)
+      // NOTE: Does NOT touch riskTier — that's composite-risk's domain (GC-5 percentile-based).
+      // The old v1 threshold formula here clobbered composite risk tiers on every file change.
       await neo4j.run(`
         MATCH (fn:CodeNode {projectId: $projectId})
         WHERE fn.fanInCount IS NOT NULL AND fn.fanOutCount IS NOT NULL
@@ -734,13 +736,7 @@ class WatchManager {
           fn.fanInCount * fn.fanOutCount * log(toFloat(coalesce(fn.lineCount, 1)) + 1.0) AS baseRisk,
           coalesce(fn.temporalCoupling, 0) AS tc,
           coalesce(fn.authorEntropy, 1) AS ae
-        SET fn.riskLevel = baseRisk * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15),
-            fn.riskTier = CASE
-              WHEN baseRisk * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15) > 500 THEN 'CRITICAL'
-              WHEN baseRisk * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15) > 100 THEN 'HIGH'
-              WHEN baseRisk * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15) > 20 THEN 'MEDIUM'
-              ELSE 'LOW'
-            END
+        SET fn.riskLevel = baseRisk * (1.0 + tc * 0.1) * (1.0 + (ae - 1) * 0.15)
       `, { projectId });
       
       // 3. Cross-file classification on CALLS edges

@@ -20,6 +20,8 @@ import {
   deleteSourceFileSubgraphs,
   loadExistingNodesForEdgeDetection,
   getCrossFileEdges,
+  saveEnrichmentProperties,
+  restoreEnrichmentProperties,
 } from './cross-file-edge.helpers.js';
 import { GraphGeneratorHandler } from './graph-generator.handler.js';
 
@@ -77,11 +79,17 @@ export const performIncrementalParse = async (
     let savedCrossFileEdges: CrossFileEdge[] = [];
     const filesToRemoveFromGraph = [...filesToDelete, ...filesToReparse];
 
+    let savedEnrichment: Awaited<ReturnType<typeof saveEnrichmentProperties>> = [];
+
     if (filesToRemoveFromGraph.length > 0) {
       await debugLog('Incremental parse: getting cross-file edges', { count: filesToRemoveFromGraph.length });
       // Save cross-file edges before deletion
       savedCrossFileEdges = await getCrossFileEdges(neo4jService, filesToRemoveFromGraph, resolvedId);
       await debugLog('Incremental parse: got cross-file edges', { savedCount: savedCrossFileEdges.length });
+
+      // Save enrichment properties before deletion (riskTier, compositeRisk, etc.)
+      savedEnrichment = await saveEnrichmentProperties(neo4jService, filesToRemoveFromGraph, resolvedId);
+      await debugLog('Incremental parse: saved enrichment properties', { savedCount: savedEnrichment.length });
 
       await debugLog('Incremental parse: deleting old subgraphs', {});
       // Delete old subgraphs
@@ -183,11 +191,21 @@ export const performIncrementalParse = async (
       }
     }
 
+    // Restore enrichment properties (riskTier, compositeRisk, etc.)
+    if (savedEnrichment.length > 0) {
+      const restored = await restoreEnrichmentProperties(neo4jService, savedEnrichment, resolvedId);
+      await debugLog('Incremental parse: restored enrichment properties', {
+        attempted: savedEnrichment.length,
+        restored,
+      });
+    }
+
     await debugLog('Incremental parse completed', {
       nodesImported,
       edgesImported,
       filesReparsed: filesToReparse.length,
       filesDeleted: filesToDelete.length,
+      enrichmentRestored: savedEnrichment.length,
     });
 
     return {
