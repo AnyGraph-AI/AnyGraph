@@ -121,6 +121,8 @@ export async function incrementalRecompute(
 
   // Guard: full scope requires explicit override
   if (req.scope === 'full' && !req.fullOverride) {
+    const msg = 'BLOCKED: full-graph recompute requires fullOverride=true. Pass { scope: "full", fullOverride: true } to proceed.';
+    console.warn(`[incremental-recompute] ${msg}`);
     return {
       scope: 'full',
       candidateCount: 0,
@@ -129,7 +131,7 @@ export async function incrementalRecompute(
       confidenceVersion: 0,
       confidenceInputsHash: '',
       durationMs: Date.now() - start,
-      reason: 'BLOCKED: full-graph recompute requires fullOverride=true',
+      reason: msg,
       bounded: false,
     };
   }
@@ -203,14 +205,16 @@ export async function incrementalRecompute(
       config,
     );
 
-    const oldTcf = row.oldTcf as number | null;
+    const rawTcf = row.oldTcf;
+    const oldTcf = typeof rawTcf === 'bigint' ? Number(rawTcf) : (rawTcf as number | null);
     // Skip if factor unchanged (within epsilon)
     if (oldTcf !== null && Math.abs(oldTcf - factors.timeConsistencyFactor) < 0.001) {
       skipped++;
       continue;
     }
 
-    const oldVersion = (row.oldVersion as number | null) ?? 0;
+    const rawVersion = row.oldVersion;
+    const oldVersion = typeof rawVersion === 'bigint' ? Number(rawVersion) : (rawVersion as number | null) ?? 0;
     updates.push({
       id: row.id as string,
       timeConsistencyFactor: factors.timeConsistencyFactor,
