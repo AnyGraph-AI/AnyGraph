@@ -32,7 +32,7 @@ import { discoverExplainabilityPaths, verifyExplainabilityCoverage } from '../..
 import { runCalibration } from '../../core/verification/calibration.js';
 import { evaluatePromotion, persistPromotionDecision } from '../../core/verification/promotion-policy.js';
 
-async function getCodeProjectIds(neo4j: Neo4jService): Promise<string[]> {
+export async function getCodeProjectIds(neo4j: Neo4jService): Promise<string[]> {
   const rows = await neo4j.run(
     `MATCH (p:Project) WHERE p.projectType = 'code' OR p.projectType IS NULL RETURN p.projectId AS id`,
   );
@@ -41,7 +41,7 @@ async function getCodeProjectIds(neo4j: Neo4jService): Promise<string[]> {
 
 /** Returns all project IDs (code + plan). Used by TC-4 explainability which
  *  needs claim-evidence edges that live on plan projects. */
-async function getAllProjectIds(neo4j: Neo4jService): Promise<string[]> {
+export async function getAllProjectIds(neo4j: Neo4jService): Promise<string[]> {
   const rows = await neo4j.run(
     `MATCH (p:Project) WHERE p.projectId IS NOT NULL RETURN p.projectId AS id`,
   );
@@ -154,7 +154,7 @@ async function runCalibrate(neo4j: Neo4jService) {
   }
 }
 
-async function runPromotion(neo4j: Neo4jService) {
+export async function runPromotion(neo4j: Neo4jService) {
   const pids = await getCodeProjectIds(neo4j);
   console.log(`[tc:promote] ${pids.length} projects (advisory mode)`);
 
