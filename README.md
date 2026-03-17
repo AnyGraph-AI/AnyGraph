@@ -6,12 +6,12 @@ A universal reasoning graph that gives AI agents structural awareness before the
 
 ## Current State
 
-- **~16,500 nodes, ~25,000 edges** across 8 projects (1 code, 6 plan, 1 document)
-- **4 operational layers:** Code, Plans, Claims/Reasoning, Ground Truth
-- **56 MCP tools** for agents to query, edit, and coordinate
-- **636 tests** across 40 suites (hermetic, deterministic)
-- **55-step governance pipeline** (`done-check`) with ground truth post-gate
-- **v0.1.0** — TypeScript parser, temporal confidence, incremental recompute
+- **~20,300 nodes, ~43,400 edges** across 8 projects (1 code, 7 plan/governance)
+- **6 operational layers:** Code, Plans, Governance, Claims, Reasoning, Self-Audit
+- **57 MCP tools** for agents to query, edit, and coordinate
+- **907 tests** across 60 suites (hermetic, deterministic)
+- **57-step governance pipeline** (`done-check`) with ground truth post-gate
+- **v0.1.0** — TypeScript parser, temporal confidence, enforcement gate, incremental recompute
 
 ## Projects in the Graph
 
@@ -71,7 +71,7 @@ cypher-shell -u neo4j -p codegraph \
 ### Run the governance pipeline
 
 ```bash
-# Full 55-step done-check (build → enrich → verify → integrity)
+# Full 57-step done-check (build → enrich → verify → integrity)
 npm run done-check
 
 # Run tests
@@ -103,7 +103,7 @@ node dist/mcp/mcp.server.js
 | `codegraph parse <dir>` | Parse TypeScript project. Auto-detects existing projectId (MERGE mode). `--fresh` for destructive wipe. |
 | `codegraph enrich [projectId]` | Run post-ingest enrichment pipeline |
 | `codegraph analyze <dir>` | Parse + enrich in one shot |
-| `codegraph serve` | Start MCP server (56 tools) |
+| `codegraph serve` | Start MCP server (57 tools) |
 | `codegraph status` | Show Neo4j and project status |
 | `codegraph risk <target>` | Query blast radius for a function |
 | `codegraph probe` | **25 architecture queries** — risk, coupling, entrypoints, verification coverage, cross-layer analysis |
@@ -304,7 +304,7 @@ cypher-shell -u neo4j -p codegraph "
 **On VerificationRun:**
 - `toolFamily`, `confidence`, `effectiveConfidence`, `temporalConfidenceFactor`
 
-## MCP Tools (56)
+## MCP Tools (57)
 
 ### Core Analysis
 
@@ -379,7 +379,7 @@ cypher-shell -u neo4j -p codegraph "
 
 `build`, `dev`, `lint`, `format`, `test`, `mcp`
 
-### Governance Pipeline (done-check — 55 steps)
+### Governance Pipeline (done-check — 57+ steps)
 
 ```bash
 npm run done-check  # Full pipeline: build → enrich → verify → integrity
@@ -430,7 +430,7 @@ Steps: `build` → `plan:refresh` → `edges:normalize` → `enrich:temporal-cou
 
 ## Test Infrastructure
 
-**636 tests, 40 suites** — all hermetic and deterministic.
+**907 tests, 60 suites** — all hermetic and deterministic.
 
 ### Test Harness Modules
 
@@ -473,7 +473,7 @@ codegraph/
 │   │   ├── verification/       # Temporal confidence, advisory gate, SARIF import
 │   │   └── test-harness/       # 12 hermetic test modules + fixtures
 │   ├── mcp/
-│   │   ├── tools/              # 43 tool files → 56 MCP tools
+│   │   ├── tools/              # 43 tool files → 57 MCP tools
 │   │   ├── handlers/           # Graph generation, traversal, incremental parse
 │   │   └── services/           # Watch manager, job manager
 │   ├── scripts/
@@ -489,7 +489,7 @@ codegraph/
 ├── skills/swarm/               # Multi-agent coordinator + worker protocols
 ├── AGENTS.md                   # Agent instructions for editing this codebase
 ├── WORKFLOW.md                  # Step-by-step task execution procedure
-└── CLAUDE.md                   # Claude Code / ACP agent instructions
+└── CLAUDE.md                   # Claude Code pointer → WORKFLOW.md + AGENTS.md
 ```
 
 ## Agent Workflows

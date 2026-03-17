@@ -1,5 +1,13 @@
 # AnythingGraph — Agent Reference
 
+**AnythingGraph** is a universal reasoning graph. Give it any structured knowledge — code, documents, plans — and it parses, cross-references, generates claims, detects drift, and self-audits. Code parsing was the proof of concept. The architecture is the product.
+
+**Design principles:**
+- Parser → IR → Enrichment → Graph (IR layer exists, TS parser still writes Neo4j directly)
+- Hermetic testing: frozen clock, network guard, ephemeral graph, seeded RNG — all tests are deterministic
+- Cross-layer synthesis: claims requiring 2+ layers to derive (code risk × plan impact, coverage gaps)
+- Self-audit: graph generates verification questions, agents answer, graph updates itself
+
 ## ⚠️ Read WORKFLOW.md First
 
 `WORKFLOW.md` is the step-by-step operating procedure for every task.
@@ -118,6 +126,8 @@ MCP config (`.mcp.json`):
 ```
 
 You don't need MCP. `cypher-shell` works. MCP adds convenience.
+
+**Response format:** All MCP tools return JSON:API — `nodes` map (each node stored once, referenced by ID), `depths` array (relationship chains). Source code truncated to 1000 chars (first 500 + last 500). Use `includeCode: false`, `summaryOnly: true`, `snippetLength: N`, or `maxTotalNodes: N` for compact responses.
 
 ---
 
@@ -287,6 +297,17 @@ MATCH (f:Function {name: 'run', projectId: 'proj_c0d3e9a1f200'}) RETURN f
 
 ---
 
+## Environment
+
+```
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=codegraph
+OPENAI_API_KEY=required_for_embeddings  # in codegraph/.env
+```
+
+---
+
 ## Rules
 
 1. **Follow WORKFLOW.md.** Every task, every time.
@@ -298,3 +319,4 @@ MATCH (f:Function {name: 'run', projectId: 'proj_c0d3e9a1f200'}) RETURN f
 7. **`npm run done-check` must exit 0** before any task is declared done.
 8. **907 tests, 60 suites.** Full suite in ~17s. No excuses for skipping.
 9. **Use `sourceCode` property** to read function implementations from graph before opening files.
+10. **Conventional Commits:** `type(scope): description` — feat, fix, docs, test, refactor, chore.
