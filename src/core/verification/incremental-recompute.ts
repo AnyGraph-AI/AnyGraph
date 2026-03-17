@@ -169,7 +169,7 @@ export async function incrementalRecompute(
   const config: TemporalDecayConfig = req.decayConfig ?? {
     decayWindowHours: 720,
     minimumFactor: 0.1,
-    defaultValidityHours: 2160,
+    defaultValidityHours: 168,  // 7 days — AI-assisted development pace
   };
 
   const now = new Date();

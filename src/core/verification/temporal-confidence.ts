@@ -30,7 +30,7 @@ export interface TemporalDecayConfig {
 const DEFAULT_DECAY_CONFIG: TemporalDecayConfig = {
   decayWindowHours: 720,
   minimumFactor: 0.1,
-  defaultValidityHours: 2160,
+  defaultValidityHours: 168,  // 7 days — AI-assisted development pace
 };
 
 export interface TemporalFactors {
