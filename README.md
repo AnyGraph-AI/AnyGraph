@@ -121,6 +121,10 @@ node dist/mcp/mcp.server.js
 | `npm run graph:metrics` | Record GraphMetricsSnapshot node (tracks growth over time) |
 | `npm run integrity:snapshot` | Snapshot current invariant state |
 | `npm run integrity:verify` | Verify latest snapshot against baselines |
+| `npm run governance:metrics:snapshot` | Record GovernanceMetricSnapshot node (governance health over time) |
+| `npm run governance:metrics:integrity:verify` | Verify governance metrics against baselines (drift detection) |
+| `npm run verification:status:dashboard` | TC pipeline dashboard — per-family confidence stats, blocked/eligible counts |
+| `npm run verification:recommendation:mismatch` | Detect tasks recommended but already done (VG-6 mismatch metric, target: 0%) |
 
 ### Enrichment Scripts (run individually or via done-check)
 
@@ -145,6 +149,34 @@ cypher-shell -u neo4j -p codegraph "
   RETURN s.timestamp, s.nodeCount, s.edgeCount, s.derivedEdgeCount
   ORDER BY s.timestamp"
 ```
+
+### Governance Health History
+
+GovernanceMetricSnapshot nodes track governance health over time. Each `done-check` creates a snapshot with:
+- Done-check pass/fail/warn results and head SHA
+- Gate interception rate, invariant violations, verification run counts
+- MEASURED edges linking snapshots to MetricResult nodes
+
+Query governance trend:
+```bash
+cypher-shell -u neo4j -p codegraph "
+  MATCH (m:GovernanceMetricSnapshot)
+  RETURN m.id, m.ranAt, m.result, m.headSha
+  ORDER BY m.ranAt DESC LIMIT 10"
+```
+
+`governance:metrics:integrity:verify` compares latest governance snapshot against baseline — flags regressions (e.g., pass→fail, rising invariant violations, gate interception drops).
+
+### TC Pipeline Dashboard
+
+`verification:status:dashboard` outputs a JSON summary of the Temporal Confidence pipeline state:
+- Per source-family stats: VR count, avg/min/max effectiveConfidence, blocked count
+- Promotion eligibility, calibration metrics (Brier, ECE)
+- Debt and shadow divergence summaries
+
+### Recommendation Mismatch (VG-6)
+
+`verification:recommendation:mismatch` checks whether the dependency-aware task recommendation query would surface any task already marked done. A non-zero mismatch rate means the recommendation engine is stale relative to plan progress. Policy target: `mismatchRate = 0`.
 
 ## Graph Schema
 

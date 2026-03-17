@@ -610,8 +610,12 @@ Plus 47 additional verification, governance, and audit sub-steps.
 ```bash
 npm run probe-architecture   # 25 structural queries — instant graph health picture
 npm run self-diagnosis        # 10 epistemological checks — does the graph know its own gaps?
-npm run graph:metrics         # Record a GraphMetricsSnapshot node (tracks growth over time)
-npm run rebuild-derived       # Nuke + rebuild all derived edges and properties
+npm run graph:metrics                          # Record a GraphMetricsSnapshot node (tracks growth over time)
+npm run governance:metrics:snapshot            # Record GovernanceMetricSnapshot (governance health over time)
+npm run governance:metrics:integrity:verify    # Verify governance metrics against baselines
+npm run verification:status:dashboard          # TC pipeline dashboard — per-family confidence stats
+npm run verification:recommendation:mismatch   # VG-6: detect recommended tasks already marked done
+npm run rebuild-derived                        # Nuke + rebuild all derived edges and properties
 ```
 
 Rules:

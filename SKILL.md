@@ -534,7 +534,7 @@ Before claiming completion, run:
 npm run done-check
 ```
 
-(Includes edge project-tag normalization, plan evidence recomputation, registry reconciliation/verification, edge-tag taxonomy verification, parser-contract regression checks, plan dependency integrity checks, plus integrity snapshot/verification.)
+(Includes edge project-tag normalization, plan evidence recomputation, registry reconciliation/verification, edge-tag taxonomy verification, parser-contract regression checks, plan dependency integrity checks, governance metrics snapshots + integrity verification, TC pipeline verification, recommendation mismatch detection, status dashboard, plus integrity snapshot/verification.)
 
 If it fails:
 - Work is still in-progress.
