@@ -653,11 +653,213 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     detail: { gmsCount: d25gmsCount, gmsGapHours: d25gmsGap, intAge: d25intAge },
   });
 
+  // ── D26–D33: RF-6→RF-9 Confidence & Invariant Meta-Health ──────
+
+  // D26: Is the shadow lane producing variance?
+  const d26 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.shadowEffectiveConfidence IS NOT NULL
+    WITH collect(DISTINCT round(r.shadowEffectiveConfidence * 1000) / 1000.0) AS distinctVals,
+      count(r) AS total
+    RETURN size(distinctVals) AS distinctShadowValues, total
+  `, { pid });
+  const d26Distinct = d26[0]?.distinctShadowValues || 0;
+  const d26Total = d26[0]?.total || 0;
+  const d26Healthy = d26Distinct > 1 || d26Total === 0;
+  results.push({
+    id: 'D26', question: 'Is the shadow lane producing variance? (degeneracy detection)',
+    answer: d26Total === 0
+      ? 'No shadow data yet.'
+      : `${d26Distinct} distinct shadowEC values across ${d26Total} VRs.${d26Distinct <= 1 ? ' DEGENERATE — all VRs have identical shadowEC.' : ''}`,
+    healthy: d26Healthy,
+    nextStep: !d26Healthy
+      ? `Shadow lane is degenerate (all VRs have same shadowEC). This means TCF=1.0 everywhere — evidence is too young for temporal decay. Run npm run tc:pipeline after evidence ages past defaultValidityHours (168h / 7 days). If you need to test now, backdate VR timestamps.`
+      : d26Total === 0
+        ? `No shadow data. Run npm run tc:pipeline to compute shadow propagation.`
+        : `Shadow lane is producing real variance — ${d26Distinct} distinct values. Shadow vs production divergence is meaningful.`,
+    detail: { distinctShadowValues: d26Distinct, total: d26Total },
+  });
+
+  // D27: Is shadow divergence trending up or down?
+  const d27 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.shadowEffectiveConfidence IS NOT NULL AND r.effectiveConfidence IS NOT NULL
+    WITH r.tool AS tool,
+      avg(abs(r.shadowEffectiveConfidence - r.effectiveConfidence)) AS avgDiv,
+      count(r) AS cnt
+    RETURN tool, round(avgDiv * 10000) / 10000.0 AS divergence, cnt ORDER BY divergence DESC
+  `, { pid });
+  const d27MaxDiv = d27.length > 0 ? Math.max(...d27.map(r => r.divergence)) : 0;
+  const d27Healthy = d27MaxDiv < 0.30;
+  results.push({
+    id: 'D27', question: 'Is shadow divergence within safe bounds? (formula drift detection)',
+    answer: d27.length === 0
+      ? 'No shadow data for divergence check.'
+      : `Max tool divergence: ${d27MaxDiv.toFixed(4)}. ${d27.map(r => `${r.tool}: ${r.divergence}`).join(', ')}`,
+    healthy: d27Healthy,
+    nextStep: !d27Healthy
+      ? `Shadow divergence exceeds 0.30 for at least one tool — production and shadow formulas disagree significantly. Review temporal-confidence.ts decay parameters vs shadow-propagation.ts damping. Consider running calibration: npm run tc:pipeline.`
+      : d27.length === 0
+        ? `No shadow data yet. Run npm run tc:pipeline.`
+        : `Shadow divergence is within bounds (<0.30). Divergence shows how much the shadow alternative formula would change confidence scores.`,
+    detail: { tools: d27 },
+  });
+
+  // D28: Are any tools immune to anti-gaming caps?
+  const d28 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.sourceFamily IS NOT NULL AND r.effectiveConfidence IS NOT NULL
+    WITH r.sourceFamily AS fam, avg(r.effectiveConfidence) AS avgEC, count(r) AS cnt
+    WHERE avgEC > 0.85
+    RETURN fam, round(avgEC * 1000) / 1000.0 AS avgEC, cnt
+  `, { pid });
+  const d28Healthy = d28.length === 0;
+  results.push({
+    id: 'D28', question: 'Are any tools immune to anti-gaming caps? (confidence domination)',
+    answer: d28.length === 0
+      ? 'No source family exceeds the 0.85 cap.'
+      : `${d28.length} families exceed cap: ${d28.map(r => `${r.fam} (avg ${r.avgEC}, n=${r.cnt})`).join(', ')}`,
+    healthy: d28Healthy,
+    nextStep: !d28Healthy
+      ? `Source families exceeding 0.85 cap dominate aggregate confidence. If done-check (confidence=1.0 by design), this is expected — it's a project-level gate. For scanner tools, review anti-gaming sourceFamilyCap in anti-gaming.ts.`
+      : `All source families are within the 0.85 anti-gaming cap. Confidence is distributed across tools.`,
+    detail: { exceeding: d28 },
+  });
+
+  // D29: Is evidence age diverse enough for calibration?
+  const d29 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.observedAt IS NOT NULL
+    WITH min(datetime(r.observedAt)) AS oldest, max(datetime(r.observedAt)) AS newest,
+      duration.between(min(datetime(r.observedAt)), max(datetime(r.observedAt))) AS span
+    RETURN toString(oldest) AS oldest, toString(newest) AS newest, span.days AS spanDays
+  `, { pid });
+  const d29SpanDays = d29[0]?.spanDays || 0;
+  const d29Healthy = d29SpanDays >= 7;
+  results.push({
+    id: 'D29', question: 'Is evidence age diverse enough for calibration? (age distribution)',
+    answer: d29.length === 0
+      ? 'No VR timestamps found.'
+      : `Evidence spans ${d29SpanDays} days (${d29[0].oldest} to ${d29[0].newest}). ${d29SpanDays < 7 ? 'Too narrow — calibration Brier will be trivially perfect.' : 'Sufficient age diversity for meaningful calibration.'}`,
+    healthy: d29Healthy,
+    nextStep: !d29Healthy
+      ? `Evidence spans only ${d29SpanDays} days — less than the 7-day validity window. Calibration scores are meaningless (memorizing, not predicting). Re-run SARIF scans (npm run verification:scan) periodically to accumulate diverse-age evidence. The system needs evidence that has actually aged past the 168h validity window.`
+      : `Evidence age spans ${d29SpanDays} days. TCF decay will produce real variance once oldest evidence passes the 7-day validity window, enabling meaningful calibration.`,
+    detail: { spanDays: d29SpanDays, oldest: d29[0]?.oldest, newest: d29[0]?.newest },
+  });
+
+  // D30: Is the promotion gate stuck?
+  const d30 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.shadowEffectiveConfidence IS NOT NULL AND r.effectiveConfidence IS NOT NULL
+    WITH avg(abs(r.shadowEffectiveConfidence - r.effectiveConfidence)) AS avgDiv,
+      max(abs(r.shadowEffectiveConfidence - r.effectiveConfidence)) AS maxDiv
+    RETURN round(avgDiv * 10000) / 10000.0 AS avgDiv, round(maxDiv * 10000) / 10000.0 AS maxDiv,
+      CASE WHEN avgDiv <= 0.15 AND maxDiv <= 0.30 THEN true ELSE false END AS eligible
+  `, { pid });
+  const d30Eligible = d30[0]?.eligible ?? false;
+  results.push({
+    id: 'D30', question: 'Is the promotion gate stuck? (shadow→production readiness)',
+    answer: d30.length === 0
+      ? 'No shadow data — promotion gate not evaluable.'
+      : `Promotion: ${d30Eligible ? 'ELIGIBLE' : 'BLOCKED'}. avgDiv=${d30[0].avgDiv}, maxDiv=${d30[0].maxDiv}. Thresholds: avg≤0.15, max≤0.30.`,
+    healthy: true, // Being blocked isn't unhealthy — it means the system is correctly cautious
+    nextStep: d30Eligible
+      ? `Shadow lane is eligible for promotion. Run calibration (npm run tc:pipeline) to check if Brier scores also qualify. Both divergence AND calibration must pass.`
+      : d30.length === 0
+        ? `No shadow data. Run npm run tc:pipeline to compute shadow propagation.`
+        : `Promotion blocked — ${d30[0].avgDiv > 0.15 ? 'avgDiv exceeds 0.15' : 'maxDiv exceeds 0.30'}. This is expected when evidence is young or formulas diverge. Re-evaluate after evidence ages past 7-day validity.`,
+    detail: { eligible: d30Eligible, avgDiv: d30[0]?.avgDiv, maxDiv: d30[0]?.maxDiv },
+  });
+
+  // D31: Are all formalized invariants executable?
+  let d31Failures = 0;
+  let d31Total = 0;
+  const d31Details: string[] = [];
+  try {
+    const { INVARIANT_REGISTRY } = await import('../../core/config/invariant-registry-schema.js');
+    d31Total = INVARIANT_REGISTRY.length;
+    for (const inv of INVARIANT_REGISTRY) {
+      try {
+        const q = inv.diagnosticQueryTemplate.replace(/\$projectId/g, `'${pid}'`);
+        await query(`EXPLAIN ${q}`);
+      } catch (e: any) {
+        d31Failures++;
+        d31Details.push(`${inv.invariantId}: ${e.message?.substring(0, 80)}`);
+      }
+    }
+  } catch {
+    d31Details.push('Could not import INVARIANT_REGISTRY');
+    d31Failures = -1;
+  }
+  const d31Healthy = d31Failures === 0 && d31Total > 0;
+  results.push({
+    id: 'D31', question: 'Are all formalized invariants executable? (query validity)',
+    answer: d31Failures === -1
+      ? 'Could not load invariant registry.'
+      : d31Failures === 0
+        ? `All ${d31Total} invariants have valid Cypher queries.`
+        : `${d31Failures}/${d31Total} invariants have invalid queries: ${d31Details.join('; ')}`,
+    healthy: d31Healthy,
+    nextStep: !d31Healthy
+      ? `${d31Failures} invariant diagnostic queries fail to parse. Fix the Cypher in invariant-registry-schema.ts. Failures: ${d31Details.join('; ')}`
+      : `All ${d31Total} invariant queries are valid. Run them periodically to check for violations: npm run done-check includes invariant evaluation.`,
+    detail: { total: d31Total, failures: d31Failures, details: d31Details },
+  });
+
+  // D32: Do any ENFORCED invariants have violations?
+  const d32 = await query(`
+    MATCH (iv:InvariantViolation)
+    WHERE iv.enforcementMode = 'enforced' OR iv.severity = 'enforced'
+    RETURN iv.invariantId AS invariant, count(iv) AS violations
+    ORDER BY violations DESC
+  `);
+  const d32Violations = d32.reduce((s, r) => s + (r.violations || 0), 0);
+  const d32Healthy = d32Violations === 0;
+  results.push({
+    id: 'D32', question: 'Do any ENFORCED invariants have violations? (illegal state detection)',
+    answer: d32Violations === 0
+      ? 'No ENFORCED invariant violations. Graph is in a legal state.'
+      : `${d32Violations} ENFORCED violations across ${d32.length} invariants: ${d32.map(r => `${r.invariant} (${r.violations})`).join(', ')}. THE GRAPH IS IN AN ILLEGAL STATE.`,
+    healthy: d32Healthy,
+    nextStep: !d32Healthy
+      ? `CRITICAL: ENFORCED invariants are violated — the graph's own rules say this state is illegal. Investigate each: ${d32.map(r => r.invariant).join(', ')}. Run the diagnostic query for each from invariant-registry-schema.ts to find counterexamples. Fix the data or downgrade the invariant to advisory if the rule is wrong.`
+      : `No ENFORCED violations. The graph satisfies its own structural laws. Advisory violations may still exist — check with npm run done-check.`,
+    detail: { violations: d32 },
+  });
+
+  // D33: Is invariant coverage complete?
+  let d33Total = 0;
+  let d33CoveredScopes: string[] = [];
+  try {
+    const { INVARIANT_REGISTRY } = await import('../../core/config/invariant-registry-schema.js');
+    d33Total = INVARIANT_REGISTRY.length;
+    d33CoveredScopes = [...new Set(INVARIANT_REGISTRY.map(i => i.scope))];
+  } catch { /* ignore */ }
+  const d33NodeTypes = await query(`
+    MATCH (n) WHERE n.projectId = $pid
+    WITH labels(n) AS lbls UNWIND lbls AS lbl
+    RETURN DISTINCT lbl ORDER BY lbl
+  `, { pid });
+  const d33Labels = d33NodeTypes.map(r => r.lbl);
+  const d33Healthy = d33Total >= 10 && d33CoveredScopes.length >= 2;
+  results.push({
+    id: 'D33', question: 'Is invariant coverage complete? (scope and breadth)',
+    answer: `${d33Total} invariants covering scopes: [${d33CoveredScopes.join(', ')}]. Project has ${d33Labels.length} node labels: [${d33Labels.slice(0, 10).join(', ')}${d33Labels.length > 10 ? '...' : ''}].`,
+    healthy: d33Healthy,
+    nextStep: d33Total < 10
+      ? `Only ${d33Total} invariants defined — consider adding more for uncovered node types. RF-9 added provenance, temporal, trust, and saturation. Consider adding invariants for: SourceFile referential integrity, Function call-graph consistency, Claim evidence minimum thresholds.`
+      : d33CoveredScopes.length < 2
+        ? `Invariants only cover scope: ${d33CoveredScopes.join(', ')}. Add project-scope and milestone-scope invariants for broader coverage.`
+        : `${d33Total} invariants across ${d33CoveredScopes.length} scopes. Coverage is adequate. Review quarterly to ensure new node/edge types have corresponding invariants.`,
+    detail: { totalInvariants: d33Total, scopes: d33CoveredScopes, nodeLabels: d33Labels },
+  });
+
   return results;
 }
 
 async function main() {
-  console.log('🔬 Self-Diagnosis — 25 Epistemological Health Checks\n');
+  console.log('🔬 Self-Diagnosis — 33 Epistemological Health Checks\n');
   console.log('   "Does the graph know what it doesn\'t know?"\n');
 
   try {

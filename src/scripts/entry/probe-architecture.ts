@@ -593,11 +593,155 @@ async function runProbes(): Promise<ProbeResult[]> {
     rows: q35,
   });
 
+  // ── RF-6→RF-9: Confidence & Invariant Layer ──────────────────────
+
+  // Q36: Shadow vs production divergence by tool
+  const q36 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.shadowEffectiveConfidence IS NOT NULL AND r.effectiveConfidence IS NOT NULL
+    WITH r.tool AS tool,
+      round(avg(r.effectiveConfidence) * 1000) / 1000.0 AS avgProd,
+      round(avg(r.shadowEffectiveConfidence) * 1000) / 1000.0 AS avgShadow,
+      round(avg(abs(r.shadowEffectiveConfidence - r.effectiveConfidence)) * 1000) / 1000.0 AS avgDiv,
+      count(r) AS cnt
+    RETURN tool, avgProd, avgShadow, avgDiv, cnt ORDER BY avgDiv DESC
+  `, { pid });
+  results.push({
+    id: 'Q36', name: 'Shadow vs production divergence by tool', category: 'Confidence',
+    status: q36.some(r => r.avgDiv > 0.15) ? 'warn' : 'info',
+    summary: q36.length > 0 ? `${q36.length} tool families, max divergence: ${Math.max(...q36.map(r => r.avgDiv)).toFixed(3)}` : 'No shadow data',
+    rows: q36,
+  });
+
+  // Q37: TCF decay timeline projection
+  const q37 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.observedAt IS NOT NULL AND r.timeConsistencyFactor IS NOT NULL
+    WITH r.tool AS tool,
+      round(min(r.timeConsistencyFactor) * 1000) / 1000.0 AS minTCF,
+      round(avg(r.timeConsistencyFactor) * 1000) / 1000.0 AS avgTCF,
+      min(r.observedAt) AS oldestEvidence,
+      max(r.observedAt) AS newestEvidence,
+      count(r) AS cnt
+    RETURN tool, minTCF, avgTCF, oldestEvidence, newestEvidence, cnt ORDER BY avgTCF ASC
+  `, { pid });
+  results.push({
+    id: 'Q37', name: 'TCF decay timeline projection', category: 'Confidence',
+    status: q37.some(r => r.avgTCF < 0.5) ? 'warn' : 'info',
+    summary: q37.length > 0 ? `${q37.length} families. Lowest avg TCF: ${Math.min(...q37.map(r => r.avgTCF)).toFixed(3)}` : 'No TCF data',
+    rows: q37,
+  });
+
+  // Q38: Source-family confidence dominance
+  const q38 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.sourceFamily IS NOT NULL AND r.effectiveConfidence IS NOT NULL
+    WITH r.sourceFamily AS fam,
+      round(avg(r.effectiveConfidence) * 1000) / 1000.0 AS avgEC,
+      round(sum(r.effectiveConfidence) * 100) / 100.0 AS totalEC,
+      count(r) AS cnt
+    WITH collect({fam: fam, avgEC: avgEC, totalEC: totalEC, cnt: cnt}) AS all, sum(totalEC) AS grandTotal
+    UNWIND all AS row
+    RETURN row.fam AS family, row.avgEC AS avgEC, row.cnt AS count,
+      round(row.totalEC / grandTotal * 10000) / 100.0 AS pctOfTotal
+    ORDER BY pctOfTotal DESC
+  `, { pid });
+  results.push({
+    id: 'Q38', name: 'Source-family confidence dominance', category: 'Confidence',
+    status: q38.length > 0 && q38[0].pctOfTotal > 70 ? 'warn' : 'info',
+    summary: q38.length > 0 ? `Top family: ${q38[0].family} at ${q38[0].pctOfTotal}% of total confidence` : 'No data',
+    rows: q38,
+  });
+
+  // Q39: Duplicate/near-duplicate VR clusters
+  const q39 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.ruleId IS NOT NULL
+    WITH r.ruleId AS rule, r.tool AS tool, collect(r.id) AS vrIds, count(r) AS cnt
+    WHERE cnt > 5
+    RETURN rule, tool, cnt ORDER BY cnt DESC LIMIT 10
+  `, { pid });
+  results.push({
+    id: 'Q39', name: 'Duplicate/near-duplicate VR clusters', category: 'Confidence',
+    status: q39.some(r => r.cnt > 20) ? 'warn' : 'info',
+    summary: q39.length > 0 ? `${q39.length} rules with >5 VRs. Largest cluster: ${q39[0]?.cnt} VRs` : 'No large clusters',
+    rows: q39,
+  });
+
+  // Q40: Calibration Brier by tool family
+  const q40 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.effectiveConfidence IS NOT NULL AND r.outcome IS NOT NULL
+    WITH r.tool AS tool,
+      round(avg(CASE WHEN r.outcome = 'violates'
+        THEN (1.0 - r.effectiveConfidence) * (1.0 - r.effectiveConfidence)
+        ELSE r.effectiveConfidence * r.effectiveConfidence END) * 10000) / 10000.0 AS brier,
+      count(r) AS cnt
+    RETURN tool, brier, cnt ORDER BY brier DESC
+  `, { pid });
+  results.push({
+    id: 'Q40', name: 'Calibration Brier by tool family', category: 'Confidence',
+    status: q40.some(r => r.brier > 0.25) ? 'warn' : 'info',
+    summary: q40.length > 0 ? `${q40.length} families. Worst Brier: ${Math.max(...q40.map(r => r.brier)).toFixed(4)}` : 'No calibration data',
+    rows: q40,
+  });
+
+  // Q41: Promotion gate status
+  const q41 = await query(`
+    MATCH (r:VerificationRun {projectId: $pid})
+    WHERE r.shadowEffectiveConfidence IS NOT NULL AND r.effectiveConfidence IS NOT NULL
+    WITH avg(abs(r.shadowEffectiveConfidence - r.effectiveConfidence)) AS avgDiv,
+      max(abs(r.shadowEffectiveConfidence - r.effectiveConfidence)) AS maxDiv,
+      count(r) AS total,
+      sum(CASE WHEN r.shadowEffectiveConfidence = r.effectiveConfidence THEN 1 ELSE 0 END) AS identical
+    RETURN round(avgDiv * 10000) / 10000.0 AS avgDivergence,
+      round(maxDiv * 10000) / 10000.0 AS maxDivergence,
+      total, identical,
+      CASE WHEN avgDiv <= 0.15 AND maxDiv <= 0.30 THEN 'ELIGIBLE' ELSE 'BLOCKED' END AS status
+  `, { pid });
+  const promStatus = q41[0]?.status || 'UNKNOWN';
+  results.push({
+    id: 'Q41', name: 'Promotion gate status + blockers', category: 'Confidence',
+    status: promStatus === 'BLOCKED' ? 'warn' : 'pass',
+    summary: q41.length > 0 ? `${promStatus} — avgDiv: ${q41[0].avgDivergence}, maxDiv: ${q41[0].maxDivergence}, ${q41[0].identical}/${q41[0].total} identical` : 'No shadow data',
+    rows: q41,
+  });
+
+  // Q42: Invariant violation inventory
+  const q42 = await query(`
+    MATCH (iv:InvariantViolation)
+    RETURN iv.invariantId AS invariant, iv.severity AS severity, count(iv) AS violations
+    ORDER BY violations DESC
+  `);
+  results.push({
+    id: 'Q42', name: 'Invariant violation inventory', category: 'Governance',
+    status: q42.length > 0 ? 'warn' : 'pass',
+    summary: q42.length > 0 ? `${q42.reduce((s, r) => s + r.violations, 0)} violations across ${q42.length} invariants` : 'No violations recorded',
+    rows: q42,
+  });
+
+  // Q43: Invariant coverage map
+  const q43 = await query(`
+    MATCH (n)
+    WHERE n.projectId = $pid
+    WITH labels(n) AS lbls
+    UNWIND lbls AS lbl
+    WITH DISTINCT lbl
+    ORDER BY lbl
+    RETURN collect(lbl) AS nodeTypes
+  `, { pid });
+  results.push({
+    id: 'Q43', name: 'Invariant coverage map (node types in project)', category: 'Governance',
+    status: 'info',
+    summary: q43.length > 0 ? `${q43[0].nodeTypes.length} distinct node labels in project` : 'No nodes',
+    rows: q43,
+  });
+
   return results;
 }
 
 async function main() {
-  console.log('🏗️  Architecture Probe — 35 Queries Against Live Graph\n');
+  console.log('🏗️  Architecture Probe — 43 Queries Against Live Graph\n');
 
   try {
     const results = await runProbes();
