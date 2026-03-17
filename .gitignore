@@ -170,3 +170,4 @@ neo4j-apoc-schema.json
 # Runtime caches
 neo4j-apoc-schema.json
 godspeed-fork-parse.json
+.enforcement-log

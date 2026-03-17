@@ -50,6 +50,7 @@ export const TOOL_NAMES = {
   swarmMessage: 'swarm_message',
   simulateEdit: 'simulate_edit',
   preEditCheck: 'pre_edit_check',
+  enforceEdit: 'enforceEdit',
   swarmGraphRefresh: 'swarm_graph_refresh',
   groundTruth: 'ground_truth',
   // Plan tools

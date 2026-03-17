@@ -23,6 +23,7 @@ import { createRestoreSessionBookmarkTool, createSaveSessionBookmarkTool } from 
 import { createCleanupSessionTool } from './session-cleanup.tool.js';
 import { createPreEditCheckTool } from './pre-edit-check.tool.js';
 import { createSimulateEditTool } from './simulate-edit.tool.js';
+import { createEnforcementGateTool } from './enforcement-gate.tool.js';
 import { createRecallSessionNotesTool, createSaveSessionNoteTool } from './session-note.tool.js';
 import { createStartWatchProjectTool } from './start-watch-project.tool.js';
 import { createStopWatchProjectTool } from './stop-watch-project.tool.js';
@@ -175,6 +176,9 @@ export const registerAllTools = (server: McpServer): void => {
 
   // Register verification dashboard tools (trust/confidence layer)
   createVerificationDashboardTools(server);
+
+  // Register RF-2 enforcement gate
+  createEnforcementGateTool(server);
 
   // Runtime parity check: every TOOL_NAMES entry must be registered
   const registeredNames = new Set((server as any)._registeredTools?.keys?.() ?? []);
