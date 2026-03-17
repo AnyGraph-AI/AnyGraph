@@ -131,8 +131,7 @@ export class SelfAuditEngine {
   // Project identity context — agents must know WHAT they're auditing
   private static PROJECT_CONTEXT: Record<string, string> = {
     'codegraph': 'A Neo4j code knowledge graph tool. Parses TypeScript codebases via ts-morph, extracts functions/classes/imports, stores in Neo4j. 42 MCP tools, 17-step enrichment pipeline. Roadmap includes multi-language parsing (Python/Java/Go/C#), corpus ingestion, plan tracking, claim layer, and reasoning engine.',
-    'godspeed': 'A Telegram Solana trading bot. Handles buying/selling tokens, copy trading, sniping, DCA orders, limit orders, trailing stops, portfolio PnL, rug score analysis, bonding curves, trenches discovery. 40 TypeScript files, 1,094 functions. The plan describes ENHANCEMENT PROPOSALS for features that may already be partially or fully implemented.',
-    'bible-graph': 'A religious text corpus pipeline. Parses KJV Bible, Deuterocanon, Pseudepigrapha, Quran into Neo4j with verse nodes, cross-references, entity resolution (45 Person nodes), SEED2 theological framework. 13 TypeScript files. Plan includes future features like Strong\'s concordance, messianic prophecy mapping, place geo-coding.',
+
     'plan-graph': 'Meta-project: the plan-tracking system itself. Plan parser ingests markdown plans into Neo4j Task/Milestone nodes, cross-references against code graphs. Its code lives in the codegraph repo (plan-parser.ts, watch-all.ts, claim-engine.ts).',
   };
 

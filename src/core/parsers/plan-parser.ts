@@ -745,8 +745,6 @@ function extractCrossReferences(text: string): CrossReference[] {
 
 const DEFAULT_PLAN_CODE_PROJECT_MAP: Record<string, string> = {
   plan_codegraph: 'proj_c0d3e9a1f200',
-  plan_godspeed: 'proj_60d5feed0001',
-  plan_bible_graph: 'proj_0e32f3c187f4',
   plan_plan_graph: 'proj_c0d3e9a1f200',
   plan_runtime_graph: 'proj_c0d3e9a1f200',
 };

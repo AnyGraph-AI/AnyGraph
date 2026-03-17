@@ -54,7 +54,7 @@ async function main() {
     console.log(`Unique session fields: ${allFields.size} — ${[...allFields].join(', ')}`);
 
     // 3. Get projectId from first handler
-    const projectId = handlers[0]?.projectId ?? 'proj_60d5feed0001';
+    const projectId = handlers[0]?.projectId ?? 'proj_c0d3e9a1f200';
 
     // 4. Create Field nodes
     console.log('Creating Field nodes...');

@@ -462,7 +462,7 @@ export function createClaimGenerateTool(server: McpServer) {
 
           // Safety fallback for cold registries.
           if (codeProjectIds.length === 0) {
-            codeProjectIds = ['proj_60d5feed0001', 'proj_c0d3e9a1f200'];
+            codeProjectIds = ['proj_c0d3e9a1f200'];
           }
 
           let codeClaims = 0;

@@ -56,8 +56,7 @@ async function main(): Promise<void> {
 
     // Fallback mappings for plans without TARGETS edges
     if (!planToCode.has('plan_codegraph')) planToCode.set('plan_codegraph', 'proj_c0d3e9a1f200');
-    if (!planToCode.has('plan_godspeed')) planToCode.set('plan_godspeed', 'proj_60d5feed0001');
-    if (!planToCode.has('plan_bible_graph')) planToCode.set('plan_bible_graph', 'proj_0e32f3c187f4');
+    // GodSpeed and bible-graph purged from graph — no fallback mappings
 
     // Get all source files and top-level declarations per code project
     const codeAssets = new Map<string, Array<{ name: string; filePath: string; elementId: string; kind: string }>>();

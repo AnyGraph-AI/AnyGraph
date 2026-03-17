@@ -91,16 +91,7 @@ const TARGETS: TargetProject[] = [
     workspacePath: '/home/jonathan/.openclaw/workspace/codegraph',
     tsconfigPath: '/home/jonathan/.openclaw/workspace/codegraph/tsconfig.json',
   },
-  {
-    name: 'godspeed',
-    workspacePath: '/mnt/c/Users/ddfff/Downloads/Bots/GodSpeed',
-    tsconfigPath: '/mnt/c/Users/ddfff/Downloads/Bots/GodSpeed/tsconfig.json',
-  },
-  {
-    name: 'bible-graph',
-    workspacePath: '/home/jonathan/.openclaw/workspace/bible-graph',
-    tsconfigPath: '/home/jonathan/.openclaw/workspace/bible-graph/tsconfig.json',
-  },
+
 ];
 
 function mapIrNodeType(node: Neo4jNode): IrNodeType {

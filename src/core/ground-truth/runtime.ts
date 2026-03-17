@@ -622,8 +622,6 @@ export class GroundTruthRuntime {
     // This is a bootstrap shim — will be replaced by DomainBlueprint lookup
     const mapping: Record<string, string> = {
       proj_c0d3e9a1f200: 'plan_codegraph',
-      proj_60d5feed0001: 'plan_godspeed',
-      proj_0e32f3c187f4: 'plan_bible_graph',
     };
     return mapping[projectId] ?? projectId.replace('proj_', 'plan_');
   }
