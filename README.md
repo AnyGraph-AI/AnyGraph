@@ -57,6 +57,57 @@ It's not just code. AnythingGraph ingests **plans, documents, and claims** into 
 - 📈 **69-step governance pipeline** — build, enrich, verify, integrity check, hygiene, metrics — all automated
 - 🧬 **Hermetic testing** — frozen clock, network guard, ephemeral graph, seeded RNG — deterministic by design
 
+## This Is Running Right Now
+
+AnythingGraph isn't a concept — it's running on its own codebase, catching real issues, blocking real regressions. Here's live output:
+
+**Risk detection** — functions ranked by how many callers depend on them:
+```
+$ cypher-shell "MATCH (caller)-[:CALLS]->(f {projectId:'proj_c0d3e9a1f200'})
+  WITH f, count(caller) AS callers WHERE callers > 5
+  RETURN f.name, callers, f.riskTier ORDER BY callers DESC LIMIT 5"
+
+ f.name                          | callers | f.riskTier
+---------------------------------+---------+-----------
+ "run"                           | 156     | "HIGH"
+ "close"                         | 119     | "HIGH"
+ "importSarifToVerificationBundle"| 34     | "LOW"
+ "fetchQuery"                    | 24      | "LOW"
+ "createEphemeralGraph"          | 8       | "MEDIUM"
+```
+
+**Next unblocked task** — the graph knows what's ready to work on:
+```
+$ cypher-shell "MATCH (t:Task {status:'planned'})-[:PART_OF]->(m:Milestone)
+  WHERE NOT EXISTS { MATCH (t)-[:DEPENDS_ON]->(d:Task) WHERE d.status <> 'done' }
+  RETURN t.name, m.name LIMIT 3"
+
+ "Query graph for god files by role..."  | "RF-16: God File Refactoring"
+ "Create project registry..."            | "RF-17: Graph Write Gate"
+ "Pause broad expansion..."              | "N0: Audit Closure First"
+```
+
+**Enforcement gate** — blocks edits to dangerous untested code:
+```
+$ codegraph enforce src/core/parsers/plan-parser.ts --mode enforced
+
+🚫 BLOCK — 9 CRITICAL functions in untested file.
+   Write tests before editing. Gate will re-evaluate after TESTED_BY edges exist.
+```
+
+**Self-diagnosis** — the graph knows what it doesn't know:
+```
+$ npm run self-diagnosis
+
+📊 Health: 23/39 checks pass, 16 need attention
+❌ D15: 169 CRITICAL/HIGH functions have no test coverage
+❌ D17: 2,234 claims cannot reach source code (broken evidence chains)
+✅ D24: Governance stable across 70 snapshots — no regression
+✅ D32: No ENFORCED invariant violations — graph is in a legal state
+```
+
+This is the real graph, real queries, real output. Not mock data.
+
 ## Current State
 
 - **31,137 nodes, 54,511 edges** across 8 projects (1 code, 6 plan/governance, 1 test)
