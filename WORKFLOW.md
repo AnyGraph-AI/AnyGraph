@@ -212,6 +212,49 @@ Run: `npm test` — all tests (existing + new) should pass.
 
 ---
 
+## Step 7b: Annotate Task with Artifacts
+
+Before marking the task done, update its text in the plan file with backtick references to every file, function, and test artifact produced.
+
+### Why:
+The plan parser extracts backtick identifiers and creates HAS_CODE_EVIDENCE edges. Without annotation, evidence linking relies on fuzzy keyword matching. With annotation, the graph gets surgical links from tasks to the exact code they produced.
+
+### How:
+
+1. Check what you touched:
+```bash
+git diff --name-only HEAD~1
+```
+
+2. List new exports/functions you created (check the diff or source files).
+
+3. Append to the task line in the plan file. Include:
+   - **Source files** created or modified: `PainHeatmap.tsx`, `queries.ts`
+   - **Functions/components** created: `PainHeatmap`, `computeBasePain`
+   - **Test files**: `ui2-pain-heatmap.test.ts`
+   - **Test names** (key ones): `exports a PainHeatmap component`
+
+### Example:
+
+**Before:**
+```markdown
+- [x] Build Recharts Treemap component with dual color encoding
+```
+
+**After:**
+```markdown
+- [x] Build Recharts Treemap component with dual color encoding. Created `PainHeatmap.tsx` with `PainHeatmap` component. Updated `page.tsx` `Dashboard`. Added `painHeatmap` query to `queries.ts`. Tests: `ui2-pain-heatmap.test.ts` (`exports a PainHeatmap component`, `returns treemap-compatible data from live graph`).
+```
+
+### Rules:
+- Every file touched gets a backtick reference
+- Every new function/export gets a backtick reference
+- Every test file gets a backtick reference with key test names
+- Don't skip this step — it's the receipt system. Future agents and the graph depend on it.
+- When M8 (evidenceRole semantics) lands, these annotations enable `target` vs `proof` classification automatically.
+
+---
+
 ## Step 8: Query the Graph Again
 
 **This is the step you will be tempted to skip. Don't.**
@@ -290,7 +333,7 @@ After commit:
 | Question | Graph Can Answer? | How |
 |----------|-------------------|-----|
 | What's the next unblocked task? | ✅ | Task status + DEPENDS_ON |
-| Which files does this task touch? | ❌ | Planned tasks have 0 code evidence |
+| Which files does this task touch? | ✅ (done tasks) / ❌ (planned) | Done tasks have backtick annotations → HAS_CODE_EVIDENCE. Planned tasks have 0 evidence. |
 | Is this file tested? | ✅ | TESTED_BY edges (93 edges, 47 files) |
 | What's the risk tier of functions in this file? | ✅ | riskTier property on Function nodes |
 | Should the gate block this commit? | ✅ | `codegraph enforce` or `enforceEdit` MCP tool |
