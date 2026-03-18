@@ -11,7 +11,8 @@
  * 4. enrich:evidence-anchor (ANCHORED_TO edges, needs symbolHash)
  * 5. enrich:claim-project (SPANS_PROJECT edges)
  * 6. enrich:evidence-project (FROM_PROJECT edges)
- * 7. enrich:composite-risk (depends on git + vr-scope)
+ * 7. enrich:semantic-roles (RF-13 role tagging)
+ * 8. enrich:composite-risk (depends on git + vr-scope)
  */
 import { execSync } from 'node:child_process';
 import neo4j from 'neo4j-driver';
@@ -83,6 +84,7 @@ async function main() {
       'enrich:flags-edges',
       'enrich:entrypoint-edges',
       'enrich:state-fields',
+      'enrich:semantic-roles',
       'enrich:precompute-scores',
     ];
 

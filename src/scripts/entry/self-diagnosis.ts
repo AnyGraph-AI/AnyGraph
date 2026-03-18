@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * self-diagnosis — 36 epistemological health checks.
+ * self-diagnosis — 37 epistemological health checks.
  * Tests what the graph knows about its own limitations.
  *
  * Each check answers: "Does the graph know what it doesn't know?"
@@ -31,7 +31,7 @@ interface DiagResult {
   detail: Record<string, any>;
 }
 
-async function query(cypher: string, params: Record<string, any> = {}): Promise<Record<string, any>[]> {
+export async function query(cypher: string, params: Record<string, any> = {}): Promise<Record<string, any>[]> {
   const session = driver.session();
   try {
     const result = await session.run(cypher, params);
@@ -48,7 +48,7 @@ async function query(cypher: string, params: Record<string, any> = {}): Promise<
   }
 }
 
-async function getProjectId(): Promise<string> {
+export async function getProjectId(): Promise<string> {
   const rows = await query(
     `MATCH (p:Project) WHERE p.path IS NOT NULL
      RETURN p.projectId AS pid ORDER BY p.nodeCount DESC LIMIT 1`,
@@ -56,7 +56,7 @@ async function getProjectId(): Promise<string> {
   return rows[0]?.pid || 'proj_c0d3e9a1f200';
 }
 
-async function runDiagnosis(): Promise<DiagResult[]> {
+export async function runDiagnosis(): Promise<DiagResult[]> {
   const pid = await getProjectId();
   const results: DiagResult[] = [];
 
@@ -946,11 +946,34 @@ async function runDiagnosis(): Promise<DiagResult[]> {
     detail: { total: d36Total, embedded: d36Embedded, failed: d36Failed, missing: d36Missing },
   });
 
+  // ── D37: Semantic role coverage (RF-13) ──────
+  const d37 = await query(`
+    MATCH (sf:SourceFile {projectId: $pid})
+    RETURN count(sf) AS total,
+           sum(CASE WHEN sf.semanticRole IS NOT NULL THEN 1 ELSE 0 END) AS tagged,
+           sum(CASE WHEN sf.semanticRole = 'unclassified' THEN 1 ELSE 0 END) AS unclassified
+  `, { pid });
+  const d37Total = Number(d37[0]?.total ?? 0);
+  const d37Tagged = Number(d37[0]?.tagged ?? 0);
+  const d37Unclassified = Number(d37[0]?.unclassified ?? 0);
+  const d37Coverage = d37Total > 0 ? (d37Tagged / d37Total) : 0;
+  results.push({
+    id: 'D37', question: 'Do SourceFiles have semanticRole coverage? (RF-13)',
+    answer: `${d37Tagged}/${d37Total} tagged (${(d37Coverage * 100).toFixed(1)}%), unclassified=${d37Unclassified}`,
+    healthy: d37Coverage >= 0.99,
+    nextStep: d37Coverage < 0.99
+      ? `Run npm run enrich:semantic-roles. Then inspect missing roles: cypher-shell -u neo4j -p codegraph "MATCH (sf:SourceFile {projectId: '${pid}'}) WHERE sf.semanticRole IS NULL RETURN sf.name, sf.filePath LIMIT 20".`
+      : d37Unclassified > d37Total * 0.5
+        ? `Coverage is complete but many files are unclassified (${d37Unclassified}). Expand config/semantic-role-map.json rules to reduce unknowns where appropriate.`
+        : `Semantic role coverage is healthy. Use role-scoped queries for RF-14 god-file selection.`,
+    detail: { total: d37Total, tagged: d37Tagged, unclassified: d37Unclassified, coverage: d37Coverage },
+  });
+
   return results;
 }
 
-async function main() {
-  console.log('🔬 Self-Diagnosis — 36 Epistemological Health Checks\n');
+export async function main() {
+  console.log('🔬 Self-Diagnosis — 37 Epistemological Health Checks\n');
   console.log('   "Does the graph know what it doesn\'t know?"\n');
 
   try {
@@ -970,7 +993,7 @@ async function main() {
     }
 
     console.log('═'.repeat(65));
-    console.log(`📊 Health: ${healthy}/${results.length} checks pass (of 36), ${unhealthy} need attention`);
+    console.log(`📊 Health: ${healthy}/${results.length} checks pass (of 37), ${unhealthy} need attention`);
 
     // JSON output for machine consumption
     const jsonOutput = {
@@ -997,7 +1020,13 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+export async function closeDriver(): Promise<void> {
+  await driver.close();
+}
+
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/self-diagnosis.ts') || process.argv[1]?.endsWith('/self-diagnosis.js')) {
+  main().catch(err => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}

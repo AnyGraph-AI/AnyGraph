@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * probe-architecture — Run 25 structural queries against the live graph.
+ * probe-architecture — Run 45 structural queries against the live graph.
  * Instant credibility: one command shows what the graph knows about itself.
  *
  * Usage: npm run probe-architecture
@@ -27,7 +27,7 @@ interface ProbeResult {
   rows: Record<string, any>[];
 }
 
-async function query(cypher: string, params: Record<string, any> = {}): Promise<Record<string, any>[]> {
+export async function query(cypher: string, params: Record<string, any> = {}): Promise<Record<string, any>[]> {
   const session = driver.session();
   try {
     const result = await session.run(cypher, params);
@@ -44,7 +44,7 @@ async function query(cypher: string, params: Record<string, any> = {}): Promise<
   }
 }
 
-async function getProjectId(): Promise<string> {
+export async function getProjectId(): Promise<string> {
   const rows = await query(
     `MATCH (p:Project) WHERE p.path IS NOT NULL
      RETURN p.projectId AS pid ORDER BY p.nodeCount DESC LIMIT 1`,
@@ -52,7 +52,7 @@ async function getProjectId(): Promise<string> {
   return rows[0]?.pid || 'proj_c0d3e9a1f200';
 }
 
-async function runProbes(): Promise<ProbeResult[]> {
+export async function runProbes(): Promise<ProbeResult[]> {
   const pid = await getProjectId();
   const results: ProbeResult[] = [];
 
@@ -737,11 +737,45 @@ async function runProbes(): Promise<ProbeResult[]> {
     rows: q43,
   });
 
+  // Q44: RF-13 role distribution
+  const q44 = await query(`
+    MATCH (sf:SourceFile {projectId: $pid})
+    RETURN sf.semanticRole AS role, count(sf) AS cnt
+    ORDER BY cnt DESC
+  `, { pid });
+  results.push({
+    id: 'Q44', name: 'Semantic role distribution (RF-13)', category: 'Governance',
+    status: q44.length > 0 ? 'info' : 'warn',
+    summary: q44.length > 0 ? `${q44.length} semantic roles observed` : 'No semantic roles found',
+    rows: q44,
+  });
+
+  // Q45: RF-13 role-scoped god files by line threshold
+  const q45 = await query(`
+    UNWIND [
+      {role:'parser', threshold:500},
+      {role:'entry-script', threshold:400},
+      {role:'handler', threshold:300}
+    ] AS cfg
+    MATCH (sf:SourceFile {projectId: $pid})
+    WHERE sf.semanticRole = cfg.role AND coalesce(sf.lineCount,0) > cfg.threshold
+    RETURN cfg.role AS role, cfg.threshold AS threshold,
+           count(sf) AS godFiles,
+           collect(sf.name)[0..5] AS sampleFiles
+    ORDER BY role
+  `, { pid });
+  results.push({
+    id: 'Q45', name: 'Role-scoped god files (RF-13→RF-14 handoff)', category: 'Governance',
+    status: 'info',
+    summary: q45.length > 0 ? `${q45.reduce((s, r) => s + Number(r.godFiles || 0), 0)} god files above role thresholds` : 'No role-scoped god files above thresholds',
+    rows: q45,
+  });
+
   return results;
 }
 
-async function main() {
-  console.log('🏗️  Architecture Probe — 43 Queries Against Live Graph\n');
+export async function main() {
+  console.log('🏗️  Architecture Probe — 45 Queries Against Live Graph\n');
 
   try {
     const results = await runProbes();
@@ -791,7 +825,13 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+export async function closeDriver(): Promise<void> {
+  await driver.close();
+}
+
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/probe-architecture.ts') || process.argv[1]?.endsWith('/probe-architecture.js')) {
+  main().catch(err => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}

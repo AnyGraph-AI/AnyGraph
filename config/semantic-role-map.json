@@ -1,0 +1,19 @@
+{
+  "version": "rf13.v1",
+  "defaultRole": "unclassified",
+  "rules": [
+    { "pattern": "**/src/core/parsers/**", "role": "parser" },
+    { "pattern": "**/src/core/ir/**", "role": "ir" },
+    { "pattern": "**/src/scripts/enrichment/**", "role": "enrichment" },
+    { "pattern": "**/src/scripts/entry/**", "role": "entry-script" },
+    { "pattern": "**/src/scripts/verify/**", "role": "verification-script" },
+    { "pattern": "**/src/mcp/tools/**", "role": "mcp-tool" },
+    { "pattern": "**/src/mcp/handlers/**", "role": "handler" },
+    { "pattern": "**/src/storage/**", "role": "storage" },
+    { "pattern": "**/src/core/verification/**", "role": "verification" },
+    { "pattern": "**/src/cli/**", "role": "cli" },
+    { "pattern": "**/src/**/adapter*/**", "role": "adapter" },
+    { "pattern": "**/*adapter*.ts", "role": "adapter" },
+    { "pattern": "**/*service*.ts", "role": "service" }
+  ]
+}
