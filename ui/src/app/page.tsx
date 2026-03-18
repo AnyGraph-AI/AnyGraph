@@ -91,7 +91,7 @@ export default function Dashboard() {
   const { data: milestoneData } = useQuery({
     queryKey: ['milestone-progress'],
     queryFn: () =>
-      fetchQuery(QUERIES.milestoneProgress, {}),
+      fetchQuery(QUERIES.milestoneProgress, { projectId: 'plan_' }),
   });
 
   const loading = projectLoading || filesLoading || riskLoading || planLoading || heatmapLoading || fnHeatmapLoading || fnTableLoading;

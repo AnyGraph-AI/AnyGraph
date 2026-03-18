@@ -80,7 +80,7 @@ describe('[UI-4] milestoneProgress query', () => {
 
     const rows = await cachedQuery(
       (QUERIES as Record<string, string>).milestoneProgress,
-      {},
+      { projectId: 'plan_' },
     );
 
     expect(Array.isArray(rows)).toBe(true);

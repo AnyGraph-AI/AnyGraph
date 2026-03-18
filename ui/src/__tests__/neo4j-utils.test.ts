@@ -165,8 +165,7 @@ describe('Queries module', () => {
   it('all queries contain $projectId parameter (except ping and listProjects)', async () => {
     const { QUERIES } = await import('@/lib/queries');
     const filtered = Object.entries(QUERIES).filter(
-      // milestoneProgress intentionally reads all plan_* projects for cross-project view
-      ([k]) => k !== 'ping' && k !== 'listProjects' && k !== 'milestoneProgress',
+      ([k]) => k !== 'ping' && k !== 'listProjects',
     );
     for (const [name, query] of filtered) {
       expect(query).toContain('$projectId');

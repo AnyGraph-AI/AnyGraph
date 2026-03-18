@@ -247,10 +247,10 @@ export const QUERIES = {
     LIMIT $limit
   `,
 
-  /** Milestone progress — all projects */
+  /** Milestone progress — all plan projects (uses $projectId with STARTS WITH for plan_ prefix) */
   milestoneProgress: `
     MATCH (t:Task)-[:PART_OF]->(m:Milestone)
-    WHERE m.projectId STARTS WITH 'plan_'
+    WHERE m.projectId STARTS WITH $projectId
     WITH m,
          count(t) AS total,
          sum(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS done
