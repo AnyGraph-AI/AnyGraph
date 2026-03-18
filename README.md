@@ -1,6 +1,10 @@
 # AnythingGraph
 
+> *Your agent just broke 156 things with a commit called "clean up." You put your fist through the keyboard. AnythingGraph puts a gate in front of the commit.*
+
 **A knowledge graph that gives AI agents structural awareness before they edit code.**
+
+**You use 3–4 commands. The graph handles the rest.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](https://www.typescriptlang.org/)
@@ -10,7 +14,7 @@
 
 ---
 
-[The Problem](#the-problem) · [The Solution](#the-solution) · [See It Working](#this-is-running-right-now) · [Features](#features) · [Common Objections](#common-objections) · [Quick Start](#quick-start) · [CLI](#cli-commands) · [MCP Tools](#mcp-tools-57) · [Schema](#graph-schema) · [Architecture](#architecture) · [What's Next](#whats-next)
+[The Problem](#the-problem) · [The Solution](#the-solution) · [See It Working](#this-is-running-right-now) · [Features](#features) · [Who This Is For](#who-this-is-for) · [Common Objections](#common-objections) · [Quick Start](#quick-start) · [CLI](#cli-commands) · [MCP Tools](#mcp-tools-57) · [Schema](#graph-schema) · [Architecture](#architecture) · [What's Next](#whats-next)
 
 ---
 
@@ -122,6 +126,21 @@ This is the real graph, real queries, real output. Not mock data.
 | Plans | codegraph, plan-graph, runtime-graph, governance-org, hygiene-governance, hygiene-ai | Task/Milestone/Sprint tracking, auto-completion detection |
 | Document | IR scaffold | Document adapter proof-of-concept |
 | Claims | (cross-cutting) | Cross-layer synthesis, self-audit verdicts, hypotheses |
+
+## Who This Is For
+
+**Best for:**
+- Teams using AI coding agents on non-trivial codebases
+- Projects where breaking changes cost real time and money
+- Systems with high coupling, hidden dependencies, or shared infrastructure
+- Anyone tired of debugging what an agent broke at 2 AM
+
+**Not for:**
+- Throwaway scripts you'll delete next week
+- Hackathon prototypes where breaking things is the point
+- Projects where you genuinely don't care if something breaks
+
+If your project matters enough to have tests, it matters enough to have a graph.
 
 ## Common Objections
 
