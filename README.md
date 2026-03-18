@@ -10,7 +10,7 @@
 
 ---
 
-[The Problem](#the-problem) · [The Solution](#the-solution) · [See It Working](#this-is-running-right-now) · [Features](#features) · [But Isn't This Heavy?](#but-isnt-this-heavy) · [Quick Start](#quick-start) · [CLI](#cli-commands) · [MCP Tools](#mcp-tools-57) · [Schema](#graph-schema) · [Architecture](#architecture) · [What's Next](#whats-next)
+[The Problem](#the-problem) · [The Solution](#the-solution) · [See It Working](#this-is-running-right-now) · [Features](#features) · [Common Objections](#common-objections) · [Quick Start](#quick-start) · [CLI](#cli-commands) · [MCP Tools](#mcp-tools-57) · [Schema](#graph-schema) · [Architecture](#architecture) · [What's Next](#whats-next)
 
 ---
 
@@ -123,9 +123,11 @@ This is the real graph, real queries, real output. Not mock data.
 | Document | IR scaffold | Document adapter proof-of-concept |
 | Claims | (cross-cutting) | Cross-layer synthesis, self-audit verdicts, hypotheses |
 
-## But Isn't This Heavy?
+## Common Objections
 
-No. Common misconceptions:
+### "Isn't this heavy?"
+
+No.
 
 | Misconception | Reality |
 |---|---|
@@ -134,7 +136,41 @@ No. Common misconceptions:
 | "69-step pipeline sounds insane" | It's one command: `npm run done-check`. The 69 steps are what it does internally — you don't manage them. |
 | "You need a big codebase to justify this" | The self-graph (this repo) is 359 parsed files producing 20,322 nodes. But it's useful even on small projects — structure matters at any scale. |
 
-**The bottleneck isn't the tools — it's understanding what a knowledge graph gives you that file-level analysis can't.** Once you get that, the setup is `npm install` + `neo4j start` + `codegraph parse`.
+The bottleneck isn't the tools — it's understanding what a knowledge graph gives you that file-level analysis can't. Once you get that, the setup is `npm install` + `neo4j start` + `codegraph parse`.
+
+### "What if the graph is wrong?"
+
+Compared to what? The alternative is an agent with **zero** structural awareness.
+
+| Objection | Reality |
+|---|---|
+| "Incomplete call graph" | A graph that catches 80% of dependencies is still infinitely better than one that catches 0%. |
+| "Stale data" | Temporal confidence handles this — old evidence decays automatically. Stale data with a decay signal beats no data. |
+| "False positives in risk scoring" | A false positive makes you look before editing. The status quo (no scoring) means you edit blind. |
+| "Silent failures" | Exist in every codebase, with or without a graph. Not an argument against — it's the baseline condition. |
+
+Worst case: the graph is wrong, you ignore it, and you're back to normal development. It doesn't degrade below baseline. It only adds optional upside. **Signal + noise > pure noise. Always.**
+
+Teams find graph bugs the same way they find any bug — hit it, fix it, PR it. That's how linters, type systems, and CI all matured.
+
+### "Isn't the scope too wide?"
+
+Yes — deliberately. AnythingGraph's claim is that it gives you structural awareness to manage complexity. A small, tidy 10-file project doesn't prove that. So we scope-crept on purpose:
+
+- 359 files, 20,322 nodes, 57 tools, 69-step pipeline
+- 6 plan projects tracking their own progress in the graph
+- The plan graph ingests its own PLAN.md — the system tracks itself
+
+And the self-diagnosis tells you exactly where the gaps are:
+
+```
+❌ D15: 169 CRITICAL/HIGH functions have no test coverage
+❌ D17: 2,234 claims cannot reach source code
+✅ D24: Governance stable across 70 snapshots
+✅ D32: No ENFORCED invariant violations
+```
+
+23/39 health checks passing with 16 flagged isn't failure — it's the system doing what it claims: **telling you what needs attention instead of hiding it.** The scope is the stress test. The self-diagnosis is the proof it works under load.
 
 ## Quick Start
 
