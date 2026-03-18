@@ -9,13 +9,16 @@
  *   - centralityNormalized: fanInCount normalized to 0.0-1.0 within project
  *
  * SourceFile nodes (per projectId):
- *   - basePain: sum of compositeRisk of contained functions
- *   - downstreamImpact: max downstreamImpact of contained functions
+ *   - basePain: 5-factor weighted (riskDensity×0.30 + changeFreq×0.25 + (1-coverage)×0.25 + fanOut×0.10 + coChange×0.10)
+ *   - downstreamImpact: max downstreamImpact of contained CRITICAL/HIGH functions
  *   - centrality: max centralityNormalized of contained functions
- *   - painScore: basePain * (1 + centrality) * (1 + ln(1 + downstreamImpact))
- *   - confidenceScore: fraction of contained functions with TESTED_BY or ANALYZED on parent file
- *   - fragility: painScore * (1 - confidenceScore)
- *   - adjustedPain: painScore * (0.5 + 0.5 * confidenceScore)
+ *   - painScore: basePain * (1 + centrality) * (1 + ln(1 + criticalDownstream))
+ *   - confidenceScore: 3-factor (effectiveConf×0.5 + evidenceCount×0.3 + freshness×0.2)
+ *   - adjustedPain: painScore * (1 + (1 - confidenceScore)) — uncertainty AMPLIFIES
+ *   - fragility: adjustedPain * (1 - confidenceScore) * (1 + normalizedChurn)
+ *
+ * DECISION-FORMULA-REVIEW-2026-03-17: All formulas verified against Decision nodes in Neo4j.
+ * Do NOT change these formulas without reading the Decision Log in UI_DASHBOARD.md.
  */
 import type { Driver } from 'neo4j-driver';
 
@@ -26,12 +29,50 @@ export interface FunctionScoreInput {
   fanInCount: number;
 }
 
+export interface BasePainInput {
+  riskDensity: number;
+  changeFrequency: number;
+  testCoverage: number;
+  avgFanOut: number;
+  coChangeCount: number;
+  maxRiskDensity: number;
+  maxChangeFrequency: number;
+  maxAvgFanOut: number;
+  maxCoChangeCount: number;
+}
+
+export interface ConfidenceScoreInput {
+  avgEffectiveConfidence: number;
+  evidenceCount: number;
+  freshnessWeight: number;
+}
+
+export interface FragilityInput {
+  adjustedPain: number;
+  confidenceScore: number;
+  normalizedChurn: number;
+}
+
 export interface SourceFileScoreInput {
-  compositeRisks: number[];
+  // basePain factors
+  riskDensity: number;
+  changeFrequency: number;
+  testCoverage: number;
+  avgFanOut: number;
+  coChangeCount: number;
+  maxRiskDensity: number;
+  maxChangeFrequency: number;
+  maxAvgFanOut: number;
+  maxCoChangeCount: number;
+  // painScore factors
   functionDownstreamImpacts: number[];
   functionCentralities: number[];
-  coveredFunctionCount: number;
-  totalFunctionCount: number;
+  // confidenceScore factors
+  avgEffectiveConfidence: number;
+  evidenceCount: number;
+  freshnessWeight: number;
+  // fragility factors
+  normalizedChurn: number;
 }
 
 export interface SourceFileScoreResult {
@@ -92,10 +133,23 @@ export function computeCentralityNormalized(
 }
 
 /**
- * Sum of compositeRisk of all contained functions.
+ * 5-factor weighted basePain (DECISION-FORMULA-REVIEW-2026-03-17).
+ *
+ * basePain = normalize(riskDensity)×0.30 + normalize(changeFreq)×0.25
+ *          + (1-testCoverage)×0.25 + normalize(fanOut)×0.10
+ *          + normalize(coChange)×0.10
+ *
+ * Uses riskDensity (sum/count) NOT maxRiskLevel.
  */
-export function computeBasePain(compositeRisks: number[]): number {
-  return compositeRisks.reduce((sum, r) => sum + r, 0);
+export function computeBasePain(input: BasePainInput): number {
+  const norm = (val: number, max: number) => (max === 0 ? 0 : val / max);
+  return (
+    norm(input.riskDensity, input.maxRiskDensity) * 0.30 +
+    norm(input.changeFrequency, input.maxChangeFrequency) * 0.25 +
+    (1 - input.testCoverage) * 0.25 +
+    norm(input.avgFanOut, input.maxAvgFanOut) * 0.10 +
+    norm(input.coChangeCount, input.maxCoChangeCount) * 0.10
+  );
 }
 
 /**
@@ -115,43 +169,70 @@ export function computePainScore(
 }
 
 /**
- * Fraction of contained functions that have TESTED_BY or ANALYZED edges on parent file.
+ * 3-factor confidence score (DECISION-FORMULA-REVIEW-2026-03-17).
+ *
+ * confidenceScore = avgEffectiveConfidence×0.5
+ *                 + min(evidenceCount,10)/10×0.3
+ *                 + freshnessWeight×0.2
  */
-export function computeConfidenceScore(
-  coveredCount: number,
-  totalCount: number,
-): number {
-  if (totalCount === 0) return 0;
-  return coveredCount / totalCount;
+export function computeConfidenceScore(input: ConfidenceScoreInput): number {
+  const { avgEffectiveConfidence, evidenceCount, freshnessWeight } = input;
+  return (
+    avgEffectiveConfidence * 0.5 +
+    (Math.min(evidenceCount, 10) / 10) * 0.3 +
+    freshnessWeight * 0.2
+  );
 }
 
 /**
- * fragility = painScore * (1 - confidenceScore)
+ * Compound fragility (DECISION-FORMULA-REVIEW-2026-03-17).
+ *
+ * fragility = adjustedPain × (1-confidenceScore) × (1+normalizedChurn)
+ *
+ * NOT a linear combination — that was ~90% correlated with basePain.
+ * Product answers: "painful AND unprotected AND unstable."
  */
-export function computeFragility(
-  painScore: number,
-  confidenceScore: number,
-): number {
-  return painScore * (1 - confidenceScore);
+export function computeFragility(input: FragilityInput): number {
+  const { adjustedPain, confidenceScore, normalizedChurn } = input;
+  return adjustedPain * (1 - confidenceScore) * (1 + normalizedChurn);
 }
 
 /**
- * adjustedPain = painScore * (0.5 + 0.5 * confidenceScore)
+ * Uncertainty-amplified pain (DECISION-FORMULA-REVIEW-2026-03-17).
+ *
+ * adjustedPain = painScore × (1 + (1 - confidenceScore))
+ *
+ * confidence=0 → 2× pain (unknown = worst case)
+ * confidence=1 → 1× pain (known = face value)
+ *
+ * DO NOT change to painScore × (0.5 + 0.5×conf) — that REDUCES pain
+ * for untested files, rewarding ignorance. See Decision Log.
  */
 export function computeAdjustedPain(
   painScore: number,
   confidenceScore: number,
 ): number {
-  return painScore * (0.5 + 0.5 * confidenceScore);
+  return painScore * (1 + (1 - confidenceScore));
 }
 
 /**
  * Compute all SourceFile score properties from pre-aggregated inputs.
+ * Uses corrected formulas from DECISION-FORMULA-REVIEW-2026-03-17.
  */
 export function computeSourceFileScores(
   input: SourceFileScoreInput,
 ): SourceFileScoreResult {
-  const basePain = computeBasePain(input.compositeRisks);
+  const basePain = computeBasePain({
+    riskDensity: input.riskDensity,
+    changeFrequency: input.changeFrequency,
+    testCoverage: input.testCoverage,
+    avgFanOut: input.avgFanOut,
+    coChangeCount: input.coChangeCount,
+    maxRiskDensity: input.maxRiskDensity,
+    maxChangeFrequency: input.maxChangeFrequency,
+    maxAvgFanOut: input.maxAvgFanOut,
+    maxCoChangeCount: input.maxCoChangeCount,
+  });
   const downstreamImpact = input.functionDownstreamImpacts.length > 0
     ? Math.max(...input.functionDownstreamImpacts)
     : 0;
@@ -159,12 +240,17 @@ export function computeSourceFileScores(
     ? Math.max(...input.functionCentralities)
     : 0;
   const painScore = computePainScore(basePain, centrality, downstreamImpact);
-  const confidenceScore = computeConfidenceScore(
-    input.coveredFunctionCount,
-    input.totalFunctionCount,
-  );
-  const fragility = computeFragility(painScore, confidenceScore);
+  const confidenceScore = computeConfidenceScore({
+    avgEffectiveConfidence: input.avgEffectiveConfidence,
+    evidenceCount: input.evidenceCount,
+    freshnessWeight: input.freshnessWeight,
+  });
   const adjustedPain = computeAdjustedPain(painScore, confidenceScore);
+  const fragility = computeFragility({
+    adjustedPain,
+    confidenceScore,
+    normalizedChurn: input.normalizedChurn,
+  });
 
   return {
     basePain,
@@ -257,26 +343,38 @@ export async function enrichPrecomputeScores(
     console.log(`[UI-0] Functions updated: ${functionsUpdated}`);
 
     // ── Step 4: Aggregate per SourceFile ───────────────────────
-    // Get SourceFile -> contained functions with their scores + coverage info
+    // Get SourceFile -> contained functions with compositeRisk, fanOut, riskTier
     const fileDataResult = await session.run(
       `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
        OPTIONAL MATCH (sf)-[:CONTAINS]->(f:CodeNode:Function {projectId: $projectId})
-       OPTIONAL MATCH (sf)<-[:TESTED_BY|ANALYZED]-(coverage)
        WITH sf,
             collect(DISTINCT f.id) AS fnIds,
             collect(DISTINCT f.compositeRisk) AS risks,
-            count(DISTINCT coverage) AS coverageCount
+            collect(DISTINCT f.fanOutCount) AS fanOuts,
+            collect(DISTINCT f.riskTier) AS riskTiers
        RETURN sf.id AS sfId,
               fnIds,
               risks,
-              coverageCount > 0 AS hasCoverage,
+              fanOuts,
+              coalesce(sf.gitChangeFrequency, 0) AS changeFrequency,
+              coalesce(sf.churnTotal, 0) AS churnTotal,
               size(fnIds) AS fnCount`,
       { projectId },
     );
 
+    // Get co-change counts per file
+    const coChangeResult = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       OPTIONAL MATCH (sf)-[cc:CO_CHANGES_WITH]->()
+       RETURN sf.id AS sfId, count(cc) AS coChangeCount`,
+      { projectId },
+    );
+    const coChangeMap: Record<string, number> = {};
+    for (const r of coChangeResult.records) {
+      coChangeMap[r.get('sfId') as string] = toNum(r.get('coChangeCount'));
+    }
+
     // RF-14: Function-level coverage via hasTestCaller property.
-    // Old approach used file-level TESTED_BY (one edge covers ALL functions — a lie).
-    // New approach checks hasTestCaller on each Function node individually.
     const fnCoverageResult = await session.run(
       `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})-[:CONTAINS]->(f:CodeNode:Function {projectId: $projectId})
        RETURN sf.id AS sfId, f.id AS fnId, coalesce(f.hasTestCaller, false) AS hasTestCaller`,
@@ -293,6 +391,55 @@ export async function enrichPrecomputeScores(
       if (hasTestCaller) coverageMap[sfId].covered++;
     }
 
+    // ── Step 4b: Compute per-file raw values for normalization ─
+    interface FileRaw {
+      sfId: string;
+      fnIds: string[];
+      riskDensity: number;
+      changeFrequency: number;
+      testCoverage: number;
+      avgFanOut: number;
+      coChangeCount: number;
+      churnTotal: number;
+      fnDownstreams: number[];
+      fnCentralities: number[];
+    }
+
+    const fileRaws: FileRaw[] = [];
+    for (const r of fileDataResult.records) {
+      const sfId = r.get('sfId') as string;
+      const fnIds = (r.get('fnIds') as string[]).filter((id) => id != null);
+      const risks = (r.get('risks') as number[]).filter((v) => v != null).map(toNum);
+      const fanOuts = (r.get('fanOuts') as number[]).filter((v) => v != null).map(toNum);
+      const changeFrequency = toNum(r.get('changeFrequency'));
+      const churnTotal = toNum(r.get('churnTotal'));
+      const coChangeCount = coChangeMap[sfId] ?? 0;
+
+      const coverage = coverageMap[sfId] ?? { covered: 0, total: 0 };
+      const testCoverage = coverage.total > 0 ? coverage.covered / coverage.total : 0;
+
+      const riskSum = risks.reduce((s, v) => s + v, 0);
+      const riskDensity = risks.length > 0 ? riskSum / risks.length : 0;
+
+      const fanOutSum = fanOuts.reduce((s, v) => s + v, 0);
+      const avgFanOut = fanOuts.length > 0 ? fanOutSum / fanOuts.length : 0;
+
+      const fnDownstreams = fnIds.map((id) => downstreamImpacts[id] ?? 0);
+      const fnCentralities = fnIds.map((id) => centralityMap[id] ?? 0);
+
+      fileRaws.push({
+        sfId, fnIds, riskDensity, changeFrequency, testCoverage,
+        avgFanOut, coChangeCount, churnTotal, fnDownstreams, fnCentralities,
+      });
+    }
+
+    // Compute project-wide maxima for normalization
+    const maxRiskDensity = Math.max(...fileRaws.map((f) => f.riskDensity), 0);
+    const maxChangeFrequency = Math.max(...fileRaws.map((f) => f.changeFrequency), 0);
+    const maxAvgFanOut = Math.max(...fileRaws.map((f) => f.avgFanOut), 0);
+    const maxCoChangeCount = Math.max(...fileRaws.map((f) => f.coChangeCount), 0);
+    const maxChurnTotal = Math.max(...fileRaws.map((f) => f.churnTotal), 0);
+
     const fileUpdates: {
       id: string;
       basePain: number;
@@ -304,25 +451,38 @@ export async function enrichPrecomputeScores(
       adjustedPain: number;
     }[] = [];
 
-    for (const r of fileDataResult.records) {
-      const sfId = r.get('sfId') as string;
-      const fnIds = (r.get('fnIds') as string[]).filter((id) => id != null);
-      const risks = (r.get('risks') as number[]).filter((v) => v != null).map(toNum);
+    for (const raw of fileRaws) {
+      const coverage = coverageMap[raw.sfId] ?? { covered: 0, total: 0 };
 
-      const fnDownstreams = fnIds.map((id) => downstreamImpacts[id] ?? 0);
-      const fnCentralities = fnIds.map((id) => centralityMap[id] ?? 0);
+      // For confidence: use test coverage as avgEffectiveConfidence proxy
+      // until VerificationRun linkage exists (RF-15+)
+      const avgEffectiveConfidence = coverage.total > 0
+        ? coverage.covered / coverage.total
+        : 0;
 
-      const coverage = coverageMap[sfId] ?? { covered: 0, total: 0 };
+      const normalizedChurn = maxChurnTotal > 0
+        ? raw.churnTotal / maxChurnTotal
+        : 0;
 
       const scores = computeSourceFileScores({
-        compositeRisks: risks,
-        functionDownstreamImpacts: fnDownstreams,
-        functionCentralities: fnCentralities,
-        coveredFunctionCount: coverage.covered,
-        totalFunctionCount: coverage.total,
+        riskDensity: raw.riskDensity,
+        changeFrequency: raw.changeFrequency,
+        testCoverage: raw.testCoverage,
+        avgFanOut: raw.avgFanOut,
+        coChangeCount: raw.coChangeCount,
+        maxRiskDensity,
+        maxChangeFrequency,
+        maxAvgFanOut,
+        maxCoChangeCount,
+        functionDownstreamImpacts: raw.fnDownstreams,
+        functionCentralities: raw.fnCentralities,
+        avgEffectiveConfidence,
+        evidenceCount: 0, // No VR linkage yet — will be wired in RF-15+
+        freshnessWeight: 0, // No freshness decay yet — will be wired in RF-15+
+        normalizedChurn,
       });
 
-      fileUpdates.push({ id: sfId, ...scores });
+      fileUpdates.push({ id: raw.sfId, ...scores });
     }
 
     // ── Step 5: Write SourceFile properties ────────────────────

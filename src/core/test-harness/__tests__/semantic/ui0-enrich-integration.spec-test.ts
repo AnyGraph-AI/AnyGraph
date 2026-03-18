@@ -12,8 +12,8 @@
  * 5. Idempotent: running twice produces the same results
  * 6. Files with 0 functions get painScore=0 (not null)
  * 7. Confidence is between 0 and 1 inclusive
- * 8. Fragility = painScore * (1 - confidenceScore) — verified post-enrichment
- * 9. adjustedPain = painScore * (0.5 + 0.5 * confidenceScore) — verified post-enrichment
+ * 8. adjustedPain = painScore * (1 + (1 - confidenceScore)) — uncertainty AMPLIFIES
+ *    (DECISION-FORMULA-REVIEW-2026-03-17: DO NOT revert to 0.5+0.5*conf)
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import neo4j, { type Driver } from 'neo4j-driver';
@@ -164,37 +164,14 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     }
   });
 
-  it('fragility = painScore * (1 - confidenceScore) for all files', async () => {
+  it('adjustedPain = painScore * (1 + (1 - confidenceScore)) for all files', async () => {
     await enrichPrecomputeScores(driver, PROJECT_ID);
     const session = driver.session();
     try {
       const r = await session.run(
         `MATCH (sf:SourceFile {projectId: $pid})
          WHERE sf.painScore IS NOT NULL
-         WITH sf, sf.painScore * (1.0 - sf.confidenceScore) AS expected
-         WHERE abs(sf.fragility - expected) > 0.001
-         RETURN sf.name AS name, sf.fragility AS actual, expected`,
-        { pid: PROJECT_ID },
-      );
-      const mismatches = r.records.map((rec) => ({
-        name: rec.get('name'),
-        actual: rec.get('actual'),
-        expected: rec.get('expected'),
-      }));
-      expect(mismatches).toEqual([]);
-    } finally {
-      await session.close();
-    }
-  });
-
-  it('adjustedPain = painScore * (0.5 + 0.5 * confidenceScore) for all files', async () => {
-    await enrichPrecomputeScores(driver, PROJECT_ID);
-    const session = driver.session();
-    try {
-      const r = await session.run(
-        `MATCH (sf:SourceFile {projectId: $pid})
-         WHERE sf.painScore IS NOT NULL
-         WITH sf, sf.painScore * (0.5 + 0.5 * sf.confidenceScore) AS expected
+         WITH sf, sf.painScore * (1.0 + (1.0 - sf.confidenceScore)) AS expected
          WHERE abs(sf.adjustedPain - expected) > 0.001
          RETURN sf.name AS name, sf.adjustedPain AS actual, expected`,
         { pid: PROJECT_ID },
