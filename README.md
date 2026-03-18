@@ -10,7 +10,7 @@
 
 ---
 
-[The Problem](#the-problem) · [The Solution](#the-solution) · [See It Working](#this-is-running-right-now) · [Features](#features) · [Quick Start](#quick-start) · [CLI](#cli-commands) · [MCP Tools](#mcp-tools-57) · [Schema](#graph-schema) · [Architecture](#architecture) · [What's Next](#whats-next)
+[The Problem](#the-problem) · [The Solution](#the-solution) · [See It Working](#this-is-running-right-now) · [Features](#features) · [But Isn't This Heavy?](#but-isnt-this-heavy) · [Quick Start](#quick-start) · [CLI](#cli-commands) · [MCP Tools](#mcp-tools-57) · [Schema](#graph-schema) · [Architecture](#architecture) · [What's Next](#whats-next)
 
 ---
 
@@ -122,6 +122,19 @@ This is the real graph, real queries, real output. Not mock data.
 | Plans | codegraph, plan-graph, runtime-graph, governance-org, hygiene-governance, hygiene-ai | Task/Milestone/Sprint tracking, auto-completion detection |
 | Document | IR scaffold | Document adapter proof-of-concept |
 | Claims | (cross-cutting) | Cross-layer synthesis, self-audit verdicts, hypotheses |
+
+## But Isn't This Heavy?
+
+No. Common misconceptions:
+
+| Misconception | Reality |
+|---|---|
+| "Neo4j is heavy infrastructure" | ~200MB RAM idle. Runs on a laptop, a Raspberry Pi, a $5 VPS. It's a local service, not a cluster. |
+| "57 tools is too complex" | Those are MCP tools for agents, not buttons you click. Humans use 3-4 commands: `parse`, `done-check`, `probe`, `diagnose`. |
+| "69-step pipeline sounds insane" | It's one command: `npm run done-check`. The 69 steps are what it does internally — you don't manage them. |
+| "You need a big codebase to justify this" | The self-graph (this repo) is ~100 TypeScript files. It's useful at that scale. |
+
+**The bottleneck isn't the tools — it's understanding what a knowledge graph gives you that file-level analysis can't.** Once you get that, the setup is `npm install` + `neo4j start` + `codegraph parse`.
 
 ## Quick Start
 
