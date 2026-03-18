@@ -1,16 +1,42 @@
 # AnythingGraph
 
-A universal reasoning graph that gives AI agents structural awareness before they edit. Give it any structured knowledge — code, documents, plans — and it parses, cross-references, generates claims, detects drift, and self-audits.
+## The Problem
 
-**The thesis:** Understanding lives in connections, not individual files. A function's risk depends on who calls it, what plan tasks reference it, what state it mutates, and how often it changes. AnythingGraph makes all of that queryable.
+AI coding agents break things. They edit a function without knowing 47 other functions call it. They refactor a file without knowing it co-changes with three others every time. They mark a task "done" without knowing the code they wrote doesn't match the plan. They ship untested changes to critical infrastructure because they can't see risk.
+
+**The root cause:** Agents operate on files. Codebases operate on *connections* — call graphs, state flows, temporal coupling, plan dependencies. No single file contains this information. It emerges from the structure.
+
+## The Solution
+
+AnythingGraph parses your codebase into a Neo4j knowledge graph, then gives AI agents 57 tools to query it before they edit anything.
+
+**What agents can do with it:**
+- **"What breaks if I change this?"** → Query the call graph. See every caller, every state dependency, every co-changing file.
+- **"Is this safe to touch?"** → Check the risk tier. CRITICAL functions with high fan-in and no tests get blocked at the gate.
+- **"What should I work on next?"** → Query the plan graph. Get the next unblocked task with its dependencies resolved.
+- **"Did my change actually satisfy the plan?"** → Cross-reference: task → code evidence → test coverage → verification run.
+
+**Before AnythingGraph:** Agent reads a file, makes a change, hopes for the best.
+**After AnythingGraph:** Agent queries blast radius, checks risk tier, verifies test coverage, runs the enforcement gate, then edits — or gets blocked if the change is too dangerous without tests.
+
+```
+# An agent asks: "What's the blast radius of editing this function?"
+cypher-shell -u neo4j -p codegraph \
+  "MATCH (caller)-[:CALLS]->(f:Function {name: 'resolveRiskTier'})
+   RETURN caller.name, caller.riskTier, caller.filePath"
+
+# Result: 12 callers, 3 CRITICAL, 2 untested — gate blocks the edit until tests exist.
+```
+
+It's not just code. AnythingGraph ingests **plans, documents, and claims** into the same graph — so agents can reason across domains. A plan task links to the code it produced, which links to the tests that verify it, which links to the verification runs that grade confidence. One graph. Full traceability.
 
 ## Current State
 
-- **~20,300 nodes, ~43,400 edges** across 8 projects (1 code, 7 plan/governance)
+- **31,137 nodes, 54,511 edges** across 8 projects (1 code, 6 plan/governance, 1 test)
 - **6 operational layers:** Code, Plans, Governance, Claims, Reasoning, Self-Audit
 - **57 MCP tools** for agents to query, edit, and coordinate
-- **907 tests** across 60 suites (hermetic, deterministic)
-- **57-step governance pipeline** (`done-check`) with ground truth post-gate
+- **1,052 tests** across 73 suites (hermetic, deterministic)
+- **69-step governance pipeline** (`done-check`) with ground truth post-gate
 - **v0.1.0** — TypeScript parser, temporal confidence, enforcement gate, incremental recompute
 
 ## Projects in the Graph
@@ -106,14 +132,14 @@ node dist/mcp/mcp.server.js
 | `codegraph serve` | Start MCP server (57 tools) |
 | `codegraph status` | Show Neo4j and project status |
 | `codegraph risk <target>` | Query blast radius for a function |
-| `codegraph probe` | **43 architecture queries** — risk, coupling, entrypoints, verification coverage, shadow divergence, cross-layer analysis |
-| `codegraph diagnose` | **33 health checks** with next-step guidance — does the graph know what it doesn't know? |
+| `codegraph probe` | **46 architecture probes** — risk, coupling, entrypoints, verification coverage, shadow divergence, cross-layer analysis |
+| `codegraph diagnose` | **39 health checks** with next-step guidance — does the graph know what it doesn't know? |
 
 ### Governance Pipeline
 
 | Command | What It Does |
 |---------|-------------|
-| `npm run done-check` | Full 57-step pipeline: build → enrich → verify → integrity → TC → governance → metrics |
+| `npm run done-check` | Full 69-step pipeline: build → enrich → verify → integrity → TC → governance → hygiene → metrics |
 | `npm run rebuild-derived` | Delete all derived edges + properties, re-run 12 enrichment scripts in dependency order |
 | `npm run probe-architecture` | Same as `codegraph probe` |
 | `npm run self-diagnosis` | Same as `codegraph diagnose` |
@@ -373,7 +399,7 @@ cypher-shell -u neo4j -p codegraph "
 
 ## npm Scripts
 
-105 scripts total. Key categories:
+126 scripts total. Key categories:
 
 ### Build & Dev
 
@@ -382,7 +408,7 @@ cypher-shell -u neo4j -p codegraph "
 ### Governance Pipeline (done-check — 57+ steps)
 
 ```bash
-npm run done-check  # Full pipeline: build → enrich → verify → integrity
+npm run done-check  # Full 69-step pipeline: build → enrich → verify → integrity → hygiene
 ```
 
 Steps: `build` → `plan:refresh` → `edges:normalize` → `enrich:temporal-coupling` → `enrich:author-ownership` → `enrich:git-frequency` → `enrich:provenance` → `evidence:auto-link` → `plan:evidence:recompute` → ... → `integrity:verify`
@@ -430,7 +456,7 @@ Steps: `build` → `plan:refresh` → `edges:normalize` → `enrich:temporal-cou
 
 ## Test Infrastructure
 
-**907 tests, 60 suites** — all hermetic and deterministic.
+**1,052 tests, 73 suites** — all hermetic and deterministic.
 
 ### Test Harness Modules
 
@@ -473,7 +499,7 @@ codegraph/
 │   │   ├── verification/       # Temporal confidence, advisory gate, SARIF import
 │   │   └── test-harness/       # 12 hermetic test modules + fixtures
 │   ├── mcp/
-│   │   ├── tools/              # 43 tool files → 57 MCP tools
+│   │   ├── tools/              # 44 tool files → 57 MCP tools
 │   │   ├── handlers/           # Graph generation, traversal, incremental parse
 │   │   └── services/           # Watch manager, job manager
 │   ├── scripts/

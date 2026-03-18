@@ -320,7 +320,7 @@ After commit:
 
 - **Trust your recall of what's tested.** Query TESTED_BY every time.
 - **Trust your recall of risk tiers.** Query riskTier every time.
-- **Assume planned tasks link to files.** They don't — 0/433 have evidence.
+- **Assume planned tasks link to files.** Done tasks have HAS_CODE_EVIDENCE (200 edges), but planned tasks have 0.
 - **Skip Step 8.** Post-implementation graph check catches regressions that tests alone miss.
 - **Use `--no-verify` casually.** The gate exists for a reason.
 - **Optimize for speed.** Optimize for not shipping slop.
@@ -334,10 +334,10 @@ After commit:
 |----------|-------------------|-----|
 | What's the next unblocked task? | ✅ | Task status + DEPENDS_ON |
 | Which files does this task touch? | ✅ (done tasks) / ❌ (planned) | Done tasks have backtick annotations → HAS_CODE_EVIDENCE. Planned tasks have 0 evidence. |
-| Is this file tested? | ✅ | TESTED_BY edges (93 edges, 47 files) |
+| Is this file tested? | ✅ | TESTED_BY edges (161 edges, 80 TestFile nodes) |
 | What's the risk tier of functions in this file? | ✅ | riskTier property on Function nodes |
 | Should the gate block this commit? | ✅ | `codegraph enforce` or `enforceEdit` MCP tool |
-| What spec-test patterns exist? | ⚠️ Partial | 53 TestFile nodes, but recent RF tests not in graph |
+| What spec-test patterns exist? | ⚠️ Partial | 80 TestFile nodes in graph, but recent RF tests may lag |
 | What did diagnosis say? | ❌ | Stdout only, 0 AuditCheck nodes in graph |
 | What invariants must hold? | ❌ | Code only, not graph nodes |
 | What was blocked/approved last week? | ❌ | Gate decisions not persisted to graph |

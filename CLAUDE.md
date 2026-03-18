@@ -7,4 +7,4 @@ Read `README.md` for install, architecture, npm scripts.
 Read `PLAN_FORMAT.md` for plan file syntax when ingesting or writing plans.
 
 Neo4j: `bolt://localhost:7687`, auth `neo4j`/`codegraph`.
-Tests: `npm test` (926 tests, 61 suites). Gate: `npm run done-check`.
+Tests: `npm test` (1,052 tests, 73 suites). Gate: `npm run done-check`.

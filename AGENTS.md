@@ -135,8 +135,8 @@ You don't need MCP. `cypher-shell` works. MCP adds convenience.
 
 ### Health (run anytime)
 ```bash
-npm run probe-architecture     # 43 structural queries
-npm run self-diagnosis          # 33 health checks with next-step guidance
+npm run probe-architecture     # 46 structural probes
+npm run self-diagnosis          # 39 health checks with next-step guidance
 npm run done-check              # 57+ step integrity gate (MUST pass before declaring done)
 npm run rebuild-derived         # Nuke + rebuild all derived edges
 npm run graph:metrics           # Record GraphMetricsSnapshot node
@@ -317,6 +317,6 @@ OPENAI_API_KEY=required_for_embeddings  # in codegraph/.env
 5. **Source change → `npm run build` → restart watcher.** Runtime reads `dist/`, not `src/`.
 6. **Don't weaken tests to match bugged code.** If a test fails and the code is wrong, flag it and wait.
 7. **`npm run done-check` must exit 0** before any task is declared done.
-8. **907 tests, 60 suites.** Full suite in ~17s. No excuses for skipping.
+8. **1,052 tests.** Full suite in ~21s. No excuses for skipping.
 9. **Use `sourceCode` property** to read function implementations from graph before opening files.
 10. **Conventional Commits:** `type(scope): description` — feat, fix, docs, test, refactor, chore.
