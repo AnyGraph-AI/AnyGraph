@@ -79,7 +79,7 @@ function normalizePath(p: string): string {
 }
 
 async function queryFunctionsForFile(
-  session: neo4j.Session,
+  session: any,
   projectId: string,
   filePath: string,
 ): Promise<FunctionSpan[]> {

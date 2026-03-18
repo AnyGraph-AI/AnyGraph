@@ -155,7 +155,7 @@ export default function Dashboard() {
           {/* Legend */}
           <details className="bg-zinc-900 border border-zinc-800 rounded-lg">
             <summary className="px-4 py-3 cursor-pointer text-zinc-400 hover:text-zinc-200 text-sm font-medium">
-              📖 What do these metrics mean?
+              What do these metrics mean?
             </summary>
             <div className="px-4 pb-4 grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
               <div>
