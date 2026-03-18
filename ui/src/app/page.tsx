@@ -148,6 +148,71 @@ export default function Dashboard() {
             );
           })()}
 
+          {/* Legend */}
+          <details className="bg-zinc-900 border border-zinc-800 rounded-lg">
+            <summary className="px-4 py-3 cursor-pointer text-zinc-400 hover:text-zinc-200 text-sm font-medium">
+              📖 What do these metrics mean?
+            </summary>
+            <div className="px-4 pb-4 grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
+              <div>
+                <span className="text-zinc-200 font-medium">Pain</span>
+                <span className="text-zinc-500"> — </span>
+                <span className="text-zinc-400">
+                  How much it hurts to change this file. 5-factor weighted score: risk density, churn frequency, test coverage gaps, fan-out complexity, and co-change coupling. Higher = more painful to touch.
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-200 font-medium">Adjusted Pain</span>
+                <span className="text-zinc-500"> — </span>
+                <span className="text-zinc-400">
+                  Pain amplified by uncertainty. 0% confidence = 2× pain (unknown risk). 100% confidence = 1× pain (well-tested). Formula: pain × (1 + (1 − confidence)).
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-200 font-medium">Confidence</span>
+                <span className="text-zinc-500"> — </span>
+                <span className="text-zinc-400">
+                  How well-tested and verified this file is. 0% = no tests, no verification. 100% = fully covered. Currently binary (file-level); function-level gradient coming in RF-14.
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-200 font-medium">Fragility</span>
+                <span className="text-zinc-500"> — </span>
+                <span className="text-zinc-400">
+                  Compound risk: painful AND unprotected AND unstable. Formula: adjustedPain × (1 − confidence) × (1 + churn). Files with 100% confidence have 0 fragility.
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-200 font-medium">Centrality</span>
+                <span className="text-zinc-500"> — </span>
+                <span className="text-zinc-400">
+                  How connected this file is in the call graph. High centrality = many things depend on it. A change here ripples further.
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-200 font-medium">Downstream</span>
+                <span className="text-zinc-500"> — </span>
+                <span className="text-zinc-400">
+                  Log-damped count of CRITICAL/HIGH functions reachable from this file. Measures blast radius of a breaking change.
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-200 font-medium">Risk Tiers</span>
+                <span className="text-zinc-500"> — </span>
+                <span className="text-zinc-400">
+                  Function-level risk classification. CRITICAL = top 15%, HIGH = next 20%, MEDIUM = next 30%, LOW = bottom 35%. Based on composite risk scoring.
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-200 font-medium">Ready / Blocked</span>
+                <span className="text-zinc-500"> — </span>
+                <span className="text-zinc-400">
+                  Plan tasks with all dependencies satisfied (ready) vs tasks waiting on incomplete prerequisites (blocked).
+                </span>
+              </div>
+            </div>
+          </details>
+
           {/* Top Files by Pain */}
           {topFiles?.data && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
@@ -162,6 +227,7 @@ export default function Dashboard() {
                       <th className="text-right py-2 px-2">Pain</th>
                       <th className="text-right py-2 px-2">Fragility</th>
                       <th className="text-right py-2 px-2">Confidence</th>
+                      <th className="text-right py-2 px-2">Downstream</th>
                       <th className="text-right py-2 px-2">Centrality</th>
                     </tr>
                   </thead>
@@ -172,6 +238,7 @@ export default function Dashboard() {
                         adjustedPain: number;
                         fragility: number;
                         confidenceScore: number;
+                        downstreamImpact: number;
                         centrality: number;
                       }) => (
                         <tr key={file.name} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
@@ -200,6 +267,9 @@ export default function Dashboard() {
                             >
                               {(file.confidenceScore * 100).toFixed(0)}%
                             </span>
+                          </td>
+                          <td className="text-right py-2 px-2 text-zinc-300">
+                            {file.downstreamImpact?.toFixed(2) ?? '—'}
                           </td>
                           <td className="text-right py-2 px-2 text-zinc-300">
                             {file.centrality?.toFixed(3)}

@@ -22,6 +22,7 @@ export const QUERIES = {
   /** God Files — ranked table */
   godFiles: `
     MATCH (sf:SourceFile {projectId: $projectId})
+    WHERE sf.adjustedPain > 0
     RETURN sf.name AS name, sf.filePath AS filePath,
            sf.adjustedPain AS adjustedPain,
            sf.fragility AS fragility,
@@ -61,8 +62,16 @@ export const QUERIES = {
   riskDistribution: `
     MATCH (f:Function {projectId: $projectId})
     WHERE f.riskTier IS NOT NULL
-    RETURN f.riskTier AS tier, count(f) AS count
-    ORDER BY count DESC
+    WITH f.riskTier AS tier, count(f) AS count,
+         CASE f.riskTier
+           WHEN 'CRITICAL' THEN 0
+           WHEN 'HIGH' THEN 1
+           WHEN 'MEDIUM' THEN 2
+           WHEN 'LOW' THEN 3
+           ELSE 4
+         END AS severity
+    RETURN tier, count
+    ORDER BY severity ASC
   `,
 
   /** Project summary with maxima for normalization */
