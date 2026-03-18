@@ -82,8 +82,9 @@ describe('RF-5: Explainability Paths + Evidence Debt', () => {
     });
 
     it('pathHash is stable (same paths produce same hash)', async () => {
-      // Prior test already ran discoverExplainabilityPaths — hashes exist.
-      // Re-run once and verify hashes didn't change (idempotency).
+      // Run discover twice independently — same inputs must produce same hashes.
+      // This test is self-contained: does not depend on prior tests.
+      await discoverExplainabilityPaths(neo4j, PLAN_PROJECT);
       const first = await neo4j.run(
         `MATCH (ip:InfluencePath {projectId: $pid})
          RETURN ip.pathHash AS hash ORDER BY hash LIMIT 10`,
@@ -101,7 +102,7 @@ describe('RF-5: Explainability Paths + Evidence Debt', () => {
       for (let i = 0; i < first.length; i++) {
         expect(first[i].hash).toBe(second[i].hash);
       }
-    });
+    }, 15_000);
   });
 
   describe('bounded path-slice policy', () => {
