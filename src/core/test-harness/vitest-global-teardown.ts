@@ -1,7 +1,7 @@
 /**
  * Vitest Global Teardown — Clean ephemeral test data from Neo4j
  *
- * Spec tests create nodes with __test_ prefixed projectIds.
+ * Spec tests create nodes with __test_ / test_ prefixed projectIds.
  * If afterAll doesn't fire (parallel timeouts, SIGTERM), nodes leak
  * and break registry:identity:verify in done-check.
  *
@@ -21,8 +21,10 @@ export async function teardown(): Promise<void> {
   const session = driver.session();
   try {
     const result = await session.run(
-      `MATCH (n) WHERE n.projectId STARTS WITH '__test_'
-         OR n.projectId = 'other_project'
+      `MATCH (n)
+       WHERE n.projectId STARTS WITH '__test_'
+          OR n.projectId STARTS WITH 'test_'
+          OR n.projectId IN ['other_project', 'different_project_id']
        DETACH DELETE n
        RETURN count(n) AS deleted`,
     );

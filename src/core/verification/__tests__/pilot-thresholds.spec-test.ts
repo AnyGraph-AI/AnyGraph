@@ -16,8 +16,8 @@ import type { IrDocument } from '../../ir/ir-v1.schema.js';
 // Test Helpers + Fixtures
 // ═══════════════════════════════════════════════════════════════════════════
 
-const TEST_PROJECT_ID = 'test_vg5_pilot_spec';
-const TEST_PLAN_PROJECT_ID = 'test_plan_vg5_spec';
+const TEST_PROJECT_ID = '__test_vg5_pilot_spec';
+const TEST_PLAN_PROJECT_ID = '__test_plan_vg5_spec';
 
 interface CountSnapshot {
   nodeCount: number;

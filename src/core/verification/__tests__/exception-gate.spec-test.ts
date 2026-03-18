@@ -18,7 +18,7 @@ import { runAdvisoryGate, type AdvisoryGateResult } from '../advisory-gate.js';
 // TEST UTILITIES
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TEST_PROJECT_ID = 'test_exception_gate_proj';
+const TEST_PROJECT_ID = '__test_exception_gate_proj';
 
 /**
  * Helper to create a VerificationRun node for testing
