@@ -10,6 +10,8 @@ import { RealityGap } from '@/components/RealityGap';
 import { FragilityTable } from '@/components/FragilityTable';
 import { RiskDistributionChart } from '@/components/RiskDistributionChart';
 import { SafestAction } from '@/components/SafestAction';
+import { RiskOverTime } from '@/components/RiskOverTime';
+import { MilestoneProgress } from '@/components/MilestoneProgress';
 
 const DEFAULT_PROJECT_ID = 'proj_c0d3e9a1f200';
 
@@ -78,6 +80,18 @@ export default function Dashboard() {
     queryKey: ['safest-action'],
     queryFn: () =>
       fetchQuery(QUERIES.safestAction, { projectId: DEFAULT_PROJECT_ID, limit: 10 }),
+  });
+
+  const { data: riskOverTimeData } = useQuery({
+    queryKey: ['risk-over-time'],
+    queryFn: () =>
+      fetchQuery(QUERIES.riskOverTime, { projectId: DEFAULT_PROJECT_ID, limit: 30 }),
+  });
+
+  const { data: milestoneData } = useQuery({
+    queryKey: ['milestone-progress'],
+    queryFn: () =>
+      fetchQuery(QUERIES.milestoneProgress, {}),
   });
 
   const loading = projectLoading || filesLoading || riskLoading || planLoading || heatmapLoading || fnHeatmapLoading || fnTableLoading;
@@ -404,6 +418,23 @@ export default function Dashboard() {
                 Safest Next Action
               </h2>
               <SafestAction data={safestData?.data ?? []} />
+            </div>
+          </div>
+
+          {/* UI-4: Risk Over Time + Milestone Progress */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
+                Risk Over Time
+              </h2>
+              <RiskOverTime data={riskOverTimeData?.data ?? []} />
+            </div>
+
+            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
+                Milestone Progress
+              </h2>
+              <MilestoneProgress data={milestoneData?.data ?? []} />
             </div>
           </div>
         </>

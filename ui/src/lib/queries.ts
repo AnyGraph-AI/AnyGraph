@@ -234,6 +234,34 @@ export const QUERIES = {
     LIMIT $limit
   `,
 
+  /** Risk Over Time — governance metric snapshots */
+  riskOverTime: `
+    MATCH (g:GovernanceMetricSnapshot {projectId: $projectId})
+    RETURN g.timestamp AS timestamp,
+           coalesce(g.invariantViolations, 0) AS invariantViolations,
+           coalesce(g.interceptionRate, 0) AS interceptionRate,
+           coalesce(g.verificationRuns, 0) AS verificationRuns,
+           coalesce(g.gateFailures, 0) AS gateFailures,
+           coalesce(g.totalRegressionEvents, 0) AS regressions
+    ORDER BY g.timestamp ASC
+    LIMIT $limit
+  `,
+
+  /** Milestone progress — all projects */
+  milestoneProgress: `
+    MATCH (t:Task)-[:PART_OF]->(m:Milestone)
+    WHERE m.projectId STARTS WITH 'plan_'
+    WITH m,
+         count(t) AS total,
+         sum(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS done
+    RETURN m.name AS milestone,
+           m.projectId AS projectId,
+           toInteger(done) AS done,
+           toInteger(total) AS total,
+           round(toFloat(done) / total * 100) AS pct
+    ORDER BY m.projectId, m.name
+  `,
+
   /** Connection test */
   ping: `RETURN 1 AS ok`,
 } as const;
