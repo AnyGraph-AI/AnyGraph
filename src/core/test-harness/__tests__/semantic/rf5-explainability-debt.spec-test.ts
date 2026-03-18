@@ -82,8 +82,8 @@ describe('RF-5: Explainability Paths + Evidence Debt', () => {
     });
 
     it('pathHash is stable (same paths produce same hash)', async () => {
-      // Run twice — same paths should produce same hashes
-      await discoverExplainabilityPaths(neo4j, PLAN_PROJECT);
+      // Prior test already ran discoverExplainabilityPaths — hashes exist.
+      // Re-run once and verify hashes didn't change (idempotency).
       const first = await neo4j.run(
         `MATCH (ip:InfluencePath {projectId: $pid})
          RETURN ip.pathHash AS hash ORDER BY hash LIMIT 10`,
