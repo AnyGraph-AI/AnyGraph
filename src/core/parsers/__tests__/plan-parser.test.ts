@@ -10,7 +10,7 @@ import { parsePlanProject } from '../plan-parser.js';
 
 function parse(content: string, projectId = 'plan_test') {
   return parsePlanProject(projectId, 'test', [
-    { absolutePath: '/test/PLAN.md', relativePath: 'PLAN.md', content },
+    { path: '/test/PLAN.md', relativePath: 'PLAN.md', content },
   ]);
 }
 
