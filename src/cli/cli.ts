@@ -24,7 +24,7 @@ import { Command } from 'commander';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-function getVersion(): string {
+export function getVersion(): string {
   try {
     const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8'));
     return pkg.version || '0.0.0';
@@ -35,7 +35,7 @@ function getVersion(): string {
 
 // ─── Neo4j Connection ───────────────────────────────────────────────────────
 
-function getNeo4jConfig() {
+export function getNeo4jConfig() {
   return {
     uri: process.env.NEO4J_URI || 'bolt://localhost:7687',
     user: process.env.NEO4J_USER || 'neo4j',
@@ -43,7 +43,7 @@ function getNeo4jConfig() {
   };
 }
 
-async function checkNeo4j(): Promise<boolean> {
+export async function checkNeo4j(): Promise<boolean> {
   const config = getNeo4jConfig();
   try {
     const neo4j = await import('neo4j-driver');
@@ -58,7 +58,7 @@ async function checkNeo4j(): Promise<boolean> {
   }
 }
 
-async function queryNeo4j(cypher: string, params: Record<string, any> = {}): Promise<any[]> {
+export async function queryNeo4j(cypher: string, params: Record<string, any> = {}): Promise<any[]> {
   const config = getNeo4jConfig();
   const neo4j = await import('neo4j-driver');
   const driver = neo4j.default.driver(config.uri, neo4j.default.auth.basic(config.user, config.password));
@@ -81,7 +81,7 @@ async function queryNeo4j(cypher: string, params: Record<string, any> = {}): Pro
 
 // ─── Project Detection ──────────────────────────────────────────────────────
 
-function detectTsconfig(dir: string): string | null {
+export function detectTsconfig(dir: string): string | null {
   const candidates = ['tsconfig.json', 'tsconfig.build.json'];
   for (const c of candidates) {
     if (existsSync(join(dir, c))) return c;
@@ -89,12 +89,12 @@ function detectTsconfig(dir: string): string | null {
   return null;
 }
 
-function generateProjectId(dir: string): string {
+export function generateProjectId(dir: string): string {
   const hash = createHash('md5').update(resolve(dir)).digest('hex').slice(0, 12);
   return `proj_${hash}`;
 }
 
-function detectProjectName(dir: string): string {
+export function detectProjectName(dir: string): string {
   try {
     const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8'));
     return pkg.name || basename(dir);
@@ -105,7 +105,7 @@ function detectProjectName(dir: string): string {
 
 // ─── Commands ───────────────────────────────────────────────────────────────
 
-async function runInit() {
+export async function runInit() {
   console.log('🔧 CodeGraph Init\n');
   
   // Check Neo4j
@@ -159,7 +159,7 @@ async function runInit() {
   }
 }
 
-async function runParse(dir: string, options: { tsconfig?: string; projectId?: string; name?: string; fresh?: boolean }) {
+export async function runParse(dir: string, options: { tsconfig?: string; projectId?: string; name?: string; fresh?: boolean }) {
   const absDir = resolve(dir);
   if (!existsSync(absDir)) {
     console.error(`❌ Directory not found: ${absDir}`);
@@ -223,6 +223,44 @@ async function runParse(dir: string, options: { tsconfig?: string; projectId?: s
   const { CORE_TYPESCRIPT_SCHEMA } = await import('../core/config/schema.js');
   const { Neo4jService } = await import('../../src/storage/neo4j/neo4j.service.js');
   
+  // Flatten a Neo4jNode into a flat property map safe for Neo4j SET.
+  // Neo4j rejects MAP-valued properties; this extracts .properties,
+  // adds top-level scalars, and JSON-stringifies any remaining objects.
+  function flattenNodeForNeo4j(n: any, pid: string | undefined): Record<string, any> {
+    const flat: Record<string, any> = {
+      ...(n.properties ?? {}),
+      projectId: pid,
+    };
+    // Preserve id/nodeId at top level
+    if (n.id && !flat.id) flat.id = n.id;
+    if (n.nodeId) flat.nodeId = n.nodeId;
+    // labels array is fine (primitive array), but nested objects are not
+    if (n.labels) flat.labels = n.labels;
+    // Stringify any remaining MAP-valued properties
+    for (const [k, v] of Object.entries(flat)) {
+      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+        flat[k] = JSON.stringify(v);
+      }
+    }
+    return flat;
+  }
+
+  // Flatten edge properties: strip routing keys, stringify any MAP values
+  function flattenEdgeProps(edge: any): Record<string, any> {
+    const skipKeys = ['type', 'sourceId', 'targetId', 'startNodeId', 'endNodeId', 'id', 'properties'];
+    // If edge has a nested properties object, use that; otherwise use the edge itself
+    const raw = edge.properties ? { ...edge.properties } : { ...edge };
+    const props = Object.fromEntries(
+      Object.entries(raw).filter(([k]) => !skipKeys.includes(k)),
+    );
+    for (const [k, v] of Object.entries(props)) {
+      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+        props[k] = JSON.stringify(v);
+      }
+    }
+    return props;
+  }
+
   // Check for framework schemas
   let frameworkSchemas: any[] = [];
   const codegraphYml = join(absDir, '.codegraph.yml');
@@ -253,26 +291,35 @@ async function runParse(dir: string, options: { tsconfig?: string; projectId?: s
     
     for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
       const batch = nodes.slice(i, i + BATCH_SIZE);
-      await neo4jService.run(`
-        UNWIND $nodes AS node
-        CREATE (n:CodeNode)
-        SET n = node
-      `, { nodes: batch.map((n: any) => ({ ...n, projectId })) });
+      for (const node of batch) {
+        const props = flattenNodeForNeo4j(node, projectId);
+        const nodeLabels = (node as any).labels || ['CodeNode'];
+        delete props.labels;
+        const labelStr = nodeLabels.join(':');
+        await neo4jService.run(`
+          CREATE (n:${labelStr})
+          SET n = $props
+        `, { props });
+      }
+      const end = Math.min(i + BATCH_SIZE, nodes.length);
+      process.stdout.write(`  Nodes ${i + 1}-${end} of ${nodes.length}\r`);
     }
     
     for (let i = 0; i < edges.length; i += BATCH_SIZE) {
       const batch = edges.slice(i, i + BATCH_SIZE);
       for (const edge of batch) {
+        const srcId = (edge as any).sourceId || (edge as any).startNodeId;
+        const tgtId = (edge as any).targetId || (edge as any).endNodeId;
         await neo4jService.run(`
-          MATCH (s:CodeNode {nodeId: $sourceId, projectId: $projectId})
-          MATCH (t:CodeNode {nodeId: $targetId, projectId: $projectId})
+          MATCH (s:CodeNode {id: $sourceId, projectId: $projectId})
+          MATCH (t:CodeNode {id: $targetId, projectId: $projectId})
           CREATE (s)-[r:${edge.type}]->(t)
           SET r = $props
         `, { 
-          sourceId: (edge as any).sourceId, 
-          targetId: (edge as any).targetId, 
+          sourceId: srcId, 
+          targetId: tgtId, 
           projectId,
-          props: Object.fromEntries(Object.entries(edge).filter(([k]) => !['type', 'sourceId', 'targetId'].includes(k)))
+          props: flattenEdgeProps(edge),
         });
       }
     }
@@ -292,11 +339,14 @@ async function runParse(dir: string, options: { tsconfig?: string; projectId?: s
     for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
       const batch = nodes.slice(i, i + BATCH_SIZE);
       for (const node of batch) {
-        const props = { ...(node as any), projectId };
-        const nodeId = (node as any).nodeId || (node as any).id;
-        // Use MERGE on nodeId to preserve node identity and derived properties
+        const props = flattenNodeForNeo4j(node, projectId);
+        // Remove labels from props — they're Neo4j labels, not flat properties
+        delete props.labels;
+        const nodeId = props.id || (node as any).id;
+        // MERGE mode: node already exists with correct labels from prior parse
+        // Just update properties, don't re-apply labels (triggers constraint re-validation)
         await neo4jService.run(`
-          MERGE (n:CodeNode {nodeId: $nodeId, projectId: $projectId})
+          MERGE (n:CodeNode {id: $nodeId, projectId: $projectId})
           SET n += $props
         `, { nodeId, projectId, props });
       }
@@ -310,16 +360,18 @@ async function runParse(dir: string, options: { tsconfig?: string; projectId?: s
     for (let i = 0; i < edges.length; i += BATCH_SIZE) {
       const batch = edges.slice(i, i + BATCH_SIZE);
       for (const edge of batch) {
+        const srcId = (edge as any).sourceId || (edge as any).startNodeId;
+        const tgtId = (edge as any).targetId || (edge as any).endNodeId;
         await neo4jService.run(`
-          MATCH (s:CodeNode {nodeId: $sourceId, projectId: $projectId})
-          MATCH (t:CodeNode {nodeId: $targetId, projectId: $projectId})
+          MATCH (s:CodeNode {id: $sourceId, projectId: $projectId})
+          MATCH (t:CodeNode {id: $targetId, projectId: $projectId})
           MERGE (s)-[r:${edge.type}]->(t)
           SET r += $props
         `, { 
-          sourceId: (edge as any).sourceId, 
-          targetId: (edge as any).targetId, 
+          sourceId: srcId, 
+          targetId: tgtId, 
           projectId,
-          props: Object.fromEntries(Object.entries(edge).filter(([k]) => !['type', 'sourceId', 'targetId'].includes(k)))
+          props: flattenEdgeProps(edge),
         });
       }
       const end = Math.min(i + BATCH_SIZE, edges.length);
@@ -380,7 +432,7 @@ async function runParse(dir: string, options: { tsconfig?: string; projectId?: s
   }
 }
 
-async function runEnrich(projectIdArg?: string) {
+export async function runEnrich(projectIdArg?: string) {
   if (!await checkNeo4j()) {
     console.error('❌ Neo4j not running.');
     process.exit(1);
@@ -405,8 +457,8 @@ async function runEnrich(projectIdArg?: string) {
   
   console.log(`🔬 Enriching project: ${projectId}\n`);
   
-  // Step 1: Fan metrics + risk
-  console.log('1/6: Computing fan metrics + risk levels...');
+  // Step 1: Fan metrics + base riskLevel inputs
+  console.log('1/6: Computing fan metrics + base risk inputs...');
   await queryNeo4j(`
     MATCH (fn:CodeNode {projectId: $pid})
     WHERE fn.startLine IS NOT NULL
@@ -423,13 +475,7 @@ async function runEnrich(projectIdArg?: string) {
     WHERE fn.fanInCount IS NOT NULL AND fn.fanOutCount IS NOT NULL
     WITH fn,
       fn.fanInCount * fn.fanOutCount * log(toFloat(coalesce(fn.lineCount, 1)) + 1.0) AS risk
-    SET fn.riskLevel = risk,
-        fn.riskTier = CASE
-          WHEN risk > 500 THEN 'CRITICAL'
-          WHEN risk > 100 THEN 'HIGH'
-          WHEN risk > 20 THEN 'MEDIUM'
-          ELSE 'LOW'
-        END
+    SET fn.riskLevel = risk
   `, { pid: projectId });
   console.log('  ✅ Done');
   
@@ -530,7 +576,7 @@ async function runEnrich(projectIdArg?: string) {
   console.log('   • npx tsx embed-nodes.ts');
 }
 
-async function runServe() {
+export async function runServe() {
   console.log('🚀 Starting CodeGraph MCP server...\n');
   
   if (!await checkNeo4j()) {
@@ -550,7 +596,7 @@ async function runServe() {
   process.on('SIGTERM', () => child.kill('SIGTERM'));
 }
 
-async function runRisk(target: string) {
+export async function runRisk(target: string) {
   if (!await checkNeo4j()) {
     console.error('❌ Neo4j not running.');
     process.exit(1);
@@ -641,7 +687,7 @@ async function runRisk(target: string) {
   }
 }
 
-async function runAnalyze(dir: string, options: { tsconfig?: string; projectId?: string; name?: string }) {
+export async function runAnalyze(dir: string, options: { tsconfig?: string; projectId?: string; name?: string }) {
   console.log('🔍 CodeGraph Analyze — Parse + Enrich + Report\n');
   
   const absDir = resolve(dir);
@@ -655,7 +701,7 @@ async function runAnalyze(dir: string, options: { tsconfig?: string; projectId?:
   await runEnrich(projectId);
 }
 
-async function runStatus() {
+export async function runStatus() {
   console.log('📊 CodeGraph Status\n');
   
   const config = getNeo4jConfig();
@@ -767,7 +813,7 @@ program
     await import('../scripts/entry/self-diagnosis.js');
   });
 
-async function main() {
+export async function main() {
   try {
     await program.parseAsync();
   } catch (error) {
@@ -776,4 +822,6 @@ async function main() {
   }
 }
 
-main();
+if (import.meta.url === `file://${process.argv[1]}`) {
+  void main();
+}
