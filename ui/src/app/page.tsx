@@ -82,6 +82,14 @@ export default function Dashboard() {
 
   const loading = projectLoading || filesLoading || riskLoading || planLoading || heatmapLoading || fnHeatmapLoading || fnTableLoading;
 
+  // Compute average confidence from heatmap data
+  const avgConfidence = (() => {
+    const files = heatmapData?.data ?? [];
+    if (files.length === 0) return 1;
+    const sum = files.reduce((acc: number, f: Record<string, unknown>) => acc + (f.confidenceScore as number ?? 0), 0);
+    return sum / files.length;
+  })();
+
   return (
     <div className="space-y-8">
       <div>
@@ -95,6 +103,22 @@ export default function Dashboard() {
         <div className="text-zinc-500">Loading graph data...</div>
       ) : (
         <>
+          {/* Confidence Banner — auto-show when avg < 0.55 */}
+          {avgConfidence < 0.55 && (
+            <div className="bg-amber-950/50 border border-amber-800/50 rounded-lg px-4 py-3 flex items-center gap-3">
+              <span className="text-amber-400 text-lg">⚠️</span>
+              <div>
+                <p className="text-amber-200 text-sm font-medium">
+                  Low Project Confidence: {(avgConfidence * 100).toFixed(0)}%
+                </p>
+                <p className="text-amber-400/70 text-xs">
+                  Average file confidence is below 55%. Fragility scores are dampened to reduce noise.
+                  Improve test coverage (RF-14) and add runtime verification (RF-15) to raise confidence.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Project Summary */}
           {project?.data?.[0] && (
             <div className="grid grid-cols-4 gap-4">
@@ -371,7 +395,7 @@ export default function Dashboard() {
               <h2 className="text-lg font-semibold text-zinc-100 mb-3">
                 Fragility Index
               </h2>
-              <FragilityTable data={fragilityData?.data ?? []} />
+              <FragilityTable data={fragilityData?.data ?? []} avgConfidence={avgConfidence} />
             </div>
 
             {/* Safest Next Action */}

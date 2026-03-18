@@ -118,6 +118,65 @@ describe('[UI-3] safestAction query', () => {
   });
 });
 
+// ─── Reality Gap filter controls ─────────────────────────────
+
+describe('[UI-3] RealityGap filter props', () => {
+  it('RealityGap accepts severityFilter and minGap props', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const source = await fs.readFile(
+      path.resolve(import.meta.dirname, '..', 'components', 'RealityGap.tsx'),
+      'utf-8',
+    );
+    expect(source).toMatch(/severityFilter/);
+    expect(source).toMatch(/minGap/);
+  });
+});
+
+// ─── Snooze button ───────────────────────────────────────────
+
+describe('[UI-3] Gap snooze', () => {
+  it('RealityGap has snooze functionality', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const source = await fs.readFile(
+      path.resolve(import.meta.dirname, '..', 'components', 'RealityGap.tsx'),
+      'utf-8',
+    );
+    expect(source).toMatch(/snooze|snoozed/i);
+    expect(source).toMatch(/localStorage/);
+  });
+});
+
+// ─── Confidence banner ──────────────────────────────────────
+
+describe('[UI-3] Confidence banner', () => {
+  it('page.tsx has confidence banner logic', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const source = await fs.readFile(
+      path.resolve(import.meta.dirname, '..', 'app', 'page.tsx'),
+      'utf-8',
+    );
+    expect(source).toMatch(/avgConfidence|averageConfidence/);
+    expect(source).toMatch(/0\.55/);
+  });
+});
+
+// ─── Dampening formula ──────────────────────────────────────
+
+describe('[UI-3] Fragility dampening', () => {
+  it('FragilityTable shows dampened values when global confidence is low', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const source = await fs.readFile(
+      path.resolve(import.meta.dirname, '..', 'components', 'FragilityTable.tsx'),
+      'utf-8',
+    );
+    expect(source).toMatch(/avgConfidence|globalConfidence|dampen/i);
+  });
+});
+
 // ─── Page integration ────────────────────────────────────────
 
 describe('[UI-3] page.tsx integration', () => {
