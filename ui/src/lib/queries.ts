@@ -85,6 +85,41 @@ export const QUERIES = {
     ORDER BY p.nodeCount DESC
   `,
 
+  /** Plan health — milestone + task status summary */
+  planHealth: `
+    MATCH (t:Task)-[:PART_OF]->(m:Milestone)
+    WHERE m.projectId = $planProjectId
+    WITH m, t,
+         CASE WHEN t.status = 'done' THEN 1 ELSE 0 END AS isDone
+    WITH m,
+         count(t) AS taskCount,
+         sum(isDone) AS doneCount
+    WITH collect({
+           name: m.name,
+           total: taskCount,
+           done: doneCount,
+           status: m.status
+         }) AS milestones,
+         sum(taskCount) AS totalTasks,
+         sum(doneCount) AS doneTasks
+    UNWIND milestones AS ms
+    WITH milestones, totalTasks, doneTasks,
+         sum(CASE WHEN ms.done = ms.total THEN 1 ELSE 0 END) AS doneMilestones,
+         size(milestones) AS totalMilestones
+    MATCH (t2:Task {status: 'planned'})-[:PART_OF]->(m2:Milestone)
+    WHERE m2.projectId = $planProjectId
+    OPTIONAL MATCH (t2)-[:DEPENDS_ON]->(dep:Task)
+    WHERE dep.status <> 'done'
+    WITH totalTasks, doneTasks, totalMilestones, doneMilestones,
+         t2, collect(dep) AS openDeps
+    WITH totalTasks, doneTasks, totalMilestones, doneMilestones,
+         sum(CASE WHEN size(openDeps) = 0 THEN 1 ELSE 0 END) AS readyTasks,
+         sum(CASE WHEN size(openDeps) > 0 THEN 1 ELSE 0 END) AS blockedTasks
+    RETURN totalMilestones, doneMilestones,
+           totalTasks, doneTasks,
+           readyTasks, blockedTasks
+  `,
+
   /** Connection test */
   ping: `RETURN 1 AS ok`,
 } as const;

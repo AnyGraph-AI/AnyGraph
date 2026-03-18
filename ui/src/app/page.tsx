@@ -34,7 +34,13 @@ export default function Dashboard() {
       fetchQuery(QUERIES.riskDistribution, { projectId: DEFAULT_PROJECT_ID }),
   });
 
-  const loading = projectLoading || filesLoading || riskLoading;
+  const { data: planHealth, isLoading: planLoading } = useQuery({
+    queryKey: ['plan-health'],
+    queryFn: () =>
+      fetchQuery(QUERIES.planHealth, { planProjectId: 'plan_codegraph' }),
+  });
+
+  const loading = projectLoading || filesLoading || riskLoading || planLoading;
 
   return (
     <div className="space-y-8">
@@ -55,7 +61,7 @@ export default function Dashboard() {
               {[
                 { label: 'Project', value: project.data[0].name },
                 { label: 'Nodes', value: project.data[0].nodeCount?.toLocaleString() },
-                { label: 'Max Pain', value: project.data[0].maxPainScore?.toFixed(1) },
+                { label: 'Max Pain', value: project.data[0].maxAdjustedPain?.toFixed(1) },
                 { label: 'Max Fragility', value: project.data[0].maxFragility?.toFixed(1) },
               ].map((card) => (
                 <div key={card.label} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
@@ -91,6 +97,56 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+
+          {/* Project Health */}
+          {planHealth?.data?.[0] && (() => {
+            const h = planHealth.data[0];
+            const milestonePct = h.totalMilestones > 0
+              ? Math.round((h.doneMilestones / h.totalMilestones) * 100)
+              : 0;
+            const taskPct = h.totalTasks > 0
+              ? Math.round((h.doneTasks / h.totalTasks) * 100)
+              : 0;
+            return (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+                <h2 className="text-lg font-semibold text-zinc-100 mb-3">Project Health</h2>
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-zinc-100">
+                      {h.doneMilestones}/{h.totalMilestones}
+                    </div>
+                    <div className="text-sm text-zinc-400 mt-1">Milestones ({milestonePct}%)</div>
+                    <div className="w-full bg-zinc-800 rounded-full h-1.5 mt-2">
+                      <div
+                        className="bg-emerald-500 h-1.5 rounded-full"
+                        style={{ width: `${milestonePct}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-zinc-100">
+                      {h.doneTasks}/{h.totalTasks}
+                    </div>
+                    <div className="text-sm text-zinc-400 mt-1">Tasks ({taskPct}%)</div>
+                    <div className="w-full bg-zinc-800 rounded-full h-1.5 mt-2">
+                      <div
+                        className="bg-emerald-500 h-1.5 rounded-full"
+                        style={{ width: `${taskPct}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-emerald-400">{h.readyTasks}</div>
+                    <div className="text-sm text-zinc-400 mt-1">Ready (unblocked)</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-orange-400">{h.blockedTasks}</div>
+                    <div className="text-sm text-zinc-400 mt-1">Blocked</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Top Files by Pain */}
           {topFiles?.data && (
