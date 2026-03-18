@@ -190,6 +190,23 @@ Or:
 
 **⚠️ Do NOT use commas as separators.** Task names commonly contain commas (e.g., "Add exception enforcement pass (expiry, approval mode, ticket linkage)"). The parser splits on semicolons only.
 
+### Code Evidence Exceptions (`NO_CODE_EVIDENCE_OK`)
+
+For done tasks that intentionally have no code artifact (manual verification steps, config changes, meetings), use `NO_CODE_EVIDENCE_OK` to suppress false-positive evidence gaps.
+
+**Format:** `NO_CODE_EVIDENCE_OK(reason)`
+
+```markdown
+- [x] Run precompute once and verify: 337 SourceFiles, 769 Functions, all scored. NO_CODE_EVIDENCE_OK(manual-verification-step)
+```
+
+**Rules:**
+- Inline in checkbox text or on standalone next line
+- `reason` must describe why no code artifact exists
+- Sets `noCodeEvidenceOK` property on Task node
+- Evidence gap queries filter `WHERE t.noCodeEvidenceOK IS NULL` to exclude these tasks
+- Don't use this to skip annotation — only for tasks that genuinely produce no files
+
 ### Dependency Exceptions (`NO_DEPENDS_OK`)
 
 For tasks that intentionally have no dependencies (e.g., foundational root tasks), use the `NO_DEPENDS_OK` directive to suppress dependency hygiene violations.
