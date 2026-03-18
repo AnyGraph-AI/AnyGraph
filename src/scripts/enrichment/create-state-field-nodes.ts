@@ -43,7 +43,7 @@ interface FieldData {
   startLine: number;
   endLine: number;
   mutable: boolean;
-  kind: 'class-property' | 'module-var';
+  kind: 'class-property' | 'module-var' | 'module-const-singleton';
   typeName?: string;
   hasInitializer: boolean;
 }
@@ -91,7 +91,6 @@ export function extractMutableFields(project: Project): FieldData[] {
     for (const varStmt of sourceFile.getVariableStatements()) {
       for (const decl of varStmt.getDeclarations()) {
         const declarationKind = varStmt.getDeclarationKind();
-        if (declarationKind === 'const') continue;  // Only mutable (let/var)
 
         // Only top-level (file-scope)
         if (decl.getFirstAncestorByKind(SyntaxKind.FunctionDeclaration) ||
@@ -100,6 +99,17 @@ export function extractMutableFields(project: Project): FieldData[] {
           continue;
         }
 
+        const initializer = decl.getInitializer();
+        const constSingleton = declarationKind === 'const' && (
+          Node.isCallExpression(initializer as Node) ||
+          Node.isNewExpression(initializer as Node) ||
+          Node.isObjectLiteralExpression(initializer as Node) ||
+          Node.isArrayLiteralExpression(initializer as Node)
+        );
+
+        // Skip immutable const primitives/literals; include let/var and const singletons
+        if (declarationKind === 'const' && !constSingleton) continue;
+
         fields.push({
           name: decl.getName(),
           filePath,
@@ -107,7 +117,7 @@ export function extractMutableFields(project: Project): FieldData[] {
           startLine: decl.getStartLineNumber(),
           endLine: decl.getEndLineNumber(),
           mutable: true,
-          kind: 'module-var',
+          kind: constSingleton ? 'module-const-singleton' : 'module-var',
           typeName: decl.getType()?.getText()?.slice(0, 100),
           hasInitializer: decl.hasInitializer(),
         });
@@ -178,6 +188,53 @@ export function extractStateAccess(project: Project, fields: FieldData[], projec
         }
       }
     }
+
+    // Module-scope variable/const-singleton access from functions and methods
+    const moduleFields = fields.filter((f) => f.filePath === filePath && f.className === null);
+    if (moduleFields.length === 0) continue;
+
+    const functionLikeNodes = [
+      ...sourceFile.getFunctions(),
+      ...sourceFile.getClasses().flatMap((c) => c.getMethods()),
+    ];
+
+    for (const fn of functionLikeNodes) {
+      const fnName = fn.getName?.() ?? 'anonymous';
+      const fnBody = fn.getBody?.()?.getText?.() ?? '';
+      if (!fnBody) continue;
+
+      for (const field of moduleFields) {
+        const escaped = field.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const fId = fieldId(projectId, field.filePath, field.className, field.name);
+
+        const propertyAssign = new RegExp(`\\b${escaped}\\.\\w+\\s*[=!](?!=)`, 'g');
+        const singletonMutatorCall = new RegExp(`\\b${escaped}\\.(set|add|push|splice|delete|clear|update|insert|remove|assign|query|execute|save|write)\\s*\\(`, 'g');
+        const anyMemberAccess = new RegExp(`\\b${escaped}\\.\\w+`, 'g');
+
+        const writeHits = (fnBody.match(propertyAssign)?.length ?? 0) + (fnBody.match(singletonMutatorCall)?.length ?? 0);
+        const readHits = fnBody.match(anyMemberAccess)?.length ?? 0;
+
+        if (writeHits > 0) {
+          accesses.push({
+            fieldId: fId,
+            accessorName: fnName,
+            accessorFilePath: filePath,
+            accessorStartLine: fn.getStartLineNumber(),
+            isWrite: true,
+          });
+        }
+
+        if (readHits > writeHits) {
+          accesses.push({
+            fieldId: fId,
+            accessorName: fnName,
+            accessorFilePath: filePath,
+            accessorStartLine: fn.getStartLineNumber(),
+            isWrite: false,
+          });
+        }
+      }
+    }
   }
 
   return accesses;
@@ -196,7 +253,7 @@ export async function enrichStateFieldNodes(driver: Driver): Promise<{
   });
 
   const fields = extractMutableFields(tsMorphProject);
-  console.log(`[GC-8] Found ${fields.length} mutable fields (${fields.filter(f => f.kind === 'class-property').length} class, ${fields.filter(f => f.kind === 'module-var').length} module)`);
+  console.log(`[GC-8] Found ${fields.length} mutable fields (${fields.filter(f => f.kind === 'class-property').length} class, ${fields.filter(f => f.kind === 'module-var').length} module-var, ${fields.filter(f => f.kind === 'module-const-singleton').length} module-const-singleton)`);
 
   if (fields.length === 0) {
     return { fieldNodes: 0, stateEdges: 0 };
@@ -281,7 +338,8 @@ export async function enrichStateFieldNodes(driver: Driver): Promise<{
            AND fn.name = $fnName
          WITH field, fn LIMIT 1
          MERGE (fn)-[r:${edgeType}]->(field)
-         ON CREATE SET r.derived = true, r.source = 'state-field-enrichment'
+         ON CREATE SET r.derived = true, r.source = 'state-field-enrichment', r.projectId = $projectId
+         ON MATCH SET r.projectId = $projectId
          RETURN count(r) AS cnt`,
         {
           fieldId: access.fieldId,

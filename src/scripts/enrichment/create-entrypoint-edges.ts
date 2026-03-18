@@ -39,16 +39,16 @@ function deterministicId(projectId: string, ...parts: string[]): string {
 }
 
 interface EntrypointData {
-  name: string;        // e.g. 'tool:self_audit' or 'command:parse'
-  kind: string;        // 'tool' or 'command'
-  framework: string;   // 'mcp' or 'commander'
+  name: string;        // e.g. 'tool:self_audit' or 'command:parse' or 'route:GET /users'
+  kind: string;        // 'tool' | 'command' | 'route'
+  framework: string;   // 'mcp' | 'commander' | 'express' | 'fastify' | 'nest'
   filePath: string;
   startLine: number;
   handlerName?: string;  // name of handler function if identifiable
   handlerFilePath?: string;
 }
 
-function extractMcpRegistrations(project: Project): EntrypointData[] {
+export function extractMcpRegistrations(project: Project): EntrypointData[] {
   const results: EntrypointData[] = [];
 
   for (const sourceFile of project.getSourceFiles()) {
@@ -106,7 +106,7 @@ function extractMcpRegistrations(project: Project): EntrypointData[] {
   return results;
 }
 
-function extractCommanderRegistrations(project: Project): EntrypointData[] {
+export function extractCommanderRegistrations(project: Project): EntrypointData[] {
   const results: EntrypointData[] = [];
 
   for (const sourceFile of project.getSourceFiles()) {
@@ -165,6 +165,109 @@ function extractCommanderRegistrations(project: Project): EntrypointData[] {
   return results;
 }
 
+export function extractWebFrameworkRegistrations(project: Project): EntrypointData[] {
+  const results: EntrypointData[] = [];
+  const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'all']);
+  const NEST_DECORATORS = new Set(['Get', 'Post', 'Put', 'Patch', 'Delete', 'Options', 'Head', 'All']);
+
+  for (const sourceFile of project.getSourceFiles()) {
+    const filePath = sourceFile.getFilePath();
+    if (filePath.includes('node_modules') || filePath.includes('__tests__')) continue;
+
+    sourceFile.forEachDescendant((node) => {
+      if (!Node.isCallExpression(node)) return;
+      const expr = node.getExpression();
+      if (!Node.isPropertyAccessExpression(expr)) return;
+
+      const methodName = expr.getName();
+      const receiver = expr.getExpression();
+      const args = node.getArguments();
+
+      // Express/Fastify style: app.get('/path', handler), router.post('/x', m1, handler)
+      if (HTTP_METHODS.has(methodName.toLowerCase()) && args.length >= 2) {
+        const first = args[0];
+        const handlerArg = args[args.length - 1];
+        const hasPathLikeArg = Node.isStringLiteral(first) || first.getText().startsWith('`/');
+
+        if (hasPathLikeArg) {
+          const pathText = first.getText().replace(/[`'"]/g, '');
+          const framework = Node.isIdentifier(receiver)
+            ? (receiver.getText().toLowerCase().includes('fastify') ? 'fastify' : 'express')
+            : 'express';
+
+          results.push({
+            name: `route:${methodName.toUpperCase()} ${pathText}`,
+            kind: 'route',
+            framework,
+            filePath,
+            startLine: node.getStartLineNumber(),
+            handlerName: Node.isIdentifier(handlerArg) ? handlerArg.getText() : undefined,
+          });
+        }
+      }
+
+      // Fastify route object: fastify.route({ method: 'GET', url: '/x', handler })
+      if (methodName === 'route' && args.length >= 1 && Node.isObjectLiteralExpression(args[0])) {
+        const obj = args[0];
+        const methodProp = obj.getProperty('method');
+        const urlProp = obj.getProperty('url');
+        const handlerProp = obj.getProperty('handler');
+
+        const methodText = methodProp && Node.isPropertyAssignment(methodProp)
+          ? methodProp.getInitializer()?.getText().replace(/[`'"]/g, '')
+          : 'ROUTE';
+        const urlText = urlProp && Node.isPropertyAssignment(urlProp)
+          ? urlProp.getInitializer()?.getText().replace(/[`'"]/g, '')
+          : '/';
+
+        let handlerName: string | undefined;
+        if (handlerProp && Node.isPropertyAssignment(handlerProp)) {
+          const init = handlerProp.getInitializer();
+          if (init && Node.isIdentifier(init)) handlerName = init.getText();
+        }
+
+        results.push({
+          name: `route:${(methodText ?? 'ROUTE').toUpperCase()} ${urlText ?? '/'}`,
+          kind: 'route',
+          framework: 'fastify',
+          filePath,
+          startLine: node.getStartLineNumber(),
+          handlerName,
+        });
+      }
+    });
+
+    // NestJS decorators: @Controller('/base') + @Get('/child')
+    for (const cls of sourceFile.getClasses()) {
+      const controller = cls.getDecorator('Controller');
+      if (!controller) continue;
+
+      const controllerPath = controller.getArguments()[0]?.getText()?.replace(/[`'"]/g, '') ?? '';
+
+      for (const method of cls.getMethods()) {
+        for (const deco of method.getDecorators()) {
+          const dName = deco.getName();
+          if (!NEST_DECORATORS.has(dName)) continue;
+
+          const routeArg = deco.getArguments()[0]?.getText()?.replace(/[`'"]/g, '') ?? '';
+          const fullPath = `${controllerPath}/${routeArg}`.replace(/\/+/g, '/');
+
+          results.push({
+            name: `route:${dName.toUpperCase()} ${fullPath === '' ? '/' : fullPath}`,
+            kind: 'route',
+            framework: 'nest',
+            filePath,
+            startLine: method.getStartLineNumber(),
+            handlerName: method.getName(),
+          });
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
 export async function enrichEntrypointEdges(driver: Driver): Promise<{
   entrypoints: number;
   dispatchEdges: number;
@@ -180,9 +283,10 @@ export async function enrichEntrypointEdges(driver: Driver): Promise<{
 
   const mcpEntrypoints = extractMcpRegistrations(tsMorphProject);
   const cliEntrypoints = extractCommanderRegistrations(tsMorphProject);
-  const allEntrypoints = [...mcpEntrypoints, ...cliEntrypoints];
+  const webEntrypoints = extractWebFrameworkRegistrations(tsMorphProject);
+  const allEntrypoints = [...mcpEntrypoints, ...cliEntrypoints, ...webEntrypoints];
 
-  console.log(`[GC-7] Found ${mcpEntrypoints.length} MCP + ${cliEntrypoints.length} CLI entrypoints`);
+  console.log(`[GC-7] Found ${mcpEntrypoints.length} MCP + ${cliEntrypoints.length} CLI + ${webEntrypoints.length} web-framework entrypoints`);
 
   if (allEntrypoints.length === 0) {
     return { entrypoints: 0, dispatchEdges: 0 };

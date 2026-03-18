@@ -5,8 +5,10 @@
  * CodeGraph's TypeScriptParser has ~20 mutable class properties.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { Project } from 'ts-morph';
 import { createEphemeralGraph, type EphemeralGraphRuntime } from '../../ephemeral-graph.js';
 import { Neo4jService } from '../../../../storage/neo4j/neo4j.service.js';
+import { extractMutableFields, extractStateAccess } from '../../../../scripts/enrichment/create-state-field-nodes.js';
 
 describe('[GC-8] Generalized State Tracking', () => {
   describe('Integration — live graph', () => {
@@ -140,6 +142,29 @@ describe('[GC-8] Generalized State Tracking', () => {
       const rels = result.records.map((r) => r.get('rel'));
       expect(rels).toContain('READS_STATE');
       expect(rels).toContain('WRITES_STATE');
+    });
+  });
+
+  describe('[GC-8] Module-scope const singleton writes', () => {
+    it('detects const singleton fields and write-like method calls', () => {
+      const project = new Project({ useInMemoryFileSystem: true });
+      project.createSourceFile('src/state/singletons.ts', `
+        const cache = createCache();
+        const db = createDb();
+
+        export function warmup() {
+          cache.set('a', 1);
+          db.query('select 1');
+        }
+      `);
+
+      const fields = extractMutableFields(project);
+      const singletonNames = fields.filter(f => f.kind === 'module-const-singleton').map(f => f.name);
+      expect(singletonNames).toContain('cache');
+      expect(singletonNames).toContain('db');
+
+      const accesses = extractStateAccess(project, fields, 'proj_c0d3e9a1f200');
+      expect(accesses.some(a => a.accessorName === 'warmup' && a.isWrite)).toBe(true);
     });
   });
 });

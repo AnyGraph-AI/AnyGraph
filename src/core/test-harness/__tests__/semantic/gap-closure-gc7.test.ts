@@ -5,8 +5,10 @@
  * CodeGraph has 56 MCP tool registrations and 7 CLI commands.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { Project } from 'ts-morph';
 import { createEphemeralGraph, type EphemeralGraphRuntime } from '../../ephemeral-graph.js';
 import { Neo4jService } from '../../../../storage/neo4j/neo4j.service.js';
+import { extractWebFrameworkRegistrations } from '../../../../scripts/enrichment/create-entrypoint-edges.js';
 
 describe('[GC-7] Entrypoint Dispatch Edges', () => {
   describe('Integration — live graph', () => {
@@ -160,6 +162,49 @@ describe('[GC-7] Entrypoint Dispatch Edges', () => {
       );
       const cnt = result.records[0]?.get('cnt')?.toNumber?.() ?? result.records[0]?.get('cnt');
       expect(cnt).toBe(1);
+    });
+  });
+
+  describe('[GC-7] Web framework registration extraction', () => {
+    it('detects Express/Fastify route registrations', () => {
+      const project = new Project({ useInMemoryFileSystem: true });
+      project.createSourceFile('src/web/routes.ts', `
+        const app = express();
+        const router = app;
+        app.get('/health', healthHandler);
+        router.post('/users', authMw, createUser);
+
+        const fastify = createFastify();
+        fastify.get('/ready', readyHandler);
+        fastify.route({ method: 'DELETE', url: '/users/:id', handler: deleteUser });
+      `);
+
+      const rows = extractWebFrameworkRegistrations(project);
+      const names = rows.map(r => r.name);
+      expect(names).toContain('route:GET /health');
+      expect(names).toContain('route:POST /users');
+      expect(names).toContain('route:GET /ready');
+      expect(names).toContain('route:DELETE /users/:id');
+    });
+
+    it('detects NestJS controller decorators as route entrypoints', () => {
+      const project = new Project({ useInMemoryFileSystem: true });
+      project.createSourceFile('src/web/users.controller.ts', `
+        @Controller('/users')
+        class UsersController {
+          @Get('/:id')
+          getUser() {}
+
+          @Post('/')
+          createUser() {}
+        }
+      `);
+
+      const rows = extractWebFrameworkRegistrations(project);
+      const names = rows.map(r => r.name);
+      expect(names).toContain('route:GET /users/:id');
+      expect(names).toContain('route:POST /users/');
+      expect(rows.some(r => r.framework === 'nest')).toBe(true);
     });
   });
 });
