@@ -33,6 +33,7 @@ export const EXCLUDE_PATTERNS_GLOB = [
   'dist/**',
   'build/**',
   'coverage/**',
+  '.next/**',
   '**/*.d.ts',
   '**/*.spec.ts',
   '**/*.test.ts',
