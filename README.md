@@ -1,5 +1,19 @@
 # AnythingGraph
 
+**A knowledge graph that gives AI agents structural awareness before they edit code.**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![Tests](https://img.shields.io/badge/tests-1%2C052_passing-brightgreen)]()
+[![Neo4j](https://img.shields.io/badge/Neo4j-5.x-008CC1?logo=neo4j)](https://neo4j.com/)
+[![MCP Tools](https://img.shields.io/badge/MCP_tools-57-purple)]()
+
+---
+
+[The Problem](#the-problem) · [The Solution](#the-solution) · [Quick Start](#quick-start) · [Features](#features) · [CLI](#cli-commands) · [MCP Tools](#mcp-tools-57) · [Schema](#graph-schema) · [Architecture](#architecture) · [What's Next](#whats-next)
+
+---
+
 ## The Problem
 
 AI coding agents break things. They edit a function without knowing 47 other functions call it. They refactor a file without knowing it co-changes with three others every time. They mark a task "done" without knowing the code they wrote doesn't match the plan. They ship untested changes to critical infrastructure because they can't see risk.
@@ -30,14 +44,24 @@ cypher-shell -u neo4j -p codegraph \
 
 It's not just code. AnythingGraph ingests **plans, documents, and claims** into the same graph — so agents can reason across domains. A plan task links to the code it produced, which links to the tests that verify it, which links to the verification runs that grade confidence. One graph. Full traceability.
 
+## Features
+
+- 🔍 **Blast radius analysis** — see every caller, callee, and state dependency before editing
+- 🚦 **Enforcement gate** — CRITICAL untested functions get blocked. No exceptions, no overrides.
+- 📊 **Risk scoring** — composite risk from fan-in, fan-out, churn, temporal coupling, test coverage
+- 📋 **Plan tracking** — tasks, milestones, sprints in the graph with auto-completion detection
+- 🔗 **Cross-domain reasoning** — plan tasks link to code, code links to tests, tests link to verification runs
+- 🤖 **57 MCP tools** — agents query the graph through a standard tool interface
+- 🧪 **Temporal confidence** — verification results decay over time, evidence has expiry, nothing is trusted forever
+- 🔄 **Self-audit** — the graph generates verification questions, agents answer them, the graph updates itself
+- 📈 **69-step governance pipeline** — build, enrich, verify, integrity check, hygiene, metrics — all automated
+- 🧬 **Hermetic testing** — frozen clock, network guard, ephemeral graph, seeded RNG — deterministic by design
+
 ## Current State
 
 - **31,137 nodes, 54,511 edges** across 8 projects (1 code, 6 plan/governance, 1 test)
-- **6 operational layers:** Code, Plans, Governance, Claims, Reasoning, Self-Audit
-- **57 MCP tools** for agents to query, edit, and coordinate
-- **1,052 tests** across 73 suites (hermetic, deterministic)
-- **69-step governance pipeline** (`done-check`) with ground truth post-gate
-- **v0.1.0** — TypeScript parser, temporal confidence, enforcement gate, incremental recompute
+- **1,052 tests** across 73 suites
+- **v0.1.0** — TypeScript parser only (Python, Go, Java on roadmap)
 
 ## Projects in the Graph
 
