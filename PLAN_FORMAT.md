@@ -265,6 +265,23 @@ The parser automatically extracts references from task text. These are resolved 
 
 **How enrichment works:** After parsing, `enrichCrossDomain()` resolves file/function references against actual `SourceFile` and `Function` nodes in the code graph. Matched references create `HAS_CODE_EVIDENCE` edges. This is how the plan graph answers "is this task actually done?" — if the code exists, the evidence edge exists.
 
+### Artifact Annotation (Step 7b in WORKFLOW.md)
+
+When marking a task done, **append backtick references** to every file, function, and test artifact produced. This is the receipt system — it tells the graph exactly what code a task created.
+
+**What to annotate:**
+- Source files created or modified: `` `PainHeatmap.tsx` ``, `` `queries.ts` ``
+- Functions/components created: `` `PainHeatmap` ``, `` `computeBasePain` ``
+- Test files: `` `ui2-pain-heatmap.test.ts` ``
+- Key test names in parentheses after the test file
+
+**Example:**
+```markdown
+- [x] Build Recharts Treemap component. Created `PainHeatmap.tsx` with `PainHeatmap` component. Updated `page.tsx` `Dashboard`. Added `painHeatmap` query to `queries.ts`. Tests: `ui2-pain-heatmap.test.ts` (`exports a PainHeatmap component`).
+```
+
+**Why it matters:** Without annotation, evidence linking relies on fuzzy keyword matching. With annotation, the graph gets surgical links. When M8 (evidenceRole semantics) lands, these annotations will automatically classify as `target` (planned) or `proof` (done + verified).
+
 ---
 
 ## Files Touched Sections
