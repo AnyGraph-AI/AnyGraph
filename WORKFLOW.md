@@ -232,9 +232,12 @@ If an existing test fails after your implementation, **STOP.** Do not dismiss it
 - Delete the test
 - Weaken the assertion to make it pass
 - Say "this is from an earlier implementation" without proving the spec changed
+- Say "this break is from earlier, not from my changes" — if it was broken before you started, you should have caught it in Step 0. If you didn't verify the suite was green before starting, you can't claim the break isn't yours.
 - Proceed with failing tests and promise to fix later
 
 **The principle:** A breaking test is a signal, not an obstacle. TDD means the tests define the contract. If you change the contract, you change the test AND document why. If you didn't intend to change the contract, your code has a bug. There is no third option.
+
+**Pre-existing failures:** If `npm test` has failures BEFORE you start work, document them (test name, error) and fix them or flag them to the human. Do not start implementation on a red suite — you lose the ability to distinguish your regressions from pre-existing ones. A green baseline is a precondition, not a nice-to-have.
 
 ---
 
