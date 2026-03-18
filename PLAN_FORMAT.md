@@ -475,3 +475,5 @@ It demonstrates:
 | Tasks not under any section header | Tasks orphaned to project root | Add a milestone or section header above |
 | Missing plan-code project map entry | No cross-domain evidence edges | Add entry to `config/plan-code-project-map.json` |
 | File path without recognized extension | Cross-reference not extracted | Use a recognized extension or backtick format |
+| Done task has no code evidence | Shows as evidence gap in queries | Add backtick file/function refs, or `NO_CODE_EVIDENCE_OK(reason)` if no artifact exists |
+| `NO_CODE_EVIDENCE_OK` used to skip annotation | Hides real gaps | Only for tasks that genuinely produce no files (manual verification, config, meetings) |
