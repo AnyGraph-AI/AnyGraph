@@ -132,7 +132,7 @@ No. Common misconceptions:
 | "Neo4j is heavy infrastructure" | ~200MB RAM idle. Runs on a laptop, a Raspberry Pi, a $5 VPS. It's a local service, not a cluster. |
 | "57 tools is too complex" | Those are MCP tools for agents, not buttons you click. Humans use 3-4 commands: `parse`, `done-check`, `probe`, `diagnose`. |
 | "69-step pipeline sounds insane" | It's one command: `npm run done-check`. The 69 steps are what it does internally — you don't manage them. |
-| "You need a big codebase to justify this" | The self-graph (this repo) is ~100 TypeScript files. It's useful at that scale. |
+| "You need a big codebase to justify this" | The self-graph (this repo) is 359 parsed files producing 20,322 nodes. But it's useful even on small projects — structure matters at any scale. |
 
 **The bottleneck isn't the tools — it's understanding what a knowledge graph gives you that file-level analysis can't.** Once you get that, the setup is `npm install` + `neo4j start` + `codegraph parse`.
 
