@@ -117,7 +117,7 @@ const GENERIC_H2 = /^##\s+(.+)$/;
 const STATUS_LINE = /\*\*Status\*\*:\s*(.+)/i;
 
 // Decision table row
-const DECISION_ROW = /^\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|$/;
+const DECISION_ROW = /^\|\s*(.+?)\s*\|\s*(.+?)\s*\|(?:\s*(.+?)\s*\|)?$/;
 
 // Cross-reference patterns — expanded to catch more file types
 const FILE_PATH_REF = /(?:`([^`]+\.[a-z]{1,5})`|(\b[\w/.-]+\.(?:ts|js|py|java|go|rs|md|json|csv|sql|toml|yaml|yml|sh)\b))/g;
@@ -480,7 +480,7 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
         if (rowMatch[1].includes('---') || rowMatch[2].includes('---')) continue;
         const decision = rowMatch[1].trim();
         const choice = rowMatch[2].trim();
-        const rationale = rowMatch[3].trim();
+        const rationale = (rowMatch[3] ?? '').trim();
 
         if (decision.toLowerCase() === 'decision' || decision === '|') continue;
         if (!decision || !choice || decision.startsWith('--')) continue;
