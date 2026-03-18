@@ -6,6 +6,10 @@ import { QUERIES } from '@/lib/queries';
 import { fetchQuery } from '@/lib/fetchQuery';
 import { PainHeatmap } from '@/components/PainHeatmap';
 import { GodFilesTable } from '@/components/GodFilesTable';
+import { RealityGap } from '@/components/RealityGap';
+import { FragilityTable } from '@/components/FragilityTable';
+import { RiskDistributionChart } from '@/components/RiskDistributionChart';
+import { SafestAction } from '@/components/SafestAction';
 
 const DEFAULT_PROJECT_ID = 'proj_c0d3e9a1f200';
 
@@ -56,6 +60,24 @@ export default function Dashboard() {
     queryKey: ['function-god-files'],
     queryFn: () =>
       fetchQuery(QUERIES.functionGodFiles, { projectId: DEFAULT_PROJECT_ID, limit: 50 }),
+  });
+
+  const { data: realityGapData } = useQuery({
+    queryKey: ['reality-gap'],
+    queryFn: () =>
+      fetchQuery(QUERIES.realityGap, { projectId: DEFAULT_PROJECT_ID, limit: 50 }),
+  });
+
+  const { data: fragilityData } = useQuery({
+    queryKey: ['fragility-index'],
+    queryFn: () =>
+      fetchQuery(QUERIES.fragilityIndex, { projectId: DEFAULT_PROJECT_ID, limit: 50 }),
+  });
+
+  const { data: safestData } = useQuery({
+    queryKey: ['safest-action'],
+    queryFn: () =>
+      fetchQuery(QUERIES.safestAction, { projectId: DEFAULT_PROJECT_ID, limit: 10 }),
   });
 
   const loading = projectLoading || filesLoading || riskLoading || planLoading || heatmapLoading || fnHeatmapLoading || fnTableLoading;
@@ -324,6 +346,41 @@ export default function Dashboard() {
                 />
               )
             )}
+          </div>
+
+          {/* UI-3: Reality Gap + Fragility + Risk Distribution + Safest Action */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Reality Gap */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
+                Reality Gap
+              </h2>
+              <RealityGap data={realityGapData?.data ?? []} />
+            </div>
+
+            {/* Risk Distribution Chart */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
+                Risk Distribution
+              </h2>
+              <RiskDistributionChart data={riskDist?.data ?? []} />
+            </div>
+
+            {/* Fragility Index */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
+                Fragility Index
+              </h2>
+              <FragilityTable data={fragilityData?.data ?? []} />
+            </div>
+
+            {/* Safest Next Action */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
+                Safest Next Action
+              </h2>
+              <SafestAction data={safestData?.data ?? []} />
+            </div>
           </div>
         </>
       )}

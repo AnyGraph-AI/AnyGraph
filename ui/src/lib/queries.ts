@@ -162,6 +162,78 @@ export const QUERIES = {
            readyTasks, blockedTasks
   `,
 
+  /** Reality Gap — files where confidence exceeds evidence depth */
+  realityGap: `
+    MATCH (sf:SourceFile {projectId: $projectId})
+    WHERE sf.adjustedPain IS NOT NULL AND sf.adjustedPain > 0
+    OPTIONAL MATCH (sf)-[:CONTAINS]->(fn:Function)
+    WITH sf,
+         count(fn) AS fnCount,
+         max(CASE fn.riskTier
+           WHEN 'CRITICAL' THEN 4
+           WHEN 'HIGH' THEN 3
+           WHEN 'MEDIUM' THEN 2
+           ELSE 1
+         END) AS maxTierNum,
+         coalesce(sf.confidenceScore, 0) AS confidence,
+         coalesce(sf.adjustedPain, 0) AS adjustedPain,
+         coalesce(sf.fragility, 0) AS fragility
+    OPTIONAL MATCH (sf)-[:TESTED_BY]->(tf)
+    WITH sf, fnCount, maxTierNum, confidence, adjustedPain, fragility,
+         count(DISTINCT tf) AS evidenceCount,
+         CASE maxTierNum
+           WHEN 4 THEN 5
+           WHEN 3 THEN 3
+           WHEN 2 THEN 2
+           ELSE 1
+         END AS expectedEvidence
+    WITH sf, fnCount, confidence, adjustedPain, fragility,
+         evidenceCount, expectedEvidence,
+         CASE WHEN expectedEvidence > 0
+           THEN toFloat(expectedEvidence - evidenceCount) / expectedEvidence
+           ELSE 0
+         END AS gapScore
+    WHERE gapScore > 0
+    RETURN sf.name AS name,
+           confidence AS confidenceScore,
+           toInteger(evidenceCount) AS evidenceCount,
+           toInteger(expectedEvidence) AS expectedEvidence,
+           round(gapScore * 1000) / 1000.0 AS gapScore,
+           adjustedPain,
+           fragility
+    ORDER BY gapScore DESC
+    LIMIT $limit
+  `,
+
+  /** Fragility Index — files ranked by fragility */
+  fragilityIndex: `
+    MATCH (sf:SourceFile {projectId: $projectId})
+    WHERE sf.fragility IS NOT NULL AND sf.fragility > 0
+    RETURN sf.name AS name,
+           coalesce(sf.fragility, 0) AS fragility,
+           coalesce(sf.confidenceScore, 0) AS confidenceScore,
+           coalesce(sf.adjustedPain, 0) AS adjustedPain,
+           coalesce(sf.painScore, 0) AS painScore,
+           coalesce(sf.centrality, 0) AS centrality
+    ORDER BY sf.fragility DESC
+    LIMIT $limit
+  `,
+
+  /** Safest Action — low risk + high confidence files */
+  safestAction: `
+    MATCH (sf:SourceFile {projectId: $projectId})
+    WHERE sf.adjustedPain IS NOT NULL
+      AND sf.confidenceScore IS NOT NULL
+      AND sf.confidenceScore > 0.5
+    RETURN sf.name AS name,
+           coalesce(sf.confidenceScore, 0) AS confidenceScore,
+           coalesce(sf.adjustedPain, 0) AS adjustedPain,
+           coalesce(sf.fragility, 0) AS fragility,
+           coalesce(sf.centrality, 0) AS centrality
+    ORDER BY sf.adjustedPain ASC, sf.confidenceScore DESC
+    LIMIT $limit
+  `,
+
   /** Connection test */
   ping: `RETURN 1 AS ok`,
 } as const;
