@@ -988,11 +988,33 @@ export async function runDiagnosis(): Promise<DiagResult[]> {
     detail: { total: d38Total, covered: d38Covered, pct: d38Pct },
   });
 
+  // ── D39: False coverage detection (RF-15) ──────
+  const d39 = await query(`
+    MATCH (f:Function {projectId: $pid})
+    WHERE f.hasTestCaller = true
+      AND coalesce(f.lineCoverage, 0) < 0.3
+    RETURN f.name AS name, f.filePath AS filePath,
+           coalesce(f.lineCoverage, 0) AS lineCoverage
+    ORDER BY coalesce(f.lineCoverage, 0) ASC
+    LIMIT 20
+  `, { pid });
+  results.push({
+    id: 'D39', question: 'Are there functions with hasTestCaller=true but lineCoverage < 0.3? (RF-15 false coverage)',
+    answer: d39.length > 0
+      ? `${d39.length} functions have test callers but < 30% runtime line coverage — possible false coverage`
+      : 'No false coverage detected — all test-called functions have ≥ 30% line coverage',
+    healthy: d39.length === 0,
+    nextStep: d39.length > 0
+      ? `Review these functions — test calls may not exercise enough code paths. Consider adding more targeted tests.`
+      : `Good — parse-time and runtime coverage are aligned.`,
+    detail: { falseCoverageCount: d39.length, samples: d39.slice(0, 5) },
+  });
+
   return results;
 }
 
 export async function main() {
-  console.log('🔬 Self-Diagnosis — 38 Epistemological Health Checks\n');
+  console.log('🔬 Self-Diagnosis — 39 Epistemological Health Checks\n');
   console.log('   "Does the graph know what it doesn\'t know?"\n');
 
   try {

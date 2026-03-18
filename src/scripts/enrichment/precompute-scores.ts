@@ -405,21 +405,30 @@ export async function enrichPrecomputeScores(
       fileTestedByMap[r.get('sfId') as string] = toNum(r.get('testedByCount'));
     }
 
-    // RF-14: Function-level coverage via hasTestCaller property.
+    // RF-15: Blend parse-time (hasTestCaller) with runtime coverage (lineCoverage).
+    // hasTestCaller = binary (0 or 1), lineCoverage = 0.0-1.0.
+    // Blend: functionCoverage = max(hasTestCaller ? 0.5 : 0, lineCoverage)
+    // This ensures: caller-only = 0.5, runtime-only = lineCov, both = max.
     const fnCoverageResult = await session.run(
       `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})-[:CONTAINS]->(f:CodeNode:Function {projectId: $projectId})
-       RETURN sf.id AS sfId, f.id AS fnId, coalesce(f.hasTestCaller, false) AS hasTestCaller`,
+       RETURN sf.id AS sfId, f.id AS fnId,
+              coalesce(f.hasTestCaller, false) AS hasTestCaller,
+              coalesce(f.lineCoverage, 0.0) AS lineCoverage`,
       { projectId },
     );
 
-    // Build map: sfId -> { coveredCount, totalCount }
+    // Build map: sfId -> { coveredSum, totalCount }
+    // coveredSum accumulates blended per-function coverage (0.0-1.0 each)
     const coverageMap: Record<string, { covered: number; total: number }> = {};
     for (const r of fnCoverageResult.records) {
       const sfId = r.get('sfId') as string;
       const hasTestCaller = r.get('hasTestCaller') as boolean;
+      const lineCoverage = Number(r.get('lineCoverage') ?? 0);
+      const callerScore = hasTestCaller ? 0.5 : 0;
+      const blended = Math.max(callerScore, lineCoverage);
       if (!coverageMap[sfId]) coverageMap[sfId] = { covered: 0, total: 0 };
       coverageMap[sfId].total++;
-      if (hasTestCaller) coverageMap[sfId].covered++;
+      coverageMap[sfId].covered += blended;
     }
 
     // ── Step 4b: Compute per-file raw values for normalization ─

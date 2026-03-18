@@ -10,6 +10,7 @@ import { GodFilesTable } from '@/components/GodFilesTable';
 const DEFAULT_PROJECT_ID = 'proj_c0d3e9a1f200';
 
 type ViewMode = 'treemap' | 'table';
+type DataMode = 'files' | 'functions';
 
 export default function Dashboard() {
   const { data: project, isLoading: projectLoading } = useQuery({
@@ -37,6 +38,7 @@ export default function Dashboard() {
   });
 
   const [viewMode, setViewMode] = useState<ViewMode>('treemap');
+  const [dataMode, setDataMode] = useState<DataMode>('files');
 
   const { data: heatmapData, isLoading: heatmapLoading } = useQuery({
     queryKey: ['pain-heatmap'],
@@ -44,7 +46,19 @@ export default function Dashboard() {
       fetchQuery(QUERIES.painHeatmap, { projectId: DEFAULT_PROJECT_ID, limit: 100 }),
   });
 
-  const loading = projectLoading || filesLoading || riskLoading || planLoading || heatmapLoading;
+  const { data: fnHeatmapData, isLoading: fnHeatmapLoading } = useQuery({
+    queryKey: ['function-heatmap'],
+    queryFn: () =>
+      fetchQuery(QUERIES.functionHeatmap, { projectId: DEFAULT_PROJECT_ID, limit: 100 }),
+  });
+
+  const { data: fnTableData, isLoading: fnTableLoading } = useQuery({
+    queryKey: ['function-god-files'],
+    queryFn: () =>
+      fetchQuery(QUERIES.functionGodFiles, { projectId: DEFAULT_PROJECT_ID, limit: 50 }),
+  });
+
+  const loading = projectLoading || filesLoading || riskLoading || planLoading || heatmapLoading || fnHeatmapLoading || fnTableLoading;
 
   return (
     <div className="space-y-8">
@@ -221,29 +235,55 @@ export default function Dashboard() {
           <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold text-zinc-100">
-                {viewMode === 'treemap' ? 'Pain Heatmap' : 'Top Files by Adjusted Pain'}
+                {dataMode === 'files'
+                  ? viewMode === 'treemap' ? 'Pain Heatmap — Files' : 'Top Files by Adjusted Pain'
+                  : viewMode === 'treemap' ? 'Risk Heatmap — Functions' : 'Top Functions by Composite Risk'}
               </h2>
-              <div className="flex gap-1 bg-zinc-800 rounded-lg p-0.5">
-                <button
-                  onClick={() => setViewMode('treemap')}
-                  className={`px-3 py-1 text-sm rounded-md transition-colors ${
-                    viewMode === 'treemap'
-                      ? 'bg-zinc-700 text-zinc-100'
-                      : 'text-zinc-400 hover:text-zinc-200'
-                  }`}
-                >
-                  Heatmap
-                </button>
-                <button
-                  onClick={() => setViewMode('table')}
-                  className={`px-3 py-1 text-sm rounded-md transition-colors ${
-                    viewMode === 'table'
-                      ? 'bg-zinc-700 text-zinc-100'
-                      : 'text-zinc-400 hover:text-zinc-200'
-                  }`}
-                >
-                  Table
-                </button>
+              <div className="flex gap-3">
+                <div className="flex gap-1 bg-zinc-800 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setDataMode('files')}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      dataMode === 'files'
+                        ? 'bg-zinc-700 text-zinc-100'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    Files
+                  </button>
+                  <button
+                    onClick={() => setDataMode('functions')}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      dataMode === 'functions'
+                        ? 'bg-zinc-700 text-zinc-100'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    Functions
+                  </button>
+                </div>
+                <div className="flex gap-1 bg-zinc-800 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setViewMode('treemap')}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      viewMode === 'treemap'
+                        ? 'bg-zinc-700 text-zinc-100'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    Heatmap
+                  </button>
+                  <button
+                    onClick={() => setViewMode('table')}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      viewMode === 'table'
+                        ? 'bg-zinc-700 text-zinc-100'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    Table
+                  </button>
+                </div>
               </div>
             </div>
             {heatmapData?.data && heatmapData.data.length > 500 && (
@@ -251,10 +291,38 @@ export default function Dashboard() {
                 ⚠️ Showing top 500 files. {heatmapData.data.length} total files have pain scores.
               </div>
             )}
-            {viewMode === 'treemap' ? (
-              <PainHeatmap data={heatmapData?.data ?? []} />
+            {dataMode === 'files' ? (
+              viewMode === 'treemap' ? (
+                <PainHeatmap data={heatmapData?.data ?? []} />
+              ) : (
+                <GodFilesTable data={topFiles?.data ?? []} />
+              )
             ) : (
-              <GodFilesTable data={topFiles?.data ?? []} />
+              viewMode === 'treemap' ? (
+                <PainHeatmap
+                  data={(fnHeatmapData?.data ?? []).map((f: Record<string, unknown>) => ({
+                    name: f.name as string,
+                    filePath: f.filePath as string,
+                    adjustedPain: f.compositeRisk as number,
+                    confidenceScore: f.riskTier === 'CRITICAL' ? 0 : f.riskTier === 'HIGH' ? 0.3 : f.riskTier === 'MEDIUM' ? 0.6 : 1.0,
+                    painScore: f.compositeRisk as number,
+                    fragility: 0,
+                  }))}
+                />
+              ) : (
+                <GodFilesTable
+                  data={(fnTableData?.data ?? []).map((f: Record<string, unknown>) => ({
+                    name: `${f.name} (${f.fileName})`,
+                    filePath: '',
+                    adjustedPain: f.compositeRisk as number,
+                    fragility: 0,
+                    confidenceScore: f.riskTier === 'CRITICAL' ? 0 : f.riskTier === 'HIGH' ? 0.3 : f.riskTier === 'MEDIUM' ? 0.6 : 1.0,
+                    basePain: f.compositeRisk as number,
+                    centrality: f.centrality as number,
+                    downstreamImpact: f.downstreamImpact as number,
+                  }))}
+                />
+              )
             )}
           </div>
         </>

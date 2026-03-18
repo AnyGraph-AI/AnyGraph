@@ -163,7 +163,8 @@
     "tc:explain": "npx tsx src/scripts/entry/tc-pipeline.ts explain",
     "tc:calibrate": "npx tsx src/scripts/entry/tc-pipeline.ts calibrate",
     "tc:promote": "npx tsx src/scripts/entry/tc-pipeline.ts promote",
-    "verification:scan": "npx tsx src/scripts/entry/scan-and-import.ts"
+    "verification:scan": "npx tsx src/scripts/entry/scan-and-import.ts",
+    "test:coverage:ingest": "vitest run --coverage.enabled --coverage.provider=v8 --coverage.reporter=json --coverage.reportsDirectory=coverage && npx tsx src/scripts/enrichment/store-runtime-coverage.ts ./coverage/coverage-final.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.15.1",

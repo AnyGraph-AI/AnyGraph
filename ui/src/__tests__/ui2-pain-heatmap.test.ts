@@ -78,20 +78,66 @@ describe('[UI-2] painHeatmap query — data shape', () => {
   });
 });
 
+// ─── Function-level queries ──────────────────────────────────
+
+describe('[UI-2] functionHeatmap query', () => {
+  it('returns function-level data from live graph', async () => {
+    const { cachedQuery, clearQueryCache } = await import('@/lib/neo4j');
+    const { QUERIES } = await import('@/lib/queries');
+    clearQueryCache();
+
+    const rows = await cachedQuery(
+      (QUERIES as Record<string, string>).functionHeatmap,
+      { projectId: 'proj_c0d3e9a1f200', limit: 10 },
+    );
+
+    expect(Array.isArray(rows)).toBe(true);
+    expect(rows.length).toBeGreaterThan(0);
+
+    const row = rows[0] as Record<string, unknown>;
+    expect(row).toHaveProperty('name');
+    expect(row).toHaveProperty('compositeRisk');
+    expect(row).toHaveProperty('riskTier');
+    expect(row).toHaveProperty('fanIn');
+    expect(row).toHaveProperty('fanOut');
+    expect(typeof row.compositeRisk).toBe('number');
+  });
+
+  it('functionGodFiles includes parent file name', async () => {
+    const { cachedQuery, clearQueryCache } = await import('@/lib/neo4j');
+    const { QUERIES } = await import('@/lib/queries');
+    clearQueryCache();
+
+    const rows = await cachedQuery(
+      (QUERIES as Record<string, string>).functionGodFiles,
+      { projectId: 'proj_c0d3e9a1f200', limit: 5 },
+    );
+
+    expect(rows.length).toBeGreaterThan(0);
+    const row = rows[0] as Record<string, unknown>;
+    expect(row).toHaveProperty('fileName');
+    expect(typeof row.fileName).toBe('string');
+  });
+});
+
 // ─── View toggle state ───────────────────────────────────────
 
 describe('[UI-2] View toggle', () => {
-  it('page exports or uses a view mode state (treemap vs table)', async () => {
-    // Verify page.tsx contains view mode toggle logic
+  it('page has view mode toggle (treemap vs table) and data mode toggle (files vs functions)', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
     const pagePath = path.resolve(import.meta.dirname, '..', 'app', 'page.tsx');
     const source = await fs.readFile(pagePath, 'utf-8');
 
-    // Should contain view mode state
-    expect(source).toMatch(/viewMode|view.*mode|showTable|activeView/i);
-    // Should contain both component references
+    // View mode toggle
+    expect(source).toMatch(/viewMode/);
+    // Data mode toggle
+    expect(source).toMatch(/dataMode/);
+    // Both components referenced
     expect(source).toContain('PainHeatmap');
     expect(source).toContain('GodFilesTable');
+    // Function queries used
+    expect(source).toContain('functionHeatmap');
+    expect(source).toContain('functionGodFiles');
   });
 });

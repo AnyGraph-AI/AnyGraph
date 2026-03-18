@@ -94,6 +94,39 @@ export const QUERIES = {
     ORDER BY p.nodeCount DESC
   `,
 
+  /** Function heatmap — treemap data at function level */
+  functionHeatmap: `
+    MATCH (f:Function {projectId: $projectId})
+    WHERE f.compositeRisk IS NOT NULL
+    RETURN f.name AS name,
+           coalesce(f.filePath, '') AS filePath,
+           coalesce(f.compositeRisk, 0) AS compositeRisk,
+           coalesce(f.riskTier, 'MEDIUM') AS riskTier,
+           coalesce(f.fanInCount, 0) AS fanIn,
+           coalesce(f.fanOutCount, 0) AS fanOut,
+           coalesce(f.downstreamImpact, 0) AS downstreamImpact,
+           coalesce(f.centralityNormalized, 0) AS centrality
+    ORDER BY f.compositeRisk DESC
+    LIMIT $limit
+  `,
+
+  /** Function god files — ranked table at function level */
+  functionGodFiles: `
+    MATCH (f:Function {projectId: $projectId})
+    WHERE f.compositeRisk IS NOT NULL
+    MATCH (sf:SourceFile {projectId: $projectId})-[:CONTAINS]->(f)
+    RETURN f.name AS name,
+           sf.name AS fileName,
+           coalesce(f.compositeRisk, 0) AS compositeRisk,
+           coalesce(f.riskTier, 'MEDIUM') AS riskTier,
+           coalesce(f.fanInCount, 0) AS fanIn,
+           coalesce(f.fanOutCount, 0) AS fanOut,
+           coalesce(f.downstreamImpact, 0) AS downstreamImpact,
+           coalesce(f.centralityNormalized, 0) AS centrality
+    ORDER BY f.compositeRisk DESC
+    LIMIT $limit
+  `,
+
   /** Plan health — milestone + task status summary */
   planHealth: `
     MATCH (t:Task)-[:PART_OF]->(m:Milestone)
