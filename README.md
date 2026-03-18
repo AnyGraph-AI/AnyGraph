@@ -130,17 +130,21 @@ This is the real graph, real queries, real output. Not mock data.
 ## Who This Is For
 
 **Best for:**
-- Teams using AI coding agents on non-trivial codebases
-- Projects where breaking changes cost real time and money
-- Systems with high coupling, hidden dependencies, or shared infrastructure
-- Anyone tired of debugging what an agent broke at 2 AM
+- Literally anyone using AI agents to write code. That's it. That's the list.
+- Anyone who's mass-reverted an AI's commits at midnight
+- Teams where `git blame` now points at an LLM and it stopped being funny
+- Projects where one function quietly holds the whole thing together and nobody knows which one
+- Devs whose agent committed "refactor: clean up" and cleaned up nothing
+- Anyone who's said "wait, what does this function even call?" and got silence
+- Teams that spend more time fixing AI output than writing code themselves
 
 **Not for:**
-- Throwaway scripts you'll delete next week
-- Hackathon prototypes where breaking things is the point
-- Projects where you genuinely don't care if something breaks
-
-If your project matters enough to have tests, it matters enough to have a graph.
+- A 10-line bash script. Come on.
+- Hackathon code that's already on fire — let it burn
+- If you don't use AI agents yet, you don't need this today. But you will.
+- Repos with one file. You ARE the graph.
+- Code you don't test because "it's simple." You're the reason prod breaks at 3 AM. A graph won't fix that — you need a mirror.
+- Nobody, honestly. If you write code with AI, you'd benefit. The question is when, not if.
 
 ## Common Objections
 
