@@ -233,16 +233,17 @@ Decision tables capture architectural choices. They become `Decision` nodes.
 ```markdown
 ## Architecture Decisions
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Parser tier for TypeScript | ts-morph (Tier 0) | Semantic, not syntactic |
-| IR before multi-language | Yes | GPT Pro's critical insight |
-| Python parser approach | CPython ast + Pyright | Native AST + workspace semantics |
+| Decision | Choice |
+|----------|--------|
+| Parser tier for TypeScript | ts-morph (Tier 0) — semantic, not syntactic |
+| IR before multi-language | Yes |
+| Python parser approach | CPython ast + Pyright |
 ```
 
 **Rules:**
 - Table must be under a section header containing the word "decision" (case-insensitive)
-- Three-column format: Decision | Choice | Rationale
+- Two-column format: Decision | Choice (rationale belongs in spec text, not the table)
+- Three-column format also accepted: Decision | Choice | Rationale (third column optional)
 - Header and separator rows are automatically skipped
 - Creates `Decision` nodes linked to the project via `PART_OF`
 
@@ -378,10 +379,10 @@ Why this project exists. What problem it solves. Background.
 
 ## Architecture Decisions
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Key decision 1 | What we chose | Why |
-| Key decision 2 | What we chose | Why |
+| Decision | Choice |
+|----------|--------|
+| Key decision 1 | What we chose |
+| Key decision 2 | What we chose |
 
 ## Execution Checklist
 
