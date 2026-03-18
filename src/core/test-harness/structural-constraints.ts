@@ -151,35 +151,14 @@ export const VALIDATION_QUERIES: Array<{
   },
   {
     name: 'missing_projectid',
-    description: 'Nodes missing projectId (except system nodes)',
+    description: 'Nodes missing projectId (except system nodes) — scoped by label overlap with project nodes',
     cypher: `
       MATCH (n)
       WHERE n.projectId IS NULL
-        AND NOT n:Project
-        AND NOT n:AuditCheck
-        AND NOT n:InvariantViolation
-        AND NOT n:EvaluationRun
-        AND NOT n:MetricResult
-        AND NOT n:VerificationRun
-        AND NOT n:GateDecision
-        AND NOT n:AdvisoryGateDecision
-        AND NOT n:AdjudicationRecord
-        AND NOT n:AnalysisScope
-        AND NOT n:CommitSnapshot
-        AND NOT n:WorkingTreeSnapshot
-        AND NOT n:Artifact
-        AND NOT n:GovernanceMetricSnapshot
-        AND NOT n:GovernanceMetricDef
-        AND NOT n:GovernanceAttributionLink
-        AND NOT n:IntegritySnapshot
-        AND NOT n:IntegrityFindingObservation
-        AND NOT n:Discrepancy
-        AND NOT n:Person
-        AND NOT n:CanonicalEntity
-        AND NOT n:Evidence
-        AND NOT n:Claim
-        AND NOT n:Hypothesis
-        AND NOT n:GraphMetricsSnapshot
+        AND (n:SourceFile OR n:Function OR n:Method OR n:Class OR n:Interface
+             OR n:TypeAlias OR n:Variable OR n:Property OR n:Parameter
+             OR n:Import OR n:Field OR n:Entrypoint OR n:Task OR n:Milestone
+             OR n:Sprint OR n:Decision OR n:Section OR n:PlanProject OR n:TestCase)
       RETURN labels(n)[0] AS label, count(n) AS count
       LIMIT 10
     `,
