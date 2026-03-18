@@ -190,6 +190,29 @@ Or:
 
 **⚠️ Do NOT use commas as separators.** Task names commonly contain commas (e.g., "Add exception enforcement pass (expiry, approval mode, ticket linkage)"). The parser splits on semicolons only.
 
+### Dependency Exceptions (`NO_DEPENDS_OK`)
+
+For tasks that intentionally have no dependencies (e.g., foundational root tasks), use the `NO_DEPENDS_OK` directive to suppress dependency hygiene violations.
+
+**Format:** `NO_DEPENDS_OK(reason|expires:YYYY-MM-DD)`
+
+```markdown
+### Milestone VG-1 — Schema + Identity Foundation
+
+NO_DEPENDS_OK(foundational-root|expires:2026-12-31)
+
+- [ ] Define core schema
+- [ ] Implement identity resolver
+  DEPENDS_ON: Define core schema
+```
+
+**Rules:**
+- `reason` must be at least 3 characters — explain why no dependency is needed
+- `expires` must be a future ISO date — exceptions don't live forever
+- The verifier (`npm run plan:deps:verify`) checks both fields; malformed exceptions are violations
+- **Scope:** Currently enforced on `DL-*` and `GM-*` milestones in `plan_codegraph`. The first non-done task in each milestone gets a "starter allowance" (no dependency required). All other planned tasks must have `DEPENDS_ON` or `NO_DEPENDS_OK`.
+- **Strict mode:** Set `STRICT_SCOPED_DEPENDS_ON=true` to fail the build on missing dependencies (default: report only)
+
 ### Resolution
 
 Dependencies resolve by matching the target text against existing Task/Milestone node names in the graph. Resolution uses scored matching:
