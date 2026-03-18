@@ -12,7 +12,7 @@
  *   - basePain: sum of compositeRisk of contained functions
  *   - downstreamImpact: max downstreamImpact of contained functions
  *   - centrality: max centralityNormalized of contained functions
- *   - painScore: basePain * (1 + centrality) * (1 + downstreamImpact)
+ *   - painScore: basePain * (1 + centrality) * (1 + ln(1 + downstreamImpact))
  *   - confidenceScore: fraction of contained functions with TESTED_BY or ANALYZED on parent file
  *   - fragility: painScore * (1 - confidenceScore)
  *   - adjustedPain: painScore * (0.5 + 0.5 * confidenceScore)
@@ -99,14 +99,19 @@ export function computeBasePain(compositeRisks: number[]): number {
 }
 
 /**
- * painScore = basePain * (1 + centrality) * (1 + downstreamImpact)
+ * painScore = basePain * (1 + centrality) * (1 + ln(1 + downstreamImpact))
+ *
+ * Log-damping prevents downstream impact from dominating the score.
+ * Without damping, a file with downstream=21 gets 22× multiplier,
+ * making a basePain=1.46 file score higher than genuinely complex files.
+ * With ln: downstream=21 → ~4.1× instead of 22×.
  */
 export function computePainScore(
   basePain: number,
   centrality: number,
   downstreamImpact: number,
 ): number {
-  return basePain * (1 + centrality) * (1 + downstreamImpact);
+  return basePain * (1 + centrality) * (1 + Math.log(1 + downstreamImpact));
 }
 
 /**

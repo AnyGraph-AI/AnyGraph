@@ -116,29 +116,55 @@ describe('[UI-0] computeBasePain', () => {
 
 // ─── SourceFile-level: painScore ───────────────────────────────
 
-describe('[UI-0] computePainScore', () => {
+describe('[UI-0] computePainScore — log-damped downstream impact', () => {
+  // Formula: painScore = basePain * (1 + centrality) * (1 + ln(1 + downstreamImpact))
+  // Log-damping prevents downstream impact from dominating the score.
+  // A file with downstream=21 gets ~3.1x multiplier instead of 22x.
+
   it('returns basePain when centrality and downstreamImpact are 0', () => {
-    // painScore = basePain * (1 + 0) * (1 + 0) = basePain
+    // painScore = basePain * (1 + 0) * (1 + ln(1)) = basePain * 1 * 1 = basePain
     expect(computePainScore(2.0, 0, 0)).toBeCloseTo(2.0);
   });
 
   it('multiplies by (1 + centrality)', () => {
-    // painScore = 2.0 * (1 + 0.5) * (1 + 0) = 3.0
+    // painScore = 2.0 * (1 + 0.5) * (1 + ln(1)) = 3.0
     expect(computePainScore(2.0, 0.5, 0)).toBeCloseTo(3.0);
   });
 
-  it('multiplies by (1 + downstreamImpact)', () => {
-    // painScore = 2.0 * (1 + 0) * (1 + 3) = 8.0
-    expect(computePainScore(2.0, 0, 3)).toBeCloseTo(8.0);
+  it('log-damps downstream impact instead of linear multiply', () => {
+    // painScore = 2.0 * (1 + 0) * (1 + ln(1 + 3)) = 2.0 * (1 + ln(4)) = 2.0 * 2.386 ≈ 4.77
+    expect(computePainScore(2.0, 0, 3)).toBeCloseTo(2.0 * (1 + Math.log(4)));
   });
 
-  it('full formula: basePain * (1 + centrality) * (1 + downstreamImpact)', () => {
-    // painScore = 1.5 * (1 + 0.8) * (1 + 5) = 1.5 * 1.8 * 6 = 16.2
-    expect(computePainScore(1.5, 0.8, 5)).toBeCloseTo(16.2);
+  it('downstream=21 gives ~3.1x not 22x', () => {
+    // Old: 1.5 * 1.8 * 22 = 59.4
+    // New: 1.5 * 1.8 * (1 + ln(22)) = 1.5 * 1.8 * 4.09 ≈ 11.04
+    const result = computePainScore(1.5, 0.8, 21);
+    expect(result).toBeCloseTo(1.5 * 1.8 * (1 + Math.log(22)));
+    // Verify it's NOT the old formula
+    expect(result).not.toBeCloseTo(1.5 * 1.8 * 22);
+  });
+
+  it('full formula: basePain * (1 + centrality) * (1 + ln(1 + downstreamImpact))', () => {
+    // painScore = 1.5 * (1 + 0.8) * (1 + ln(6)) = 1.5 * 1.8 * 2.79 ≈ 7.53
+    expect(computePainScore(1.5, 0.8, 5)).toBeCloseTo(1.5 * 1.8 * (1 + Math.log(6)));
   });
 
   it('returns 0 when basePain is 0', () => {
     expect(computePainScore(0, 0.9, 10)).toBe(0);
+  });
+
+  it('downstream=1 gives modest boost (ln(2) ≈ 0.69)', () => {
+    // painScore = 1.0 * 1.0 * (1 + ln(2)) ≈ 1.69
+    expect(computePainScore(1.0, 0, 1)).toBeCloseTo(1 + Math.log(2));
+  });
+
+  it('high downstream (100) is bounded, not explosive', () => {
+    // Old: 1.0 * 1.0 * 101 = 101
+    // New: 1.0 * 1.0 * (1 + ln(101)) ≈ 5.62
+    const result = computePainScore(1.0, 0, 100);
+    expect(result).toBeCloseTo(1 + Math.log(101));
+    expect(result).toBeLessThan(10); // sanity: bounded
   });
 });
 
@@ -223,7 +249,7 @@ describe('[UI-0] normalize', () => {
 // ─── computeSourceFileScores integration ───────────────────────
 
 describe('[UI-0] computeSourceFileScores', () => {
-  it('computes all properties for a file with mixed coverage', () => {
+  it('computes all properties for a file with mixed coverage (log-damped)', () => {
     const input: SourceFileScoreInput = {
       compositeRisks: [0.3, 0.5, 0.2],       // 3 functions
       functionDownstreamImpacts: [2, 5, 0],    // max = 5
@@ -237,10 +263,11 @@ describe('[UI-0] computeSourceFileScores', () => {
     expect(result.basePain).toBeCloseTo(1.0);                  // 0.3+0.5+0.2
     expect(result.downstreamImpact).toBe(5);                   // max
     expect(result.centrality).toBeCloseTo(0.8);                // max
-    expect(result.painScore).toBeCloseTo(1.0 * 1.8 * 6);      // 1.0 * (1+0.8) * (1+5) = 10.8
+    const expectedPain = 1.0 * 1.8 * (1 + Math.log(6));        // log-damped downstream
+    expect(result.painScore).toBeCloseTo(expectedPain);
     expect(result.confidenceScore).toBeCloseTo(2 / 3);         // 2/3
-    expect(result.fragility).toBeCloseTo(10.8 * (1 - 2 / 3)); // 10.8 * 1/3 = 3.6
-    expect(result.adjustedPain).toBeCloseTo(10.8 * (0.5 + 0.5 * 2 / 3)); // 10.8 * 0.833... = 9.0
+    expect(result.fragility).toBeCloseTo(expectedPain * (1 - 2 / 3));
+    expect(result.adjustedPain).toBeCloseTo(expectedPain * (0.5 + 0.5 * 2 / 3));
   });
 
   it('handles file with no functions', () => {
