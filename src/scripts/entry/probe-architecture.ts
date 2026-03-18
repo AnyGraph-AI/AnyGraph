@@ -771,11 +771,29 @@ export async function runProbes(): Promise<ProbeResult[]> {
     rows: q45,
   });
 
+  // Q46: RF-14 untested danger list — highest risk functions with no test caller
+  const q46 = await query(`
+    MATCH (f:Function {projectId: $pid})
+    WHERE f.riskTier IN ['CRITICAL', 'HIGH']
+      AND coalesce(f.hasTestCaller, false) = false
+    MATCH (sf:SourceFile {projectId: $pid})-[:CONTAINS]->(f)
+    RETURN f.name AS function, sf.name AS file, f.riskTier AS tier,
+           round(f.compositeRisk * 1000) / 1000 AS risk
+    ORDER BY f.compositeRisk DESC
+    LIMIT 20
+  `, { pid });
+  results.push({
+    id: 'Q46', name: 'Untested danger list: highest-risk functions without test caller (RF-14)', category: 'Quality',
+    status: q46.length === 0 ? 'pass' : 'warn',
+    summary: q46.length > 0 ? `${q46.length} CRITICAL/HIGH functions have no test caller` : 'All CRITICAL/HIGH functions have test callers',
+    rows: q46,
+  });
+
   return results;
 }
 
 export async function main() {
-  console.log('🏗️  Architecture Probe — 45 Queries Against Live Graph\n');
+  console.log('🏗️  Architecture Probe — 46 Queries Against Live Graph\n');
 
   try {
     const results = await runProbes();

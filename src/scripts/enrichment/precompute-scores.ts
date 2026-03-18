@@ -274,15 +274,12 @@ export async function enrichPrecomputeScores(
       { projectId },
     );
 
-    // For confidence: count functions whose parent file has TESTED_BY or ANALYZED
-    // We need per-function coverage. Let's query that separately.
+    // RF-14: Function-level coverage via hasTestCaller property.
+    // Old approach used file-level TESTED_BY (one edge covers ALL functions — a lie).
+    // New approach checks hasTestCaller on each Function node individually.
     const fnCoverageResult = await session.run(
       `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})-[:CONTAINS]->(f:CodeNode:Function {projectId: $projectId})
-       OPTIONAL MATCH (sf)-[:TESTED_BY]->(tb)
-       OPTIONAL MATCH (sf)-[:ANALYZED]->(az)
-       WITH f.id AS fnId, sf.id AS sfId,
-            count(DISTINCT tb) + count(DISTINCT az) AS coverageEdges
-       RETURN sfId, fnId, coverageEdges > 0 AS isCovered`,
+       RETURN sf.id AS sfId, f.id AS fnId, coalesce(f.hasTestCaller, false) AS hasTestCaller`,
       { projectId },
     );
 
@@ -290,10 +287,10 @@ export async function enrichPrecomputeScores(
     const coverageMap: Record<string, { covered: number; total: number }> = {};
     for (const r of fnCoverageResult.records) {
       const sfId = r.get('sfId') as string;
-      const isCovered = r.get('isCovered') as boolean;
+      const hasTestCaller = r.get('hasTestCaller') as boolean;
       if (!coverageMap[sfId]) coverageMap[sfId] = { covered: 0, total: 0 };
       coverageMap[sfId].total++;
-      if (isCovered) coverageMap[sfId].covered++;
+      if (hasTestCaller) coverageMap[sfId].covered++;
     }
 
     const fileUpdates: {

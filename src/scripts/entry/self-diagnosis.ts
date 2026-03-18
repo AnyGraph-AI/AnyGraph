@@ -969,11 +969,30 @@ export async function runDiagnosis(): Promise<DiagResult[]> {
     detail: { total: d37Total, tagged: d37Tagged, unclassified: d37Unclassified, coverage: d37Coverage },
   });
 
+  // ── D38: Function-level test coverage (RF-14) ──────
+  const d38 = await query(`
+    MATCH (f:Function {projectId: $pid})
+    RETURN count(f) AS total,
+           sum(CASE WHEN f.hasTestCaller = true THEN 1 ELSE 0 END) AS covered
+  `, { pid });
+  const d38Total = Number(d38[0]?.total ?? 0);
+  const d38Covered = Number(d38[0]?.covered ?? 0);
+  const d38Pct = d38Total > 0 ? (d38Covered / d38Total) : 0;
+  results.push({
+    id: 'D38', question: 'What percentage of functions have a test caller? (RF-14)',
+    answer: `${d38Covered}/${d38Total} (${(d38Pct * 100).toFixed(1)}%) functions have hasTestCaller=true`,
+    healthy: d38Pct >= 0.30,
+    nextStep: d38Pct < 0.30
+      ? `Function-level test coverage is below 30%. Run npm run enrich:test-coverage to refresh, then write tests for CRITICAL untested functions.`
+      : `Function-level test coverage is above 30%. Continue to increase coverage for CRITICAL/HIGH risk functions.`,
+    detail: { total: d38Total, covered: d38Covered, pct: d38Pct },
+  });
+
   return results;
 }
 
 export async function main() {
-  console.log('🔬 Self-Diagnosis — 37 Epistemological Health Checks\n');
+  console.log('🔬 Self-Diagnosis — 38 Epistemological Health Checks\n');
   console.log('   "Does the graph know what it doesn\'t know?"\n');
 
   try {

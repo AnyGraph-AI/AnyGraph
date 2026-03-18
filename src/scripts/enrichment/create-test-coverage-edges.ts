@@ -1,136 +1,253 @@
 #!/usr/bin/env npx tsx
 /**
- * Test Coverage Enrichment — Wire test files to source files they test.
+ * RF-14 (phase 1): Test Coverage Enrichment
  *
- * Scans disk for *.test.ts / *.spec-test.ts files, reads their imports,
- * resolves to SourceFile nodes in the graph, creates TESTED_BY edges.
+ * 1) Identify test files by naming convention and tag `isTestFile: true`.
+ * 2) Trace calls from test functions to source functions.
  *
- * Does NOT touch the parser or modify exclude patterns.
- * Test files stay excluded from the code graph — only the edges are added.
- *
- * Edge: (SourceFile)-[:TESTED_BY {derived: true}]->(TestFile:CodeNode)
- * TestFile nodes are lightweight: just filePath, name, testFramework, testCount.
- *
- * Usage: npm run enrich:test-coverage
+ * Existing behavior retained:
+ * - Create lightweight TestFile nodes.
+ * - Create file-level TESTED_BY edges from SourceFile -> TestFile.
  */
 import neo4j from 'neo4j-driver';
 import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { globSync } from 'glob';
 
 dotenv.config();
 
-const driver = neo4j.driver(
-  process.env.NEO4J_URI || 'bolt://localhost:7687',
-  neo4j.auth.basic(
-    process.env.NEO4J_USER || 'neo4j',
-    process.env.NEO4J_PASSWORD || 'codegraph',
-  ),
-);
+export interface ImportBinding {
+  imported: string;
+  sourceSpec: string;
+  namespace?: boolean;
+  defaultImport?: boolean;
+}
+
+export interface TestCallRef {
+  alias: string;
+  member?: string;
+}
+
+export interface TestFunctionTrace {
+  functionName: string;
+  calls: TestCallRef[];
+}
 
 interface TestFileInfo {
   filePath: string;
   name: string;
-  imports: string[];       // resolved absolute paths of imported source files
-  testCount: number;       // number of it()/test() calls
-  describeBlocks: string[]; // describe() block names
+  imports: string[]; // resolved absolute import targets
+  testCount: number;
+  describeBlocks: string[];
+  traces: TestFunctionTrace[];
 }
 
-function analyzeTestFile(filePath: string, projectRoot: string): TestFileInfo {
+const TEST_FILE_PATTERNS = [
+  'src/**/*.test.ts',
+  'src/**/*.spec.ts',
+  'src/**/*.spec-test.ts', // compatibility with existing suite
+];
+
+export function isTestFileByConvention(filePath: string): boolean {
+  return /(\.test|\.spec|\.spec-test)\.ts$/i.test(filePath);
+}
+
+export function extractImportBindings(content: string): Map<string, ImportBinding> {
+  const bindings = new Map<string, ImportBinding>();
+
+  // import { a, b as c } from './x'
+  const namedRegex = /import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]/g;
+  for (const match of content.matchAll(namedRegex)) {
+    const namedBlock = match[1] ?? '';
+    const sourceSpec = match[2] ?? '';
+    const parts = namedBlock
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean);
+
+    for (const p of parts) {
+      const aliasSplit = p.split(/\s+as\s+/i).map((x) => x.trim());
+      const imported = aliasSplit[0];
+      const alias = aliasSplit[1] ?? imported;
+      if (!alias || !imported) continue;
+      bindings.set(alias, { imported, sourceSpec });
+    }
+  }
+
+  // import * as ns from './x'
+  const namespaceRegex = /import\s*\*\s*as\s*([A-Za-z_$][\w$]*)\s*from\s*['"]([^'"]+)['"]/g;
+  for (const match of content.matchAll(namespaceRegex)) {
+    const alias = match[1];
+    const sourceSpec = match[2] ?? '';
+    if (!alias) continue;
+    bindings.set(alias, { imported: '*', sourceSpec, namespace: true });
+  }
+
+  // import defaultName from './x'
+  const defaultRegex = /import\s+([A-Za-z_$][\w$]*)\s+from\s+['"]([^'"]+)['"]/g;
+  for (const match of content.matchAll(defaultRegex)) {
+    const alias = match[1];
+    const sourceSpec = match[2] ?? '';
+    if (!alias) continue;
+    if (!bindings.has(alias)) {
+      bindings.set(alias, { imported: 'default', sourceSpec, defaultImport: true });
+    }
+  }
+
+  return bindings;
+}
+
+function resolveRelativeImport(spec: string, dir: string): string | null {
+  if (!spec.startsWith('.')) return null;
+
+  let normalized = spec;
+  if (normalized.endsWith('.js')) normalized = normalized.replace(/\.js$/, '');
+  if (normalized.endsWith('.ts')) normalized = normalized.replace(/\.ts$/, '');
+
+  const base = path.resolve(dir, normalized);
+  const candidates = [
+    `${base}.ts`,
+    `${base}/index.ts`,
+    base,
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+export function resolveImportMap(bindings: Map<string, ImportBinding>, dir: string): Map<string, { targetPath: string; imported: string; namespace?: boolean; defaultImport?: boolean }> {
+  const resolved = new Map<string, { targetPath: string; imported: string; namespace?: boolean; defaultImport?: boolean }>();
+
+  for (const [alias, binding] of bindings.entries()) {
+    const targetPath = resolveRelativeImport(binding.sourceSpec, dir);
+    if (!targetPath) continue;
+    resolved.set(alias, {
+      targetPath,
+      imported: binding.imported,
+      namespace: binding.namespace,
+      defaultImport: binding.defaultImport,
+    });
+  }
+
+  return resolved;
+}
+
+function extractDescribeBlocks(content: string): string[] {
+  const describeRegex = /describe\s*\(\s*['"`]([^'"`]+)['"`]/g;
+  const blocks: string[] = [];
+  for (const match of content.matchAll(describeRegex)) {
+    if (match[1]) blocks.push(match[1]);
+  }
+  return blocks;
+}
+
+function extractTestCount(content: string): number {
+  return content.match(/\b(?:it|test)\s*\(/g)?.length ?? 0;
+}
+
+export function traceTestFunctionCalls(content: string): TestFunctionTrace[] {
+  const traces: TestFunctionTrace[] = [];
+
+  const callbackRegex = /\b(it|test)\s*\(\s*(["'`])([^"'`]+)\2\s*,\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*\{([\s\S]*?)\}\s*\)/g;
+
+  for (const match of content.matchAll(callbackRegex)) {
+    const functionName = match[3] ?? 'unnamed-test';
+    const body = match[4] ?? '';
+    const calls: TestCallRef[] = [];
+
+    // foo(...)
+    const directCallRegex = /\b([A-Za-z_$][\w$]*)\s*\(/g;
+    for (const callMatch of body.matchAll(directCallRegex)) {
+      const alias = callMatch[1];
+      if (!alias) continue;
+      if (['if', 'for', 'while', 'switch', 'catch', 'it', 'test', 'expect', 'describe'].includes(alias)) continue;
+      calls.push({ alias });
+    }
+
+    // ns.member(...)
+    const memberCallRegex = /\b([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\s*\(/g;
+    for (const callMatch of body.matchAll(memberCallRegex)) {
+      const alias = callMatch[1];
+      const member = callMatch[2];
+      if (!alias || !member) continue;
+      calls.push({ alias, member });
+    }
+
+    traces.push({ functionName, calls });
+  }
+
+  return traces;
+}
+
+function stableTestNodeId(prefix: 'testfile' | 'testfn', value: string): string {
+  const digest = crypto.createHash('sha1').update(value).digest('hex').slice(0, 16);
+  return `${prefix}_${digest}`;
+}
+
+export function analyzeTestFile(filePath: string): TestFileInfo {
   const content = fs.readFileSync(filePath, 'utf-8');
   const name = path.basename(filePath);
   const dir = path.dirname(filePath);
 
-  // Extract imports — both static and from/require (supports multiline imports)
-  const importRegex = /(?:import\s+[\s\S]*?from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\))/g;
-  const rawImports: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = importRegex.exec(content)) !== null) {
-    const spec = match[1] || match[2];
-    if (spec && spec.startsWith('.')) {
-      rawImports.push(spec);
-    }
-  }
-
-  // Resolve imports to absolute paths, handling .js → .ts
-  const resolvedImports: string[] = [];
-  for (const spec of rawImports) {
-    let resolved = spec;
-    // Strip .js extension for ESM
-    if (resolved.endsWith('.js')) {
-      resolved = resolved.replace(/\.js$/, '');
-    }
-    // Strip .ts extension if present
-    if (resolved.endsWith('.ts')) {
-      resolved = resolved.replace(/\.ts$/, '');
-    }
-
-    const base = path.resolve(dir, resolved);
-
-    // Try .ts first, then /index.ts
-    const candidates = [
-      base + '.ts',
-      base + '/index.ts',
-      base,  // exact match (e.g. already has extension)
-    ];
-
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) {
-        resolvedImports.push(candidate);
-        break;
-      }
-    }
-  }
-
-  // Count test cases
-  const testMatches = content.match(/\b(?:it|test)\s*\(/g);
-  const testCount = testMatches?.length || 0;
-
-  // Extract describe block names
-  const describeRegex = /describe\s*\(\s*['"`]([^'"`]+)['"`]/g;
-  const describeBlocks: string[] = [];
-  while ((match = describeRegex.exec(content)) !== null) {
-    describeBlocks.push(match[1]);
-  }
+  const bindings = extractImportBindings(content);
+  const resolvedBindings = resolveImportMap(bindings, dir);
+  const imports = Array.from(new Set(Array.from(resolvedBindings.values()).map((v) => v.targetPath)));
 
   return {
     filePath,
     name,
-    imports: resolvedImports,
-    testCount,
-    describeBlocks,
+    imports,
+    testCount: extractTestCount(content),
+    describeBlocks: extractDescribeBlocks(content),
+    traces: traceTestFunctionCalls(content),
   };
 }
 
-async function main() {
-  const projectRoot = process.cwd();
-  console.log('[test-coverage] Scanning for test files...\n');
-
-  // Find all test files
-  const testFiles = globSync('src/**/*.{test,spec-test}.ts', {
-    cwd: projectRoot,
-    absolute: true,
-    ignore: ['**/node_modules/**'],
-  });
-
-  console.log(`  Found ${testFiles.length} test files on disk`);
-
-  // Analyze each test file
-  const analyses: TestFileInfo[] = [];
-  for (const tf of testFiles) {
-    const info = analyzeTestFile(tf, projectRoot);
-    analyses.push(info);
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object' && 'toNumber' in value && typeof (value as any).toNumber === 'function') {
+    return (value as any).toNumber();
   }
+  return Number(value ?? 0);
+}
 
-  const totalTests = analyses.reduce((s, a) => s + a.testCount, 0);
-  const totalImports = analyses.reduce((s, a) => s + a.imports.length, 0);
-  console.log(`  Total test cases: ${totalTests}`);
-  console.log(`  Total source imports from tests: ${totalImports}`);
+export async function enrichTestCoverage(projectRoot = process.cwd()): Promise<void> {
+  const driver = neo4j.driver(
+    process.env.NEO4J_URI || 'bolt://localhost:7687',
+    neo4j.auth.basic(
+      process.env.NEO4J_USER || 'neo4j',
+      process.env.NEO4J_PASSWORD || 'codegraph',
+    ),
+  );
 
-  // Get projectId
   const session = driver.session();
+
   try {
+    console.log('[test-coverage] Scanning for test files...\n');
+
+    const testFiles = globSync(TEST_FILE_PATTERNS, {
+      cwd: projectRoot,
+      absolute: true,
+      ignore: ['**/node_modules/**'],
+    });
+
+    const conventionTestFiles = testFiles.filter(isTestFileByConvention);
+    console.log(`  Found ${conventionTestFiles.length} test files on disk`);
+
+    const analyses = conventionTestFiles.map((filePath) => analyzeTestFile(filePath));
+    const totalTests = analyses.reduce((sum, info) => sum + info.testCount, 0);
+    const totalImports = analyses.reduce((sum, info) => sum + info.imports.length, 0);
+    console.log(`  Total test cases: ${totalTests}`);
+    console.log(`  Total source imports from tests: ${totalImports}`);
+
     const pidResult = await session.run(
       `MATCH (p:Project) WHERE p.path = $path RETURN p.projectId AS pid`,
       { path: projectRoot },
@@ -138,127 +255,256 @@ async function main() {
     const projectId = pidResult.records[0]?.get('pid') || 'proj_c0d3e9a1f200';
     console.log(`  Project: ${projectId}\n`);
 
-    // Clear existing test coverage data
-    const clearResult = await session.run(`
-      MATCH (tf:TestFile {projectId: $pid}) DETACH DELETE tf
-      RETURN count(tf) AS cleared
-    `, { pid: projectId });
-    const cleared = clearResult.records[0]?.get('cleared');
-    if (cleared && (typeof cleared === 'number' ? cleared : cleared.toNumber()) > 0) {
-      console.log(`  Cleared ${typeof cleared === 'number' ? cleared : cleared.toNumber()} old TestFile nodes`);
-    }
+    // Reset previous test artifacts for this project
+    await session.run(
+      `MATCH (tf:TestFile {projectId: $pid}) DETACH DELETE tf`,
+      { pid: projectId },
+    );
+    await session.run(
+      `MATCH (tf:TestFunction {projectId: $pid}) DETACH DELETE tf`,
+      { pid: projectId },
+    );
+    await session.run(
+      `MATCH ()-[r:TESTED_BY]->() DELETE r`,
+    );
 
-    // Also clear old TESTED_BY edges (in case TestFile nodes were already deleted)
-    await session.run(`
-      MATCH ()-[r:TESTED_BY]->() DELETE r
-    `);
+    // Clear stale SourceFile test tag (for files that may be in graph)
+    await session.run(
+      `MATCH (sf:SourceFile {projectId: $pid})
+       WHERE sf.isTestFile = true
+       SET sf.isTestFile = false`,
+      { pid: projectId },
+    );
 
-    // Create TestFile nodes and TESTED_BY edges
     let testFileNodes = 0;
     let testedByEdges = 0;
-    let sourceFilesCovered = new Set<string>();
+    let tracedCalls = 0;
+    const sourceFilesCovered = new Set<string>();
 
     for (const analysis of analyses) {
-      // Create TestFile node
-      await session.run(`
-        CREATE (tf:TestFile:CodeNode {
+      const testFileNodeId = stableTestNodeId('testfile', analysis.filePath);
+
+      // Create TestFile node tagged with isTestFile
+      await session.run(
+        `CREATE (tf:TestFile:CodeNode {
           filePath: $filePath,
           name: $name,
           projectId: $pid,
           testCount: $testCount,
           describeBlocks: $describeBlocks,
-          nodeId: 'testfile_' + $name
-        })
-      `, {
-        filePath: analysis.filePath,
-        name: analysis.name,
-        pid: projectId,
-        testCount: analysis.testCount,
-        describeBlocks: analysis.describeBlocks,
-      });
+          isTestFile: true,
+          namingConvention: true,
+          nodeId: $nodeId
+        })`,
+        {
+          filePath: analysis.filePath,
+          name: analysis.name,
+          pid: projectId,
+          testCount: analysis.testCount,
+          describeBlocks: analysis.describeBlocks,
+          nodeId: testFileNodeId,
+        },
+      );
       testFileNodes++;
 
-      // Create TESTED_BY edges from source files to this test file
+      // If parser includes this file as SourceFile, tag it too
+      await session.run(
+        `MATCH (sf:SourceFile {projectId: $pid, filePath: $filePath})
+         SET sf.isTestFile = true`,
+        { pid: projectId, filePath: analysis.filePath },
+      );
+
+      // File-level TESTED_BY edges
       for (const importPath of analysis.imports) {
-        const result = await session.run(`
-          MATCH (sf:SourceFile {projectId: $pid})
-          WHERE sf.filePath = $importPath
-          MATCH (tf:TestFile {filePath: $testPath, projectId: $pid})
-          MERGE (sf)-[r:TESTED_BY]->(tf)
-          SET r.derived = true
-          RETURN sf.filePath AS matched
-        `, {
-          pid: projectId,
-          importPath,
-          testPath: analysis.filePath,
-        });
+        const result = await session.run(
+          `MATCH (sf:SourceFile {projectId: $pid})
+           WHERE sf.filePath = $importPath
+           MATCH (tf:TestFile {projectId: $pid, filePath: $testPath})
+           MERGE (sf)-[r:TESTED_BY]->(tf)
+           SET r.derived = true,
+               r.projectId = $pid
+           RETURN sf.filePath AS matched`,
+          {
+            pid: projectId,
+            importPath,
+            testPath: analysis.filePath,
+          },
+        );
 
         if (result.records.length > 0) {
           testedByEdges++;
           sourceFilesCovered.add(importPath);
         }
       }
+
+      // RF-14 phase 1: trace CALLS from test functions to source functions
+      const content = fs.readFileSync(analysis.filePath, 'utf-8');
+      const resolvedBindings = resolveImportMap(extractImportBindings(content), path.dirname(analysis.filePath));
+
+      for (let idx = 0; idx < analysis.traces.length; idx++) {
+        const trace = analysis.traces[idx];
+        const testFnNodeId = stableTestNodeId('testfn', `${analysis.filePath}#${idx}#${trace.functionName}`);
+
+        await session.run(
+          `MERGE (tf:TestFunction:CodeNode {projectId: $pid, nodeId: $nodeId})
+           ON CREATE SET
+            tf.name = $name,
+            tf.filePath = $filePath,
+            tf.isTestFunction = true,
+            tf.isTestFile = true,
+            tf.testFilePath = $filePath,
+            tf.source = 'rf14-trace'
+           ON MATCH SET
+            tf.name = $name,
+            tf.filePath = $filePath,
+            tf.source = 'rf14-trace'`,
+          {
+            pid: projectId,
+            nodeId: testFnNodeId,
+            name: trace.functionName,
+            filePath: analysis.filePath,
+          },
+        );
+
+        // Link TestFile -> TestFunction for traceability
+        await session.run(
+          `MATCH (testFile:TestFile {projectId: $pid, filePath: $filePath})
+           MATCH (testFn:TestFunction {projectId: $pid, nodeId: $testFnNodeId})
+           MERGE (testFile)-[r:CONTAINS]->(testFn)
+           SET r.derived = true,
+               r.projectId = $pid`,
+          {
+            pid: projectId,
+            filePath: analysis.filePath,
+            testFnNodeId,
+          },
+        );
+
+        for (const call of trace.calls) {
+          const binding = resolvedBindings.get(call.alias);
+          if (!binding) continue;
+
+          const targetName = call.member
+            ? (binding.namespace ? call.member : binding.imported)
+            : binding.imported;
+
+          if (!targetName || targetName === '*' || targetName === 'default') continue;
+
+          const callResult = await session.run(
+            `MATCH (testFn:TestFunction {projectId: $pid, nodeId: $testFnNodeId})
+             MATCH (fn:Function {projectId: $pid, filePath: $targetPath, name: $targetName})
+             MERGE (testFn)-[r:CALLS]->(fn)
+             SET r.derived = true,
+                 r.projectId = $pid,
+                 r.fromTestTrace = true,
+                 r.traceVersion = 'rf14-v1'
+             RETURN count(fn) AS matched`,
+            {
+              pid: projectId,
+              testFnNodeId,
+              targetPath: binding.targetPath,
+              targetName,
+            },
+          );
+
+          tracedCalls += toNumber(callResult.records[0]?.get('matched'));
+        }
+      }
     }
+
+    // RF-14 phase 2: materialize TESTED_BY_FUNCTION edges from traced CALLS
+    const testedByFunctionResult = await session.run(
+      `MATCH (tf:TestFunction {projectId: $pid})-[:CALLS]->(f:Function {projectId: $pid})
+       MERGE (tf)-[r:TESTED_BY_FUNCTION]->(f)
+       SET r.derived = true,
+           r.projectId = $pid,
+           r.fromTestTrace = true,
+           r.traceVersion = 'rf14-v1'
+       RETURN count(r) AS cnt`,
+      { pid: projectId },
+    );
+    const testedByFunctionEdges = toNumber(testedByFunctionResult.records[0]?.get('cnt'));
+
+    // RF-14 phase 2: set hasTestCaller on Function nodes
+    await session.run(
+      `MATCH (f:Function {projectId: $pid})
+       SET f.hasTestCaller = false`,
+      { pid: projectId },
+    );
+    const hasCallerResult = await session.run(
+      `MATCH (f:Function {projectId: $pid})<-[:TESTED_BY_FUNCTION]-(:TestFunction {projectId: $pid})
+       SET f.hasTestCaller = true
+       RETURN count(DISTINCT f) AS cnt`,
+      { pid: projectId },
+    );
+    const hasTestCallerCount = toNumber(hasCallerResult.records[0]?.get('cnt'));
 
     console.log(`  Created ${testFileNodes} TestFile nodes`);
     console.log(`  Created ${testedByEdges} TESTED_BY edges`);
+    console.log(`  Traced ${tracedCalls} CALLS edges from test functions`);
+    console.log(`  Created ${testedByFunctionEdges} TESTED_BY_FUNCTION edges`);
+    console.log(`  Marked ${hasTestCallerCount} functions with hasTestCaller=true`);
     console.log(`  Source files with test coverage: ${sourceFilesCovered.size}`);
 
-    // Query coverage gaps
     console.log('\n═══ Coverage Report ═══════════════════════════════════════\n');
 
-    // Total source files
-    const totalResult = await session.run(`
-      MATCH (sf:SourceFile {projectId: $pid})
-      WHERE NOT sf.filePath CONTAINS '.test.' AND NOT sf.filePath CONTAINS '.spec-test.'
-      RETURN count(sf) AS total
-    `, { pid: projectId });
-    const totalSourceFiles = (totalResult.records[0]?.get('total') as any)?.toNumber?.() ?? totalResult.records[0]?.get('total') ?? 0;
+    const totalResult = await session.run(
+      `MATCH (sf:SourceFile {projectId: $pid})
+       WHERE coalesce(sf.isTestFile, false) = false
+       RETURN count(sf) AS total`,
+      { pid: projectId },
+    );
+    const totalSourceFiles = toNumber(totalResult.records[0]?.get('total'));
 
-    // Covered source files
-    const coveredResult = await session.run(`
-      MATCH (sf:SourceFile {projectId: $pid})-[:TESTED_BY]->()
-      RETURN count(DISTINCT sf) AS covered
-    `, { pid: projectId });
-    const coveredFiles = (coveredResult.records[0]?.get('covered') as any)?.toNumber?.() ?? coveredResult.records[0]?.get('covered') ?? 0;
+    const coveredResult = await session.run(
+      `MATCH (sf:SourceFile {projectId: $pid})-[:TESTED_BY]->()
+       RETURN count(DISTINCT sf) AS covered`,
+      { pid: projectId },
+    );
+    const coveredFiles = toNumber(coveredResult.records[0]?.get('covered'));
 
-    const coveragePct = totalSourceFiles > 0 ? ((coveredFiles / totalSourceFiles) * 100).toFixed(1) : '0';
+    const coveragePct = totalSourceFiles > 0 ? ((coveredFiles / totalSourceFiles) * 100).toFixed(1) : '0.0';
     console.log(`  Source files: ${totalSourceFiles}`);
     console.log(`  Tested: ${coveredFiles} (${coveragePct}%)`);
-    console.log(`  Untested: ${totalSourceFiles - coveredFiles}`);
+    console.log(`  Untested: ${Math.max(0, totalSourceFiles - coveredFiles)}`);
 
-    // CRITICAL/HIGH risk functions without test coverage
     console.log('\n  ⚠️  CRITICAL/HIGH functions in untested files:\n');
-    const gapResult = await session.run(`
-      MATCH (f:Function {projectId: $pid})
-      WHERE f.riskTier IN ['CRITICAL', 'HIGH']
-      MATCH (sf:SourceFile)-[:CONTAINS]->(f)
-      WHERE NOT (sf)-[:TESTED_BY]->()
-      RETURN f.name AS function, sf.name AS file, f.riskTier AS tier,
-             round(f.riskLevel * 100) / 100 AS risk
-      ORDER BY f.riskLevel DESC LIMIT 20
-    `, { pid: projectId });
+    const gapResult = await session.run(
+      `MATCH (f:Function {projectId: $pid})
+       WHERE f.riskTier IN ['CRITICAL', 'HIGH']
+       MATCH (sf:SourceFile {projectId: $pid})-[:CONTAINS]->(f)
+       WHERE NOT (sf)-[:TESTED_BY]->()
+       RETURN f.name AS function, sf.name AS file, f.riskTier AS tier,
+              round(f.compositeRisk * 100) / 100 AS risk
+       ORDER BY f.compositeRisk DESC LIMIT 20`,
+      { pid: projectId },
+    );
 
     if (gapResult.records.length === 0) {
       console.log('  ✅ All CRITICAL/HIGH functions are in tested files!');
     } else {
-      for (const r of gapResult.records) {
-        const tier = r.get('tier');
+      for (const row of gapResult.records) {
+        const tier = String(row.get('tier'));
         const icon = tier === 'CRITICAL' ? '🔴' : '🟠';
-        console.log(`  ${icon} ${tier} ${r.get('function')} (${r.get('file')}, risk=${r.get('risk')})`);
+        console.log(`  ${icon} ${tier} ${row.get('function')} (${row.get('file')}, risk=${row.get('risk')})`);
       }
       console.log(`\n  ${gapResult.records.length} high-risk functions in untested files.`);
     }
 
+    console.log('\n✅ Test coverage enrichment complete.');
   } finally {
     await session.close();
     await driver.close();
   }
-
-  console.log('\n✅ Test coverage enrichment complete.');
 }
 
-main().catch(err => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+export async function main(): Promise<void> {
+  await enrichTestCoverage();
+}
+
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/create-test-coverage-edges.ts') || process.argv[1]?.endsWith('/create-test-coverage-edges.js')) {
+  main().catch((err) => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}

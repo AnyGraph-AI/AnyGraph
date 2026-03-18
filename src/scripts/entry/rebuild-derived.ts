@@ -79,6 +79,7 @@ async function main() {
       'enrich:evidence-anchor',
       'enrich:claim-project',
       'enrich:evidence-project',
+      'enrich:test-coverage',
       'enrich:composite-risk',
       'enrich:evaluated-edges',
       'enrich:flags-edges',
