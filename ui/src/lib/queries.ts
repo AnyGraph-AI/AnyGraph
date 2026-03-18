@@ -262,6 +262,20 @@ export const QUERIES = {
     ORDER BY m.projectId, m.name
   `,
 
+  /** Recently destabilized — CRITICAL functions updated in a rolling window */
+  recentlyDestabilized: `
+    MATCH (f:Function {projectId: $projectId})
+    WHERE f.riskTier = 'CRITICAL'
+      AND f.runtimeCoverageUpdatedAt IS NOT NULL
+      AND datetime(f.runtimeCoverageUpdatedAt) >= datetime() - duration({days: $days})
+    RETURN f.name AS name,
+           f.filePath AS filePath,
+           f.runtimeCoverageUpdatedAt AS observedAt,
+           coalesce(f.compositeRisk, 0) AS compositeRisk
+    ORDER BY datetime(f.runtimeCoverageUpdatedAt) DESC
+    LIMIT $limit
+  `,
+
   /** Connection test */
   ping: `RETURN 1 AS ok`,
 } as const;

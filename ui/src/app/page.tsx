@@ -12,6 +12,7 @@ import { RiskDistributionChart } from '@/components/RiskDistributionChart';
 import { SafestAction } from '@/components/SafestAction';
 import { RiskOverTime } from '@/components/RiskOverTime';
 import { MilestoneProgress } from '@/components/MilestoneProgress';
+import { RecentlyDestabilizedAlert } from '@/components/RecentlyDestabilizedAlert';
 
 const DEFAULT_PROJECT_ID = 'proj_c0d3e9a1f200';
 
@@ -94,6 +95,16 @@ export default function Dashboard() {
       fetchQuery(QUERIES.milestoneProgress, { projectId: 'plan_' }),
   });
 
+  const { data: recentlyDestabilized } = useQuery({
+    queryKey: ['recently-destabilized'],
+    queryFn: () =>
+      fetchQuery(QUERIES.recentlyDestabilized, {
+        projectId: DEFAULT_PROJECT_ID,
+        days: 7,
+        limit: 10,
+      }),
+  });
+
   const loading = projectLoading || filesLoading || riskLoading || planLoading || heatmapLoading || fnHeatmapLoading || fnTableLoading;
 
   // Compute average confidence from heatmap data
@@ -132,6 +143,9 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+
+          {/* Recently destabilized alert */}
+          <RecentlyDestabilizedAlert data={recentlyDestabilized?.data ?? []} />
 
           {/* Project Summary */}
           {project?.data?.[0] && (

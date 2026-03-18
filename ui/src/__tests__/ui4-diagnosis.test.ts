@@ -107,4 +107,36 @@ describe('[UI-4] page integration', () => {
     expect(source).toContain('RiskOverTime');
     expect(source).toContain('MilestoneProgress');
   });
+
+  it('dashboard includes recently-destabilized query usage', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const source = await fs.readFile(
+      path.resolve(import.meta.dirname, '..', 'app', 'page.tsx'),
+      'utf-8',
+    );
+    expect(source).toContain('recentlyDestabilized');
+  });
+
+  it('has /diagnosis page with Diagnosis Grid and Architecture Probes tabs', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const pagePath = path.resolve(import.meta.dirname, '..', 'app', 'diagnosis', 'page.tsx');
+    const source = await fs.readFile(pagePath, 'utf-8');
+
+    expect(source).toContain('Diagnosis Grid');
+    expect(source).toContain('Architecture Probes');
+    expect(source).toContain('DiagnosisGrid');
+  });
+});
+
+describe('[UI-4] recentlyDestabilized query', () => {
+  it('defines recentlyDestabilized query scoped by $projectId', async () => {
+    const { QUERIES } = await import('@/lib/queries');
+    const query = (QUERIES as Record<string, string>).recentlyDestabilized;
+
+    expect(query).toBeDefined();
+    expect(query).toContain('$projectId');
+    expect(query).toContain("riskTier = 'CRITICAL'");
+  });
 });
