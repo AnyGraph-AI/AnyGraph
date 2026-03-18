@@ -210,6 +210,32 @@ Write the code that makes the TDD spec tests pass.
 
 Run: `npm test` — all tests (existing + new) should pass.
 
+### When a pre-existing test breaks (NON-NEGOTIABLE)
+
+If an existing test fails after your implementation, **STOP.** Do not dismiss it. Do not say "this tests an earlier implementation." Diagnose it:
+
+1. **Read the test.** What behavior is it asserting? Is it testing a contract (input→output, API shape, invariant) or an implementation detail (internal structure, mock wiring)?
+
+2. **Read your diff.** What did you change that could have caused this failure?
+
+3. **Determine the verdict:**
+
+| Situation | Verdict | Action |
+|-----------|---------|--------|
+| Your change intentionally altered the behavior the test verifies | **Spec changed** | Update the test to match the new spec. Document WHY in the commit message. |
+| The test was asserting implementation details that your refactor legitimately changed (e.g., internal data structure, mock shape) | **Test was brittle** | Rewrite the test to assert the contract, not the implementation. The behavior didn't change — the test was wrong. |
+| You don't understand why it broke | **Investigate** | Do NOT proceed. Read the source. Trace the call chain. Ask if stuck. |
+| The test catches a real regression your code introduced | **Your code is wrong** | Fix your code, not the test. |
+
+**What you NEVER do:**
+- Skip the test (`--skip`, `.skip`, commenting out)
+- Delete the test
+- Weaken the assertion to make it pass
+- Say "this is from an earlier implementation" without proving the spec changed
+- Proceed with failing tests and promise to fix later
+
+**The principle:** A breaking test is a signal, not an obstacle. TDD means the tests define the contract. If you change the contract, you change the test AND document why. If you didn't intend to change the contract, your code has a bug. There is no third option.
+
 ---
 
 ## Step 7b: Annotate Task with Artifacts
