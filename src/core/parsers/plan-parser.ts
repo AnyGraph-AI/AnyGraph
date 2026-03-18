@@ -137,6 +137,7 @@ const FILES_TOUCHED = /^###?\s*Files\s+touched:?\s*$/i;
 //   - [ ] **DEPENDS_ON** Task X
 //   BLOCKS: Task Y
 const DEPENDS_ON_PATTERN = /^\s*(?:[-*]\s*\[[ xX]\]\s*)?(?:\*\*\s*)?DEPENDS_ON(?:\s*\*\*)?\s*:?\s+(.+)$/i;
+const NO_CODE_EVIDENCE_OK_PATTERN = /NO_CODE_EVIDENCE_OK\(([^)]+)\)/;
 const BLOCKS_PATTERN = /^\s*(?:[-*]\s*\[[ xX]\]\s*)?(?:\*\*\s*)?BLOCKS(?:\s*\*\*)?\s*:?\s+(.+)$/i;
 
 // ============================================================================
@@ -306,7 +307,7 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       });
 
       // Peek forward to collect spec prose between milestone header and first task/section
-      // Filter out dependency metadata lines (DEPENDS_ON, NO_DEPENDS_OK) — those aren't specs
+      // Filter out dependency metadata lines (DEPENDS_ON, NO_DEPENDS_OK, NO_CODE_EVIDENCE_OK) — those aren't specs
       const specLines: string[] = [];
       let peekIdx = i + 1;
       while (peekIdx < lines.length) {
@@ -321,7 +322,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
         }
         if (peekLine.length > 0 &&
             !peekLine.startsWith('DEPENDS_ON') &&
-            !peekLine.startsWith('NO_DEPENDS_OK')) {
+            !peekLine.startsWith('NO_DEPENDS_OK') &&
+            !peekLine.startsWith('NO_CODE_EVIDENCE_OK')) {
           specLines.push(peekLine);
         }
         peekIdx++;
@@ -563,6 +565,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
 
       const crossRefs = extractCrossReferences(taskText);
       stats.crossRefs += crossRefs.length;
+      const tableNoEvidenceMatch = taskText.match(NO_CODE_EVIDENCE_OK_PATTERN);
+      const tableNoCodeEvidenceOK = tableNoEvidenceMatch ? tableNoEvidenceMatch[1].trim() : null;
 
       nodes.push({
         id: taskId,
@@ -589,6 +593,7 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
           embeddingInputVersion: 1,
           hasCodeEvidence: false,
           codeEvidenceCount: 0,
+          ...(tableNoCodeEvidenceOK ? { noCodeEvidenceOK: tableNoCodeEvidenceOK } : {}),
         },
       });
 
@@ -631,6 +636,10 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       const crossRefs = extractCrossReferences(text);
       stats.crossRefs += crossRefs.length;
 
+      // Check for NO_CODE_EVIDENCE_OK directive (inline or next line)
+      const noEvidenceMatch = text.match(NO_CODE_EVIDENCE_OK_PATTERN);
+      const noCodeEvidenceOK = noEvidenceMatch ? noEvidenceMatch[1].trim() : null;
+
       nodes.push({
         id: taskId,
         labels: ['CodeNode', PlanNodeType.TASK],
@@ -653,6 +662,8 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
           // These get filled by enrichment:
           hasCodeEvidence: false,
           codeEvidenceCount: 0,
+          // NO_CODE_EVIDENCE_OK: task intentionally has no code artifact
+          ...(noCodeEvidenceOK ? { noCodeEvidenceOK } : {}),
         },
       });
 
