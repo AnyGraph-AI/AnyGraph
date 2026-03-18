@@ -88,7 +88,7 @@ export const QUERIES = {
   /** Plan health — milestone + task status summary */
   planHealth: `
     MATCH (t:Task)-[:PART_OF]->(m:Milestone)
-    WHERE m.projectId = $planProjectId
+    WHERE m.projectId = $projectId
     WITH m, t,
          CASE WHEN t.status = 'done' THEN 1 ELSE 0 END AS isDone
     WITH m,
@@ -107,7 +107,7 @@ export const QUERIES = {
          sum(CASE WHEN ms.done = ms.total THEN 1 ELSE 0 END) AS doneMilestones,
          size(milestones) AS totalMilestones
     MATCH (t2:Task {status: 'planned'})-[:PART_OF]->(m2:Milestone)
-    WHERE m2.projectId = $planProjectId
+    WHERE m2.projectId = $projectId
     OPTIONAL MATCH (t2)-[:DEPENDS_ON]->(dep:Task)
     WHERE dep.status <> 'done'
     WITH totalTasks, doneTasks, totalMilestones, doneMilestones,

@@ -162,10 +162,10 @@ describe('Queries module', () => {
     }
   });
 
-  it('all queries contain $projectId parameter (except ping, listProjects, planHealth)', async () => {
+  it('all queries contain $projectId parameter (except ping and listProjects)', async () => {
     const { QUERIES } = await import('@/lib/queries');
     const filtered = Object.entries(QUERIES).filter(
-      ([k]) => k !== 'ping' && k !== 'listProjects' && k !== 'planHealth',
+      ([k]) => k !== 'ping' && k !== 'listProjects',
     );
     for (const [name, query] of filtered) {
       expect(query).toContain('$projectId');

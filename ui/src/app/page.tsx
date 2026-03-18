@@ -37,7 +37,7 @@ export default function Dashboard() {
   const { data: planHealth, isLoading: planLoading } = useQuery({
     queryKey: ['plan-health'],
     queryFn: () =>
-      fetchQuery(QUERIES.planHealth, { planProjectId: 'plan_codegraph' }),
+      fetchQuery(QUERIES.planHealth, { projectId: 'plan_codegraph' }),
   });
 
   const loading = projectLoading || filesLoading || riskLoading || planLoading;

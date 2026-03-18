@@ -42,7 +42,7 @@ describe('[UI-1] queries.ts — planHealth query', () => {
 
     const rows = await cachedQuery(
       (QUERIES as Record<string, string>).planHealth,
-      { planProjectId: 'plan_codegraph' },
+      { projectId: 'plan_codegraph' },
     );
 
     expect(Array.isArray(rows)).toBe(true);
