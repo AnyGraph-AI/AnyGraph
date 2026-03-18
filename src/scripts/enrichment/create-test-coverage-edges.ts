@@ -49,6 +49,8 @@ const TEST_FILE_PATTERNS = [
   'src/**/*.test.ts',
   'src/**/*.spec.ts',
   'src/**/*.spec-test.ts', // compatibility with existing suite
+  'ui/src/**/*.test.ts',   // UI dashboard tests
+  'ui/src/**/*.spec.ts',
 ];
 
 export function isTestFileByConvention(filePath: string): boolean {
@@ -97,20 +99,58 @@ export function extractImportBindings(content: string): Map<string, ImportBindin
     }
   }
 
+  // Dynamic imports: await import('@/lib/queries'), import('./foo')
+  const dynamicRegex = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  for (const match of content.matchAll(dynamicRegex)) {
+    const sourceSpec = match[1] ?? '';
+    if (!sourceSpec) continue;
+    // Use the module path as both alias and source — we just need the sourceSpec for resolution
+    const alias = `__dynamic_${sourceSpec.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    if (!bindings.has(alias)) {
+      bindings.set(alias, { imported: '*', sourceSpec, namespace: true });
+    }
+  }
+
   return bindings;
 }
 
-function resolveRelativeImport(spec: string, dir: string): string | null {
-  if (!spec.startsWith('.')) return null;
-
+/**
+ * Resolve an import specifier to an absolute file path.
+ * Supports:
+ * - Relative imports: './foo', '../bar'
+ * - tsconfig path aliases: '@/lib/queries' → '<projectRoot>/src/lib/queries.ts'
+ *
+ * @param spec - the import specifier string
+ * @param dir - directory of the importing file
+ * @param projectRoot - optional project root for alias resolution
+ */
+function resolveRelativeImport(spec: string, dir: string, projectRoot?: string): string | null {
   let normalized = spec;
+
+  // Handle tsconfig path aliases: @/ → <projectRoot>/src/
+  // Walk up from dir to find the nearest tsconfig.json with paths
+  if (normalized.startsWith('@/') && !normalized.startsWith('@/..')) {
+    const root = projectRoot ?? findProjectRoot(dir);
+    if (root) {
+      const aliasResolved = path.join(root, 'src', normalized.slice(2));
+      normalized = path.relative(dir, aliasResolved);
+      if (!normalized.startsWith('.')) normalized = './' + normalized;
+    } else {
+      return null;
+    }
+  }
+
+  if (!normalized.startsWith('.')) return null;
+
   if (normalized.endsWith('.js')) normalized = normalized.replace(/\.js$/, '');
   if (normalized.endsWith('.ts')) normalized = normalized.replace(/\.ts$/, '');
 
   const base = path.resolve(dir, normalized);
   const candidates = [
     `${base}.ts`,
+    `${base}.tsx`,
     `${base}/index.ts`,
+    `${base}/index.tsx`,
     base,
   ];
 
@@ -120,6 +160,26 @@ function resolveRelativeImport(spec: string, dir: string): string | null {
     }
   }
 
+  return null;
+}
+
+/** Walk up from dir to find nearest tsconfig.json with paths.@/ alias */
+function findProjectRoot(dir: string): string | null {
+  let current = dir;
+  for (let i = 0; i < 10; i++) {
+    const tsconfig = path.join(current, 'tsconfig.json');
+    if (fs.existsSync(tsconfig)) {
+      try {
+        const content = fs.readFileSync(tsconfig, 'utf-8');
+        if (content.includes('"@/*"')) {
+          return current;
+        }
+      } catch { /* skip */ }
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
   return null;
 }
 

@@ -374,6 +374,21 @@ export async function enrichPrecomputeScores(
       coChangeMap[r.get('sfId') as string] = toNum(r.get('coChangeCount'));
     }
 
+    // File-level TESTED_BY fallback: files with no Functions but with TESTED_BY edges
+    // (e.g. queries.ts exports a const object, not functions)
+    const fileTestedByResult = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       OPTIONAL MATCH (sf)-[:TESTED_BY]->()
+       WITH sf.id AS sfId, count(*) AS testedByCount
+       WHERE testedByCount > 0
+       RETURN sfId, testedByCount`,
+      { projectId },
+    );
+    const fileTestedByMap: Record<string, number> = {};
+    for (const r of fileTestedByResult.records) {
+      fileTestedByMap[r.get('sfId') as string] = toNum(r.get('testedByCount'));
+    }
+
     // RF-14: Function-level coverage via hasTestCaller property.
     const fnCoverageResult = await session.run(
       `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})-[:CONTAINS]->(f:CodeNode:Function {projectId: $projectId})
@@ -416,7 +431,11 @@ export async function enrichPrecomputeScores(
       const coChangeCount = coChangeMap[sfId] ?? 0;
 
       const coverage = coverageMap[sfId] ?? { covered: 0, total: 0 };
-      const testCoverage = coverage.total > 0 ? coverage.covered / coverage.total : 0;
+      // If file has no functions but has TESTED_BY edges, treat as covered (1.0)
+      const hasTestedByEdge = (fileTestedByMap[sfId] ?? 0) > 0;
+      const testCoverage = coverage.total > 0
+        ? coverage.covered / coverage.total
+        : hasTestedByEdge ? 1.0 : 0;
 
       const riskSum = risks.reduce((s, v) => s + v, 0);
       const riskDensity = risks.length > 0 ? riskSum / risks.length : 0;
@@ -456,9 +475,11 @@ export async function enrichPrecomputeScores(
 
       // For confidence: use test coverage as avgEffectiveConfidence proxy
       // until VerificationRun linkage exists (RF-15+)
-      const avgEffectiveConfidence = coverage.total > 0
-        ? coverage.covered / coverage.total
-        : 0;
+      const fileCoverage = coverageMap[raw.sfId] ?? { covered: 0, total: 0 };
+      const hasTestedBy = (fileTestedByMap[raw.sfId] ?? 0) > 0;
+      const avgEffectiveConfidence = fileCoverage.total > 0
+        ? fileCoverage.covered / fileCoverage.total
+        : hasTestedBy ? 1.0 : 0;
 
       const normalizedChurn = maxChurnTotal > 0
         ? raw.churnTotal / maxChurnTotal

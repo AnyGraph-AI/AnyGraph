@@ -133,4 +133,41 @@ describe('RF-14: resolveImportMap (CRITICAL characterization)', () => {
     const resolved = resolveImportMap(new Map(), '/tmp');
     expect(resolved.size).toBe(0);
   });
+
+  it('resolves @/ alias imports to source files', () => {
+    const bindings = new Map<string, ImportBinding>();
+    bindings.set('QUERIES', { imported: 'QUERIES', sourceSpec: '@/lib/queries' });
+
+    // dir is the UI test directory; project root has tsconfig with @/ → ./src/
+    const dir = '/home/jonathan/.openclaw/workspace/codegraph/ui/src/__tests__';
+    const resolved = resolveImportMap(bindings, dir);
+
+    expect(resolved.has('QUERIES')).toBe(true);
+    expect(resolved.get('QUERIES')?.targetPath).toContain('ui/src/lib/queries.ts');
+  });
+});
+
+describe('RF-14: dynamic import extraction', () => {
+  it('extracts dynamic import() specifiers', () => {
+    const code = `
+      const { cachedQuery } = await import('@/lib/neo4j');
+      const { QUERIES } = await import('@/lib/queries');
+    `;
+    const bindings = extractImportBindings(code);
+
+    // Should capture both dynamic imports
+    const specs = Array.from(bindings.values()).map(b => b.sourceSpec);
+    expect(specs).toContain('@/lib/neo4j');
+    expect(specs).toContain('@/lib/queries');
+  });
+
+  it('does not duplicate bindings for same dynamic import', () => {
+    const code = `
+      const a = await import('./foo');
+      const b = await import('./foo');
+    `;
+    const bindings = extractImportBindings(code);
+    const fooBindings = Array.from(bindings.values()).filter(b => b.sourceSpec === './foo');
+    expect(fooBindings.length).toBe(1);
+  });
 });
