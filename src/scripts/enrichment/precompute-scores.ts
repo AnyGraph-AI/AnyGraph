@@ -171,16 +171,32 @@ export function computePainScore(
 /**
  * 3-factor confidence score (DECISION-FORMULA-REVIEW-2026-03-17).
  *
- * confidenceScore = avgEffectiveConfidence×0.5
- *                 + min(evidenceCount,10)/10×0.3
- *                 + freshnessWeight×0.2
+ * confidenceScore = avgEffectiveConfidence×W_eff
+ *                 + min(evidenceCount,10)/10×W_ev
+ *                 + freshnessWeight×W_fr
+ *
+ * When VerificationRun data is absent (evidenceCount=0, freshness=0),
+ * the full weight shifts to effectiveConfidence so tested files reach
+ * 100% instead of being capped at 50% by missing infrastructure.
+ * Once RF-15 delivers real VR data, the weights activate naturally.
  */
 export function computeConfidenceScore(input: ConfidenceScoreInput): number {
   const { avgEffectiveConfidence, evidenceCount, freshnessWeight } = input;
+
+  const W_EFF = 0.5;
+  const W_EV = 0.3;
+  const W_FR = 0.2;
+
+  // If VR factors are absent (both zero), redistribute their weight to effectiveConf
+  const vrAbsent = evidenceCount === 0 && freshnessWeight === 0;
+  if (vrAbsent) {
+    return avgEffectiveConfidence; // full weight on what we know
+  }
+
   return (
-    avgEffectiveConfidence * 0.5 +
-    (Math.min(evidenceCount, 10) / 10) * 0.3 +
-    freshnessWeight * 0.2
+    avgEffectiveConfidence * W_EFF +
+    (Math.min(evidenceCount, 10) / 10) * W_EV +
+    freshnessWeight * W_FR
   );
 }
 

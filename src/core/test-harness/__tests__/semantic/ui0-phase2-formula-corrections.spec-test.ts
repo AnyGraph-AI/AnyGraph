@@ -139,33 +139,44 @@ describe('[UI-0 Phase 2] computeConfidenceScore — 3-factor', () => {
     expect(result).toBe(0);
   });
 
-  it('freshnessWeight contributes 20% of the score', () => {
+  it('freshnessWeight contributes 20% when VR data present', () => {
+    // Need non-zero evidenceCount or freshnessWeight for 3-factor mode
     const withFresh = computeConfidenceScore({
       avgEffectiveConfidence: 0,
-      evidenceCount: 0,
+      evidenceCount: 1,  // VR present → 3-factor mode
       freshnessWeight: 1.0,
     });
-    expect(withFresh).toBeCloseTo(0.2);
-
-    const withoutFresh = computeConfidenceScore({
-      avgEffectiveConfidence: 0,
-      evidenceCount: 0,
-      freshnessWeight: 0,
-    });
-    expect(withoutFresh).toBe(0);
+    // 0×0.5 + (1/10)×0.3 + 1.0×0.2 = 0 + 0.03 + 0.2 = 0.23
+    expect(withFresh).toBeCloseTo(0.23);
   });
 
-  it('backward-compatible: coverage-only mode when no VR data exists', () => {
-    // When no VerificationRuns exist, caller passes coverage ratio as effectiveConfidence
-    // evidenceCount = 0, freshnessWeight = 0
+  it('VR absent: full weight shifts to effectiveConfidence', () => {
+    // When no VerificationRuns exist (evidenceCount=0, freshnessWeight=0),
+    // confidence = effectiveConfidence directly (no 50% cap)
     const result = computeConfidenceScore({
       avgEffectiveConfidence: 0.6,  // 6/10 functions tested
       evidenceCount: 0,
       freshnessWeight: 0,
     });
+    expect(result).toBeCloseTo(0.6);
+  });
 
-    // 0.6×0.5 + 0 + 0 = 0.3
-    expect(result).toBeCloseTo(0.3);
+  it('VR absent: fully tested file reaches 100% confidence', () => {
+    const result = computeConfidenceScore({
+      avgEffectiveConfidence: 1.0,
+      evidenceCount: 0,
+      freshnessWeight: 0,
+    });
+    expect(result).toBe(1.0);
+  });
+
+  it('VR absent: untested file stays at 0% confidence', () => {
+    const result = computeConfidenceScore({
+      avgEffectiveConfidence: 0,
+      evidenceCount: 0,
+      freshnessWeight: 0,
+    });
+    expect(result).toBe(0);
   });
 });
 
