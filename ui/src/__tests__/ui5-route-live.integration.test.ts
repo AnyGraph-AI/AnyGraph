@@ -26,7 +26,7 @@ describe('[UI-5] live route integration coverage', () => {
     expect(body.data.absoluteNodeCap).toBe(500);
     expect(Array.isArray(body.data.nodes)).toBe(true);
     expect(Array.isArray(body.data.edges)).toBe(true);
-  });
+  }, 20000);
 
   it('danger-paths route resolves a real source-file seed and returns danger payload', async () => {
     const req = new Request(

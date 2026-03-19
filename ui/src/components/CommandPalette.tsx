@@ -11,7 +11,13 @@ import {
   CommandSeparator,
   CommandShortcut,
 } from '@/components/ui/command';
-import { COMMAND_REGISTRY, commandsByCategory, type CommandDefinition } from '@/lib/command-registry';
+import {
+  COMMAND_REGISTRY,
+  commandsByCategory,
+  contextualCommands,
+  deriveSelectionFromParams,
+  type CommandDefinition,
+} from '@/lib/command-registry';
 
 function copyToClipboard(text: string) {
   if (typeof navigator === 'undefined' || !navigator.clipboard) return Promise.resolve(false);
@@ -23,7 +29,24 @@ function copyToClipboard(text: string) {
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
+  const [selection, setSelection] = useState<ReturnType<typeof deriveSelectionFromParams>>(null);
   const grouped = useMemo(() => commandsByCategory(), []);
+  const contextual = useMemo(
+    () => (selection ? contextualCommands(selection.type, selection.value) : []),
+    [selection],
+  );
+
+  useEffect(() => {
+    const syncSelection = () => {
+      const params = new URLSearchParams(window.location.search);
+      setSelection(deriveSelectionFromParams(params));
+    };
+
+    syncSelection();
+    window.addEventListener('popstate', syncSelection);
+
+    return () => window.removeEventListener('popstate', syncSelection);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -46,7 +69,11 @@ export function CommandPalette() {
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          const params = new URLSearchParams(window.location.search);
+          setSelection(deriveSelectionFromParams(params));
+          setOpen(true);
+        }}
         className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-zinc-300 hover:bg-white/[0.08]"
         aria-label="Open command palette"
       >
@@ -63,6 +90,23 @@ export function CommandPalette() {
               <CommandInput placeholder="Search commands..." />
               <CommandList>
                 <CommandEmpty>No matching command.</CommandEmpty>
+
+                {contextual.length > 0 ? (
+                  <>
+                    <CommandGroup heading={`Context (${selection?.type})`}>
+                      {contextual.map((command) => (
+                        <CommandItem key={command.id} onSelect={() => void runCommand(command)}>
+                          <div className="flex flex-col gap-0.5">
+                            <span>{command.title}</span>
+                            <span className="text-[11px] text-zinc-500">{command.description}</span>
+                          </div>
+                          <CommandShortcut>copy</CommandShortcut>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                    <CommandSeparator />
+                  </>
+                ) : null}
 
                 {Object.entries(grouped).map(([category, commands], index) => (
                   <div key={category}>

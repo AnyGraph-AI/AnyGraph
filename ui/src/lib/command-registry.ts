@@ -2,6 +2,11 @@ export type CommandCategory = 'Core' | 'Verification' | 'Planning' | 'Utilities'
 
 export type CommandTargetType = 'SourceFile' | 'Function' | 'Task';
 
+export type CommandSelection = {
+  type: CommandTargetType;
+  value: string;
+};
+
 export type CommandDefinition = {
   id: string;
   title: string;
@@ -69,6 +74,33 @@ export const COMMAND_REGISTRY: CommandDefinition[] = [
     category: 'Utilities',
   },
 ];
+
+export function normalizeCommandTargetType(raw: string | null | undefined): CommandTargetType | null {
+  if (!raw) return null;
+  const value = raw.trim().toLowerCase();
+  if (value === 'sourcefile' || value === 'file') return 'SourceFile';
+  if (value === 'function') return 'Function';
+  if (value === 'task') return 'Task';
+  return null;
+}
+
+export function deriveSelectionFromParams(params: { get: (key: string) => string | null }): CommandSelection | null {
+  const selectedType = normalizeCommandTargetType(params.get('selectedType'));
+  const selectedValue = (params.get('selectedValue') ?? '').trim();
+
+  if (selectedType && selectedValue) {
+    return { type: selectedType, value: selectedValue };
+  }
+
+  const focusType = normalizeCommandTargetType(params.get('focusType'));
+  const focus = (params.get('focus') ?? params.get('filePath') ?? params.get('nodeId') ?? '').trim();
+
+  if (focusType && focus) {
+    return { type: focusType, value: focus };
+  }
+
+  return null;
+}
 
 export function contextualCommands(type: CommandTargetType, value: string): CommandDefinition[] {
   const escaped = value.replace(/"/g, '\\"');

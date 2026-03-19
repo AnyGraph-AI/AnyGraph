@@ -29,5 +29,8 @@ describe('[UI-6] command primitive installation', () => {
     expect(source).toContain("event.key.toLowerCase() === 'k'");
     expect(source).toContain('event.metaKey || event.ctrlKey');
     expect(source).toContain('setOpen((prev) => !prev)');
+    expect(source).toContain('deriveSelectionFromParams');
+    expect(source).toContain('contextualCommands');
+    expect(source).toContain('Context (');
   });
 });
