@@ -9,6 +9,9 @@ import { ContextTabs } from '@/components/ContextTabs';
 import { RealityGap } from '@/components/RealityGap';
 import { GodFilesTable } from '@/components/GodFilesTable';
 import { RecentlyDestabilizedAlert } from '@/components/RecentlyDestabilizedAlert';
+import { KpiSkeleton, TreemapSkeleton, PanelSkeleton } from '@/components/ui/loading-skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
 
 export default function Dashboard() {
   const {
@@ -34,15 +37,17 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map(i => (
-            <div key={i} className={`${PANEL.classes} ${PANEL.padding} animate-pulse`}>
-              <div className="h-8 bg-zinc-800 rounded w-1/2 mb-2" />
-              <div className="h-3 bg-zinc-800 rounded w-2/3" />
-            </div>
-          ))}
+        <div>
+          <div className="h-7 bg-zinc-800 rounded w-48 mb-2 animate-pulse" />
+          <div className="h-4 bg-zinc-800 rounded w-72 animate-pulse" />
         </div>
-        <div className="animate-pulse bg-zinc-900/50 rounded-xl min-h-[60vh]" />
+        <KpiSkeleton />
+        <TreemapSkeleton />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <PanelSkeleton lines={6} />
+          <PanelSkeleton lines={6} />
+        </div>
+        <PanelSkeleton lines={4} />
       </div>
     );
   }
@@ -122,14 +127,22 @@ export default function Dashboard() {
           <h2 className={PANEL.headerText}>Top Files</h2>
           <p className={PANEL.descText}>Ranked by adjusted pain — highest risk files first</p>
           <div className="mt-3">
-            <GodFilesTable data={(topFiles?.data ?? []) as any} />
+            {(topFiles?.data ?? []).length > 0 ? (
+              <GodFilesTable data={(topFiles?.data ?? []) as any} />
+            ) : (
+              <EmptyState title="No files found" description="Run codegraph parse to ingest source files" icon="📂" />
+            )}
           </div>
         </div>
         <div className={`${PANEL.classes} ${PANEL.padding}`}>
           <h2 className={PANEL.headerText}>Reality Gap</h2>
           <p className={PANEL.descText}>Where confidence claims exceed actual evidence</p>
           <div className="mt-3">
-            <RealityGap data={(realityGapData?.data ?? []) as any} />
+            {(realityGapData?.data ?? []).length > 0 ? (
+              <RealityGap data={(realityGapData?.data ?? []) as any} />
+            ) : (
+              <EmptyState title="No gaps detected" description="All claims have adequate evidence coverage" icon="✅" />
+            )}
           </div>
         </div>
       </div>
