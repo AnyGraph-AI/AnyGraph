@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TabsPanel } from '@/components/ui/tabs-panel';
 import { FragilityTable } from '@/components/FragilityTable';
 import { SafestAction } from '@/components/SafestAction';
@@ -32,6 +32,20 @@ export function ContextTabs({
   avgConfidence,
 }: ContextTabsProps) {
   const [contextTab, setContextTab] = useState<ContextTab>('fragility');
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key === '1') setContextTab('fragility');
+      if (e.key === '2') setContextTab('safest');
+      if (e.key === '3') setContextTab('riskOverTime');
+      if (e.key === '4') setContextTab('milestones');
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   return (
     <TabsPanel

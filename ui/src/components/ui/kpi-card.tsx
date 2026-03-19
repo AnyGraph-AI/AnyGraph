@@ -6,13 +6,14 @@ export interface KpiCardProps {
   readonly value: string | number;
   readonly label: string;
   readonly indicator?: React.ReactNode;
+  readonly accentColor?: string;
 }
 
 function easeOut(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
-export function KpiCard({ value, label, indicator }: KpiCardProps) {
+export function KpiCard({ value, label, indicator, accentColor = '#7ec8e3' }: KpiCardProps) {
   const displayRef = useRef<HTMLSpanElement>(null);
   const numeric = typeof value === "number" ? value : parseFloat(String(value));
   const isNumeric = !isNaN(numeric) && typeof value === "number";
@@ -55,13 +56,17 @@ export function KpiCard({ value, label, indicator }: KpiCardProps) {
     <div
       className="
         group relative flex flex-col gap-1.5 rounded-xl
-        border border-zinc-800/60 bg-zinc-900/70 p-4
+        border border-white/10 bg-white/[0.03] p-4
         backdrop-blur-sm transition-all duration-200
         hover:-translate-y-px hover:shadow-lg hover:shadow-black/30
       "
     >
+      <span
+        className="absolute left-0 right-0 top-0 h-[2px] rounded-t-xl"
+        style={{ background: `linear-gradient(90deg, ${accentColor}55, ${accentColor}, ${accentColor}55)` }}
+      />
       <div className="flex items-center justify-between">
-        <span className="text-3xl font-bold text-zinc-50 tabular-nums">
+        <span className="text-3xl font-bold tabular-nums font-mono" style={{ color: accentColor }}>
           {isNumeric ? (
             <span ref={displayRef}>0</span>
           ) : (

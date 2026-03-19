@@ -10,11 +10,27 @@ export const QUERIES = {
   painHeatmap: `
     MATCH (sf:SourceFile {projectId: $projectId})
     WHERE sf.adjustedPain > 0
+    OPTIONAL MATCH (sf)-[:CONTAINS]->(f:Function)
+    WITH sf,
+         count(f) AS functionCount,
+         max(CASE f.riskTier
+           WHEN 'CRITICAL' THEN 4
+           WHEN 'HIGH' THEN 3
+           WHEN 'MEDIUM' THEN 2
+           ELSE 1
+         END) AS maxTierNum
     RETURN sf.name AS name, sf.filePath AS filePath,
            sf.adjustedPain AS adjustedPain,
            sf.confidenceScore AS confidenceScore,
            sf.painScore AS painScore,
-           sf.fragility AS fragility
+           sf.fragility AS fragility,
+           functionCount,
+           CASE maxTierNum
+             WHEN 4 THEN 'CRITICAL'
+             WHEN 3 THEN 'HIGH'
+             WHEN 2 THEN 'MEDIUM'
+             ELSE 'LOW'
+           END AS riskTier
     ORDER BY sf.adjustedPain DESC
     LIMIT $limit
   `,

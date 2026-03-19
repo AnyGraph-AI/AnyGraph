@@ -18,16 +18,19 @@ export function KpiRow({ maxPain, maxFragility, avgConfidence, riskCounts }: Kpi
       <KpiCard
         value={maxPain?.toFixed(1) ?? '—'}
         label="Max Pain"
+        accentColor="#ff4757"
       />
 
       <KpiCard
         value={maxFragility?.toFixed(1) ?? '—'}
         label="Max Fragility"
+        accentColor="#ff7f50"
       />
 
       <KpiCard
         value={`${(avgConfidence * 100).toFixed(0)}%`}
         label="Avg Confidence"
+        accentColor="#ffc048"
         indicator={
           avgConfidence < 0.55 ? (
             <span
@@ -41,6 +44,7 @@ export function KpiRow({ maxPain, maxFragility, avgConfidence, riskCounts }: Kpi
       <KpiCard
         value=""
         label="Risk Tiers"
+        accentColor="#7ec8e3"
         indicator={
           <div className="flex items-center gap-1.5">
             {TIERS.map(tier => {

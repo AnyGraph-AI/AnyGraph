@@ -27,11 +27,11 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-zinc-950 text-zinc-100 min-h-screen`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#0a0c10] text-zinc-100 min-h-screen`}
       >
         <QueryProvider>
           <Navbar />
-          <main className="container mx-auto px-4 py-6">
+          <main className="mx-auto w-full max-w-[1400px] px-7 py-6">
             {children}
           </main>
         </QueryProvider>

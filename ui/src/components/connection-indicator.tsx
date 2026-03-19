@@ -20,20 +20,17 @@ export function ConnectionIndicator() {
     return () => clearInterval(interval);
   }, []);
 
+  const dotClass =
+    connected === null
+      ? 'bg-zinc-500'
+      : connected
+      ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.55)] animate-pulse'
+      : 'bg-red-500';
+
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <div
-        className={`w-2 h-2 rounded-full ${
-          connected === null
-            ? 'bg-zinc-500'
-            : connected
-            ? 'bg-emerald-500'
-            : 'bg-red-500'
-        }`}
-      />
-      <span className="text-zinc-400">
-        {connected === null ? 'Checking...' : connected ? 'Neo4j' : 'Disconnected'}
-      </span>
+    <div className="flex items-center gap-2.5 text-xs font-mono text-zinc-400">
+      <span className={`h-2 w-2 rounded-full ${dotClass}`} />
+      <span>{connected === false ? 'Disconnected' : 'Neo4j'}</span>
     </div>
   );
 }

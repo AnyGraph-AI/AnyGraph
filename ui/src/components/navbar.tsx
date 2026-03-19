@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ConnectionIndicator } from './connection-indicator';
+import { AnythingGraphLogo } from './AnythingGraphLogo';
 
 const TABS = [
   { href: '/', label: 'Dashboard' },
@@ -16,21 +17,24 @@ export function Navbar() {
   const pathname = usePathname();
 
   return (
-    <nav className="bg-zinc-950 border-b border-zinc-800 px-4 py-3">
-      <div className="container mx-auto flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <Link href="/" className="text-lg font-bold text-zinc-100 hover:text-white">
-            AnythingGraph
+    <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#0a0c10]/85 backdrop-blur-xl px-5 py-3">
+      <div className="mx-auto flex max-w-[1400px] items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Link href="/" className="flex items-center gap-2.5 hover:opacity-90 transition-opacity">
+            <AnythingGraphLogo size={26} />
+            <span className="text-[17px] font-bold tracking-[-0.02em] text-zinc-100">
+              AnythingGraph
+            </span>
           </Link>
-          <div className="flex gap-1">
+          <div className="ml-1 flex items-center gap-1">
             {TABS.map((tab) => (
               <Link
                 key={tab.href}
                 href={tab.href}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
                   pathname === tab.href
-                    ? 'bg-zinc-800 text-white'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+                    ? 'bg-[#7ec8e3]/15 text-[#7ec8e3]'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
                 }`}
               >
                 {tab.label}
@@ -38,6 +42,7 @@ export function Navbar() {
             ))}
           </div>
         </div>
+
         <ConnectionIndicator />
       </div>
     </nav>

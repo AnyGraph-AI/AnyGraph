@@ -11,6 +11,8 @@ export interface HeatmapFile {
   confidenceScore: number;
   painScore: number;
   fragility: number;
+  riskTier?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  functionCount?: number;
 }
 
 export interface PainHeatmapProps {
@@ -96,6 +98,10 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
         <span className={`text-right ${d.confidenceScore >= 0.5 ? 'text-emerald-400' : 'text-red-400'}`}>
           {(d.confidenceScore * 100).toFixed(0)}%
         </span>
+        <span className="text-zinc-500">Risk Tier</span>
+        <span className="text-right">{d.riskTier ?? '—'}</span>
+        <span className="text-zinc-500">Functions</span>
+        <span className="text-right">{d.functionCount ?? 0}</span>
         <span className="text-zinc-500">Fragility</span>
         <span className={`text-right ${d.fragility > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
           {d.fragility?.toFixed(2)}

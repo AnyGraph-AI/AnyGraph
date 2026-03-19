@@ -40,21 +40,21 @@ export function HeroTreemap({ fileHeatmapData, fnHeatmapData, godFilesData, fnTa
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold text-zinc-200">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-zinc-100">
           {dataMode === 'files'
             ? viewMode === 'treemap' ? 'Pain Heatmap' : 'Files by Adjusted Pain'
             : viewMode === 'treemap' ? 'Risk Heatmap' : 'Functions by Composite Risk'}
         </h2>
         <div className="flex gap-2">
-          <div className="flex gap-0.5 bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
+          <div className="flex gap-0.5 rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
             {(['files', 'functions'] as const).map(mode => (
               <button
                 key={mode}
                 onClick={() => setDataMode(mode)}
                 className={`px-3 py-1 text-xs rounded-md transition-colors duration-150 ${
                   dataMode === mode
-                    ? 'bg-zinc-700 text-zinc-100'
+                    ? 'bg-[#7ec8e3]/15 text-[#7ec8e3]'
                     : 'text-zinc-500 hover:text-zinc-300'
                 }`}
               >
@@ -62,14 +62,14 @@ export function HeroTreemap({ fileHeatmapData, fnHeatmapData, godFilesData, fnTa
               </button>
             ))}
           </div>
-          <div className="flex gap-0.5 bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
+          <div className="flex gap-0.5 rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
             {(['treemap', 'table'] as const).map(mode => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
                 className={`px-3 py-1 text-xs rounded-md transition-colors duration-150 ${
                   viewMode === mode
-                    ? 'bg-zinc-700 text-zinc-100'
+                    ? 'bg-[#7ec8e3]/15 text-[#7ec8e3]'
                     : 'text-zinc-500 hover:text-zinc-300'
                 }`}
               >
@@ -86,7 +86,7 @@ export function HeroTreemap({ fileHeatmapData, fnHeatmapData, godFilesData, fnTa
         </div>
       )}
 
-      <div className="min-h-[60vh] rounded-xl overflow-hidden border border-zinc-800/40 bg-zinc-950">
+      <div className="min-h-[60vh] overflow-hidden rounded-xl border border-white/10 bg-[#0b0e13]">
         {dataMode === 'files' ? (
           viewMode === 'treemap' ? (
             <PainHeatmap data={fileHeatmapData as any} />
