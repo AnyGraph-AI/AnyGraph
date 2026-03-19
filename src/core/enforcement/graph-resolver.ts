@@ -4,7 +4,7 @@
  * Queries:
  *   1. Match SourceFile nodes by filePath
  *   2. Get contained Functions with riskTier + compositeRisk
- *   3. Check TESTED_BY edges for test coverage
+ *   3. Check TESTED_BY_FUNCTION (function-level) + TESTED_BY (file-level) edges for test coverage
  *   4. Return AffectedNode[] for the enforcement gate
  */
 
@@ -17,8 +17,9 @@ import type { AffectedNode } from './enforcement-gate.js';
  * Cypher pattern:
  *   MATCH (sf:SourceFile)-[:CONTAINS]->(f:Function)
  *   WHERE sf.filePath IN $filePaths AND sf.projectId = $projectId
- *   OPTIONAL MATCH (sf)-[:TESTED_BY]->(tf)
- *   RETURN f.id, f.name, sf.filePath, f.riskTier, f.compositeRisk, tf IS NOT NULL AS hasTests
+ *   OPTIONAL MATCH (f)<-[:TESTED_BY_FUNCTION]-(tfFunc)
+ *   OPTIONAL MATCH (sf)-[:TESTED_BY]->(tfFile)
+ *   RETURN f.id, f.name, sf.filePath, f.riskTier, f.compositeRisk, (tfFunc IS NOT NULL OR tfFile IS NOT NULL) AS hasTests
  */
 export async function resolveAffectedNodes(
   neo4j: Neo4jService,
@@ -31,8 +32,9 @@ export async function resolveAffectedNodes(
     MATCH (sf:SourceFile {projectId: $projectId})-[:CONTAINS]->(f)
     WHERE sf.filePath IN $filePaths
       AND (f:Function OR f:Method)
-    OPTIONAL MATCH (sf)-[:TESTED_BY]->(tf)
-    WITH f, sf, count(tf) > 0 AS hasTests
+    OPTIONAL MATCH (f)<-[:TESTED_BY_FUNCTION]-(tfFunc)
+    OPTIONAL MATCH (sf)-[:TESTED_BY]->(tfFile)
+    WITH f, sf, (count(tfFunc) > 0 OR count(tfFile) > 0) AS hasTests
     RETURN
       f.id AS id,
       f.name AS name,
@@ -74,8 +76,9 @@ export async function resolveBlastRadius(
     WHERE NOT downstream.id IN $functionIds
     WITH DISTINCT downstream
     OPTIONAL MATCH (sf:SourceFile {projectId: $projectId})-[:CONTAINS]->(downstream)
-    OPTIONAL MATCH (sf)-[:TESTED_BY]->(tf)
-    WITH downstream, sf, count(tf) > 0 AS hasTests
+    OPTIONAL MATCH (downstream)<-[:TESTED_BY_FUNCTION]-(tfFunc)
+    OPTIONAL MATCH (sf)-[:TESTED_BY]->(tfFile)
+    WITH downstream, sf, (count(tfFunc) > 0 OR count(tfFile) > 0) AS hasTests
     RETURN
       downstream.id AS id,
       downstream.name AS name,
