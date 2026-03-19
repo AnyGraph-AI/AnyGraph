@@ -122,6 +122,60 @@ export function computeDownstreamImpact(
 }
 
 /**
+ * Max CALLS depth from a function (longest shortest-path from root to reachable node).
+ * Returns 0 when no callees.
+ */
+export function computeMaxCallDepth(
+  functionId: string,
+  adjacency: Record<string, string[]>,
+): number {
+  const visited = new Set<string>([functionId]);
+  const queue: Array<{ id: string; depth: number }> = [];
+  let maxDepth = 0;
+
+  for (const callee of adjacency[functionId] ?? []) {
+    if (!visited.has(callee)) {
+      visited.add(callee);
+      queue.push({ id: callee, depth: 1 });
+      maxDepth = Math.max(maxDepth, 1);
+    }
+  }
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const callee of adjacency[current.id] ?? []) {
+      if (!visited.has(callee)) {
+        visited.add(callee);
+        const nextDepth = current.depth + 1;
+        maxDepth = Math.max(maxDepth, nextDepth);
+        queue.push({ id: callee, depth: nextDepth });
+      }
+    }
+  }
+
+  return maxDepth;
+}
+
+/**
+ * Compact tier summary string, e.g. "3C,2H,1M".
+ */
+export function formatRiskTierSummary(riskTiers: Array<string | null | undefined>): string {
+  const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+  for (const tier of riskTiers) {
+    if (tier === 'CRITICAL' || tier === 'HIGH' || tier === 'MEDIUM' || tier === 'LOW') {
+      counts[tier]++;
+    }
+  }
+
+  const parts: string[] = [];
+  if (counts.CRITICAL > 0) parts.push(`${counts.CRITICAL}C`);
+  if (counts.HIGH > 0) parts.push(`${counts.HIGH}H`);
+  if (counts.MEDIUM > 0) parts.push(`${counts.MEDIUM}M`);
+  if (counts.LOW > 0) parts.push(`${counts.LOW}L`);
+  return parts.length > 0 ? parts.join(',') : '0';
+}
+
+/**
  * Normalize fanInCount to 0.0-1.0 within project population.
  */
 export function computeCentralityNormalized(
@@ -367,11 +421,12 @@ export async function enrichPrecomputeScores(
             collect(DISTINCT f.id) AS fnIds,
             collect(DISTINCT f.compositeRisk) AS risks,
             collect(DISTINCT f.fanOutCount) AS fanOuts,
-            collect(DISTINCT f.riskTier) AS riskTiers
+            collect(f.riskTier) AS riskTiers
        RETURN sf.id AS sfId,
               fnIds,
               risks,
               fanOuts,
+              riskTiers,
               coalesce(sf.gitChangeFrequency, 0) AS changeFrequency,
               coalesce(sf.churnTotal, 0) AS churnTotal,
               size(fnIds) AS fnCount`,
@@ -388,6 +443,69 @@ export async function enrichPrecomputeScores(
     const coChangeMap: Record<string, number> = {};
     for (const r of coChangeResult.records) {
       coChangeMap[r.get('sfId') as string] = toNum(r.get('coChangeCount'));
+    }
+
+    // Hidden coupling: files that co-change without import in either direction
+    const hiddenCouplingResult = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})-[cc:CO_CHANGES_WITH]->(other:CodeNode:SourceFile {projectId: $projectId})
+       WHERE NOT (sf)-[:IMPORTS]->(other) AND NOT (other)-[:IMPORTS]->(sf)
+       RETURN sf.id AS sfId, count(DISTINCT other) AS hiddenCouplingCount`,
+      { projectId },
+    );
+    const hiddenCouplingMap: Record<string, number> = {};
+    for (const r of hiddenCouplingResult.records) {
+      hiddenCouplingMap[r.get('sfId') as string] = toNum(r.get('hiddenCouplingCount'));
+    }
+
+    // Distinct authors touching each file (bus factor proxy)
+    const busFactorResult = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       OPTIONAL MATCH (sf)-[:OWNED_BY]->(a:CodeNode:Author)
+       RETURN sf.id AS sfId, count(DISTINCT a) AS busFactor`,
+      { projectId },
+    );
+    const busFactorMap: Record<string, number> = {};
+    for (const r of busFactorResult.records) {
+      busFactorMap[r.get('sfId') as string] = toNum(r.get('busFactor'));
+    }
+
+    // Mutable state fields per file (Q6/Q26)
+    const stateFieldResult = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       OPTIONAL MATCH (sf)-[:CONTAINS]->(fld:CodeNode:Field)
+       WHERE coalesce(fld.isMutable, true) = true
+       RETURN sf.id AS sfId, count(fld) AS stateFieldCount`,
+      { projectId },
+    );
+    const stateFieldMap: Record<string, number> = {};
+    for (const r of stateFieldResult.records) {
+      stateFieldMap[r.get('sfId') as string] = toNum(r.get('stateFieldCount'));
+    }
+
+    // Advisory gate failures targeting each file (Q33)
+    const verificationFailResult = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       OPTIONAL MATCH (d:AdvisoryGateDecision)-[:FLAGS]->(sf)
+       WHERE toUpper(coalesce(d.status, '')) IN ['FAIL', 'FAILED', 'BLOCK', 'BLOCKED']
+       RETURN sf.id AS sfId, count(d) AS verificationFailCount`,
+      { projectId },
+    );
+    const verificationFailMap: Record<string, number> = {};
+    for (const r of verificationFailResult.records) {
+      verificationFailMap[r.get('sfId') as string] = toNum(r.get('verificationFailCount'));
+    }
+
+    // Claims referencing file through evidence chains (Q31)
+    const claimCountResult = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       OPTIONAL MATCH (e:Evidence)-[:ANCHORED_TO]->(sf)
+       OPTIONAL MATCH (c:Claim)-[:SUPPORTED_BY|CONTRADICTED_BY|WITNESSES]->(e)
+       RETURN sf.id AS sfId, count(DISTINCT c) AS claimCount`,
+      { projectId },
+    );
+    const claimCountMap: Record<string, number> = {};
+    for (const r of claimCountResult.records) {
+      claimCountMap[r.get('sfId') as string] = toNum(r.get('claimCount'));
     }
 
     // File-level TESTED_BY fallback: files with no Functions but with TESTED_BY edges
@@ -492,6 +610,14 @@ export async function enrichPrecomputeScores(
       churnTotal: number;
       fnDownstreams: number[];
       fnCentralities: number[];
+      riskTierSummary: string;
+      blastRadiusDepth: number;
+      temporalCouplingCount: number;
+      busFactor: number;
+      stateFieldCount: number;
+      verificationFailCount: number;
+      claimCount: number;
+      hiddenCouplingCount: number;
     }
 
     const fileRaws: FileRaw[] = [];
@@ -500,6 +626,7 @@ export async function enrichPrecomputeScores(
       const fnIds = (r.get('fnIds') as string[]).filter((id) => id != null);
       const risks = (r.get('risks') as number[]).filter((v) => v != null).map(toNum);
       const fanOuts = (r.get('fanOuts') as number[]).filter((v) => v != null).map(toNum);
+      const riskTiers = (r.get('riskTiers') as Array<string | null>).filter((v) => v != null);
       const changeFrequency = toNum(r.get('changeFrequency'));
       const churnTotal = toNum(r.get('churnTotal'));
       const coChangeCount = coChangeMap[sfId] ?? 0;
@@ -519,10 +646,27 @@ export async function enrichPrecomputeScores(
 
       const fnDownstreams = fnIds.map((id) => downstreamImpacts[id] ?? 0);
       const fnCentralities = fnIds.map((id) => centralityMap[id] ?? 0);
+      const fnDepths = fnIds.map((id) => computeMaxCallDepth(id, adjacency));
 
       fileRaws.push({
-        sfId, fnIds, riskDensity, changeFrequency, testCoverage,
-        avgFanOut, coChangeCount, churnTotal, fnDownstreams, fnCentralities,
+        sfId,
+        fnIds,
+        riskDensity,
+        changeFrequency,
+        testCoverage,
+        avgFanOut,
+        coChangeCount,
+        churnTotal,
+        fnDownstreams,
+        fnCentralities,
+        riskTierSummary: formatRiskTierSummary(riskTiers),
+        blastRadiusDepth: fnDepths.length > 0 ? Math.max(...fnDepths) : 0,
+        temporalCouplingCount: coChangeCount,
+        busFactor: busFactorMap[sfId] ?? 0,
+        stateFieldCount: stateFieldMap[sfId] ?? 0,
+        verificationFailCount: verificationFailMap[sfId] ?? 0,
+        claimCount: claimCountMap[sfId] ?? 0,
+        hiddenCouplingCount: hiddenCouplingMap[sfId] ?? 0,
       });
     }
 
@@ -542,6 +686,14 @@ export async function enrichPrecomputeScores(
       confidenceScore: number;
       fragility: number;
       adjustedPain: number;
+      riskTierSummary: string;
+      blastRadiusDepth: number;
+      temporalCouplingCount: number;
+      busFactor: number;
+      stateFieldCount: number;
+      verificationFailCount: number;
+      claimCount: number;
+      hiddenCouplingCount: number;
     }[] = [];
 
     for (const raw of fileRaws) {
@@ -580,7 +732,18 @@ export async function enrichPrecomputeScores(
         normalizedChurn,
       });
 
-      fileUpdates.push({ id: raw.sfId, ...scores });
+      fileUpdates.push({
+        id: raw.sfId,
+        ...scores,
+        riskTierSummary: raw.riskTierSummary,
+        blastRadiusDepth: raw.blastRadiusDepth,
+        temporalCouplingCount: raw.temporalCouplingCount,
+        busFactor: raw.busFactor,
+        stateFieldCount: raw.stateFieldCount,
+        verificationFailCount: raw.verificationFailCount,
+        claimCount: raw.claimCount,
+        hiddenCouplingCount: raw.hiddenCouplingCount,
+      });
     }
 
     // ── Step 5: Write SourceFile properties ────────────────────
@@ -595,7 +758,15 @@ export async function enrichPrecomputeScores(
              sf.painScore = u.painScore,
              sf.confidenceScore = u.confidenceScore,
              sf.fragility = u.fragility,
-             sf.adjustedPain = u.adjustedPain
+             sf.adjustedPain = u.adjustedPain,
+             sf.riskTierSummary = u.riskTierSummary,
+             sf.blastRadiusDepth = u.blastRadiusDepth,
+             sf.temporalCouplingCount = u.temporalCouplingCount,
+             sf.busFactor = u.busFactor,
+             sf.stateFieldCount = u.stateFieldCount,
+             sf.verificationFailCount = u.verificationFailCount,
+             sf.claimCount = u.claimCount,
+             sf.hiddenCouplingCount = u.hiddenCouplingCount
          RETURN count(sf) AS updated`,
         { updates: fileUpdates },
       );
@@ -630,16 +801,43 @@ export async function enrichPrecomputeScores(
       const maxAdjustedPain = Math.max(...fileUpdates.map((u) => u.adjustedPain));
       const maxFragility = Math.max(...fileUpdates.map((u) => u.fragility));
       const maxCentrality = Math.max(...fileUpdates.map((u) => u.centrality));
+      const maxBlastRadiusDepth = Math.max(...fileUpdates.map((u) => u.blastRadiusDepth));
+      const maxTemporalCouplingCount = Math.max(...fileUpdates.map((u) => u.temporalCouplingCount));
+      const maxBusFactor = Math.max(...fileUpdates.map((u) => u.busFactor));
+      const maxStateFieldCount = Math.max(...fileUpdates.map((u) => u.stateFieldCount));
+      const maxVerificationFailCount = Math.max(...fileUpdates.map((u) => u.verificationFailCount));
+      const maxClaimCount = Math.max(...fileUpdates.map((u) => u.claimCount));
+      const maxHiddenCouplingCount = Math.max(...fileUpdates.map((u) => u.hiddenCouplingCount));
 
       await session.run(
         `MATCH (p:Project {projectId: $projectId})
          SET p.maxPainScore = $maxPainScore,
              p.maxAdjustedPain = $maxAdjustedPain,
              p.maxFragility = $maxFragility,
-             p.maxCentrality = $maxCentrality`,
-        { projectId, maxPainScore, maxAdjustedPain, maxFragility, maxCentrality },
+             p.maxCentrality = $maxCentrality,
+             p.maxBlastRadiusDepth = $maxBlastRadiusDepth,
+             p.maxTemporalCouplingCount = $maxTemporalCouplingCount,
+             p.maxBusFactor = $maxBusFactor,
+             p.maxStateFieldCount = $maxStateFieldCount,
+             p.maxVerificationFailCount = $maxVerificationFailCount,
+             p.maxClaimCount = $maxClaimCount,
+             p.maxHiddenCouplingCount = $maxHiddenCouplingCount`,
+        {
+          projectId,
+          maxPainScore,
+          maxAdjustedPain,
+          maxFragility,
+          maxCentrality,
+          maxBlastRadiusDepth,
+          maxTemporalCouplingCount,
+          maxBusFactor,
+          maxStateFieldCount,
+          maxVerificationFailCount,
+          maxClaimCount,
+          maxHiddenCouplingCount,
+        },
       );
-      console.log(`[UI-0] Project maxima stored: painScore=${maxPainScore.toFixed(2)}, adjustedPain=${maxAdjustedPain.toFixed(2)}, fragility=${maxFragility.toFixed(2)}, centrality=${maxCentrality.toFixed(2)}`);
+      console.log(`[UI-0] Project maxima stored: painScore=${maxPainScore.toFixed(2)}, adjustedPain=${maxAdjustedPain.toFixed(2)}, fragility=${maxFragility.toFixed(2)}, centrality=${maxCentrality.toFixed(2)}, blastDepth=${maxBlastRadiusDepth}, temporal=${maxTemporalCouplingCount}, busFactor=${maxBusFactor}, stateFields=${maxStateFieldCount}, verificationFails=${maxVerificationFailCount}, claims=${maxClaimCount}, hiddenCoupling=${maxHiddenCouplingCount}`);
     }
 
     return { functionsUpdated, filesUpdated };

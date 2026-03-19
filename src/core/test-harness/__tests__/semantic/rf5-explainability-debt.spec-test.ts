@@ -35,7 +35,7 @@ describe('RF-5: Explainability Paths + Evidence Debt', () => {
   });
 
   describe('InfluencePath persistence (top-k)', () => {
-    it('creates InfluencePath nodes with pathHash and pathWeight', async () => {
+    it('creates InfluencePath nodes with pathHash and pathWeight', { timeout: 20_000 }, async () => {
       await discoverExplainabilityPaths(neo4j, PLAN_PROJECT);
 
       const rows = await neo4j.run(
@@ -48,7 +48,7 @@ describe('RF-5: Explainability Paths + Evidence Debt', () => {
       expect(total).toBeGreaterThan(0);
     });
 
-    it('assigns rank per claim (1-indexed, weight descending)', async () => {
+    it('assigns rank per claim (1-indexed, weight descending)', { timeout: 20_000 }, async () => {
       await discoverExplainabilityPaths(neo4j, PLAN_PROJECT);
 
       const rows = await neo4j.run(

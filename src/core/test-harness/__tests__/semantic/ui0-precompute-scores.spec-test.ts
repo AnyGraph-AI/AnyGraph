@@ -17,6 +17,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeDownstreamImpact,
+  computeMaxCallDepth,
+  formatRiskTierSummary,
   computeCentralityNormalized,
   computeBasePain,
   computePainScore,
@@ -72,6 +74,48 @@ describe('[UI-0] computeDownstreamImpact', () => {
   it('handles missing nodes gracefully', () => {
     const adj: Record<string, string[]> = { fnA: ['fnB'] };
     expect(computeDownstreamImpact('fnA', adj)).toBe(1);
+  });
+});
+
+describe('[UI-0] computeMaxCallDepth', () => {
+  it('returns 0 when no callees', () => {
+    expect(computeMaxCallDepth('fnA', { fnA: [] })).toBe(0);
+  });
+
+  it('returns longest reachable depth', () => {
+    const adj: Record<string, string[]> = {
+      fnA: ['fnB', 'fnC'],
+      fnB: ['fnD'],
+      fnC: ['fnE'],
+      fnD: [],
+      fnE: ['fnF'],
+      fnF: [],
+    };
+    expect(computeMaxCallDepth('fnA', adj)).toBe(3);
+  });
+
+  it('handles cycles safely', () => {
+    const adj: Record<string, string[]> = {
+      fnA: ['fnB'],
+      fnB: ['fnC'],
+      fnC: ['fnA'],
+    };
+    expect(computeMaxCallDepth('fnA', adj)).toBe(2);
+  });
+});
+
+describe('[UI-0] formatRiskTierSummary', () => {
+  it('formats tier counts compactly', () => {
+    expect(formatRiskTierSummary(['CRITICAL', 'CRITICAL', 'HIGH', 'MEDIUM'])).toBe('2C,1H,1M');
+  });
+
+  it('includes LOW when present', () => {
+    expect(formatRiskTierSummary(['LOW', 'LOW', 'HIGH'])).toBe('1H,2L');
+  });
+
+  it('returns 0 for empty/invalid tiers', () => {
+    expect(formatRiskTierSummary([])).toBe('0');
+    expect(formatRiskTierSummary([null, undefined, 'UNKNOWN'])).toBe('0');
   });
 });
 

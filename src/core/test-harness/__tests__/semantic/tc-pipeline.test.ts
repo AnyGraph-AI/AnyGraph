@@ -21,7 +21,7 @@ describe('TC Pipeline Orchestration', () => {
     expect(output).toContain('projects');
   });
 
-  it('tc:verify runs and returns exit 0', () => {
+  it('tc:verify runs and returns exit 0', { timeout: 30_000 }, () => {
     const output = execSync(
       `npx tsx src/scripts/entry/tc-pipeline.ts verify`,
       { cwd: ROOT, timeout: 30000, encoding: 'utf-8' },

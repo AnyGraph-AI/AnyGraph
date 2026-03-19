@@ -950,9 +950,9 @@ export async function enrichCrossDomain(
                )
                AND (
                  sf:SourceFile
-                 OR sf.coreType = 'SourceFile'
-                 OR sf.semanticType = 'source-file'
-                 OR sf.semanticType = 'module'
+                 OR sf:TestFile
+                 OR sf.coreType IN ['SourceFile', 'TestFile']
+                 OR sf.semanticType IN ['source-file', 'module', 'test-file']
                )
                AND ($targetCodeProjectId IS NULL OR sf.projectId = $targetCodeProjectId)
                RETURN sf.id AS id, sf.name AS name, sf.filePath AS filePath, sf.projectId AS projectId

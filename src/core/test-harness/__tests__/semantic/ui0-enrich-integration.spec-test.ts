@@ -6,7 +6,7 @@
  *
  * Requirements:
  * 1. Every SourceFile in the project gets a painScore (no nulls)
- * 2. Every SourceFile gets all 7 score properties
+ * 2. Every SourceFile gets all core + expanded precompute properties
  * 3. Every Function gets downstreamImpact and centralityNormalized
  * 4. Project node gets maxima (maxPainScore, maxAdjustedPain, maxFragility, maxCentrality)
  * 5. Idempotent: running twice produces the same results
@@ -43,7 +43,7 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     expect(result.filesUpdated).toBeGreaterThan(0);
   });
 
-  it('every SourceFile has all 7 score properties (no nulls)', async () => {
+  it('every SourceFile has core + expanded precompute properties (no nulls)', async () => {
     await enrichPrecomputeScores(driver, PROJECT_ID);
     const session = driver.session();
     try {
@@ -56,6 +56,14 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
             OR sf.confidenceScore IS NULL
             OR sf.downstreamImpact IS NULL
             OR sf.centrality IS NULL
+            OR sf.riskTierSummary IS NULL
+            OR sf.blastRadiusDepth IS NULL
+            OR sf.temporalCouplingCount IS NULL
+            OR sf.busFactor IS NULL
+            OR sf.stateFieldCount IS NULL
+            OR sf.verificationFailCount IS NULL
+            OR sf.claimCount IS NULL
+            OR sf.hiddenCouplingCount IS NULL
          RETURN sf.name AS name`,
         { pid: PROJECT_ID },
       );
@@ -84,7 +92,7 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     }
   });
 
-  it('Project node has all 4 maxima set', async () => {
+  it('Project node has core + expanded maxima set', async () => {
     await enrichPrecomputeScores(driver, PROJECT_ID);
     const session = driver.session();
     try {
@@ -93,7 +101,14 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
          RETURN p.maxPainScore AS maxPain,
                 p.maxAdjustedPain AS maxAdj,
                 p.maxFragility AS maxFrag,
-                p.maxCentrality AS maxCent`,
+                p.maxCentrality AS maxCent,
+                p.maxBlastRadiusDepth AS maxBlast,
+                p.maxTemporalCouplingCount AS maxTemporal,
+                p.maxBusFactor AS maxBus,
+                p.maxStateFieldCount AS maxState,
+                p.maxVerificationFailCount AS maxVFail,
+                p.maxClaimCount AS maxClaim,
+                p.maxHiddenCouplingCount AS maxHidden`,
         { pid: PROJECT_ID },
       );
       const rec = r.records[0];
@@ -102,10 +117,24 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
       const maxAdj = rec.get('maxAdj');
       const maxFrag = rec.get('maxFrag');
       const maxCent = rec.get('maxCent');
+      const maxBlast = rec.get('maxBlast');
+      const maxTemporal = rec.get('maxTemporal');
+      const maxBus = rec.get('maxBus');
+      const maxState = rec.get('maxState');
+      const maxVFail = rec.get('maxVFail');
+      const maxClaim = rec.get('maxClaim');
+      const maxHidden = rec.get('maxHidden');
       expect(typeof maxPain).toBe('number');
       expect(typeof maxAdj).toBe('number');
       expect(typeof maxFrag).toBe('number');
       expect(typeof maxCent).toBe('number');
+      expect(typeof maxBlast).toBe('number');
+      expect(typeof maxTemporal).toBe('number');
+      expect(typeof maxBus).toBe('number');
+      expect(typeof maxState).toBe('number');
+      expect(typeof maxVFail).toBe('number');
+      expect(typeof maxClaim).toBe('number');
+      expect(typeof maxHidden).toBe('number');
       expect(maxPain).toBeGreaterThan(0);
       expect(maxAdj).toBeGreaterThan(0);
       expect(maxCent).toBeGreaterThan(0);

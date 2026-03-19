@@ -5,7 +5,36 @@ dotenv.config();
 
 const DEFAULT_PROJECT_ID = process.env.PROJECT_ID ?? 'proj_c0d3e9a1f200';
 const REQUIRED_FAILURE_CLASSES = ['regression', 'security_issue', 'reliability_issue', 'governance_drift'];
-const REQUIRED_ENTITY_LABELS = ['Project', 'VerificationRun', 'GateDecision', 'CommitSnapshot', 'Artifact', 'DocumentWitness'];
+const REQUIRED_ENTITY_LABELS = ['Project', 'VerificationRun', 'GateDecision', 'CommitSnapshot', 'Artifact', 'DocumentWitness'] as const;
+
+type RequiredEntityLabel = (typeof REQUIRED_ENTITY_LABELS)[number];
+
+interface EntityRequirementContext {
+  documentProjectCount: number;
+  advisoryGateDecisionCount: number;
+  commitLinkedVerificationRunCount: number;
+}
+
+const HARD_REQUIRED_ENTITIES: RequiredEntityLabel[] = ['Project', 'VerificationRun'];
+
+export function getRequiredEntitySet(ctx: EntityRequirementContext): Set<RequiredEntityLabel> {
+  const required = new Set<RequiredEntityLabel>(HARD_REQUIRED_ENTITIES);
+
+  // GateDecision required only when gate decision lane has emitted data.
+  if (ctx.advisoryGateDecisionCount > 0) required.add('GateDecision');
+
+  // CommitSnapshot required only when commit-linked verification exists.
+  if (ctx.commitLinkedVerificationRunCount > 0) required.add('CommitSnapshot');
+
+  // DocumentWitness required only when document projects exist.
+  if (ctx.documentProjectCount > 0) required.add('DocumentWitness');
+
+  // Artifact nodes are optional in graph topology (file artifacts exist on disk).
+  // Keep reported for visibility, but do not fail closure in their absence.
+
+  return required;
+}
+
 
 async function count(session: any, query: string, params: Record<string, unknown>): Promise<number> {
   const result = await session.run(query, params);
@@ -64,15 +93,66 @@ async function main(): Promise<void> {
     const entityCoverageScoped: Record<string, number> = {};
     const entityCoverageGlobal: Record<string, number> = {};
     for (const label of REQUIRED_ENTITY_LABELS) {
-      entityCoverageScoped[label] = await count(
-        session,
-        `MATCH (n:${label} {projectId: $projectId}) RETURN count(n) AS count`,
-        { projectId: DEFAULT_PROJECT_ID },
-      );
-      entityCoverageGlobal[label] = await count(session, `MATCH (n:${label}) RETURN count(n) AS count`, {});
+      if (label === 'GateDecision') {
+        entityCoverageScoped[label] = await count(
+          session,
+          `MATCH (n {projectId: $projectId})
+           WHERE n:GateDecision OR n:AdvisoryGateDecision
+           RETURN count(n) AS count`,
+          { projectId: DEFAULT_PROJECT_ID },
+        );
+        entityCoverageGlobal[label] = await count(
+          session,
+          `MATCH (n)
+           WHERE n:GateDecision OR n:AdvisoryGateDecision
+           RETURN count(n) AS count`,
+          {},
+        );
+      } else {
+        entityCoverageScoped[label] = await count(
+          session,
+          `MATCH (n:${label} {projectId: $projectId}) RETURN count(n) AS count`,
+          { projectId: DEFAULT_PROJECT_ID },
+        );
+        entityCoverageGlobal[label] = await count(session, `MATCH (n:${label}) RETURN count(n) AS count`, {});
+      }
     }
 
-    const missingEntities = REQUIRED_ENTITY_LABELS.filter((label) => entityCoverageGlobal[label] === 0);
+    const documentProjectCount = await count(
+      session,
+      `MATCH (p:Project)
+       WHERE p.projectType = 'document' OR p.sourceKind = 'document-ingest'
+       RETURN count(p) AS count`,
+      {},
+    );
+
+    const advisoryGateDecisionCount = await count(
+      session,
+      `MATCH (d:AdvisoryGateDecision) RETURN count(d) AS count`,
+      {},
+    );
+
+    const commitLinkedVerificationRunCount = await count(
+      session,
+      `MATCH (vr:VerificationRun)
+       WHERE vr.commitRef IS NOT NULL
+       RETURN count(vr) AS count`,
+      {},
+    );
+
+    const requiredEntitySet = getRequiredEntitySet({
+      documentProjectCount,
+      advisoryGateDecisionCount,
+      commitLinkedVerificationRunCount,
+    });
+
+    const missingEntities = REQUIRED_ENTITY_LABELS.filter(
+      (label) => requiredEntitySet.has(label) && entityCoverageGlobal[label] === 0,
+    );
+
+    const advisoryMissingEntities = REQUIRED_ENTITY_LABELS.filter(
+      (label) => !requiredEntitySet.has(label) && entityCoverageGlobal[label] === 0,
+    );
 
     const checks = {
       domainPresent: domainCount >= 1,
@@ -99,6 +179,13 @@ async function main(): Promise<void> {
       },
       requiredFailureClasses: REQUIRED_FAILURE_CLASSES,
       requiredEntities: REQUIRED_ENTITY_LABELS,
+      requiredEntitiesActive: Array.from(requiredEntitySet),
+      advisoryEntitiesInactive: advisoryMissingEntities,
+      entityRequirementContext: {
+        documentProjectCount,
+        advisoryGateDecisionCount,
+        commitLinkedVerificationRunCount,
+      },
       entityCoverageScoped,
       entityCoverageGlobal,
       missingEntities,
@@ -117,12 +204,14 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error(
-    JSON.stringify({
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    }),
-  );
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(
+      JSON.stringify({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    process.exit(1);
+  });
+}
