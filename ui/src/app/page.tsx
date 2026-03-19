@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { confidenceColor } from '@/lib/colors';
 import { PANEL } from '@/lib/tokens';
 import { useDashboardData } from '@/hooks/useDashboardData';

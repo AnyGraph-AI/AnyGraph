@@ -82,8 +82,11 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   if (!active || !payload?.[0]) return null;
   const d = payload[0].payload;
   return (
-    <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-sm shadow-xl">
-      <div className="font-mono text-zinc-100 font-semibold mb-2">{d.name}</div>
+    <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-sm shadow-xl max-w-xs">
+      <div className="font-mono text-zinc-100 font-semibold mb-1">{d.name}</div>
+      {d.filePath && (
+        <div className="text-xs text-zinc-600 font-mono mb-2 truncate">{d.filePath}</div>
+      )}
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-zinc-300">
         <span className="text-zinc-500">Adjusted Pain</span>
         <span className="text-right">{d.adjustedPain?.toFixed(2)}</span>
