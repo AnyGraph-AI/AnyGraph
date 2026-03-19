@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { DiagnosisGrid } from '@/components/DiagnosisGrid';
 import { RiskOverTime } from '@/components/RiskOverTime';
 import { MilestoneProgress } from '@/components/MilestoneProgress';
+import { ProbeResultsGrid, type ProbeResult } from '@/components/ProbeResultsGrid';
 import { QUERIES } from '@/lib/queries';
 import { fetchQuery } from '@/lib/fetchQuery';
 
@@ -21,6 +22,15 @@ export default function DiagnosisPage() {
       const res = await fetch('/api/graph/diagnosis');
       if (!res.ok) throw new Error(`Diagnosis API failed: ${res.status}`);
       return res.json();
+    },
+  });
+
+  const { data: probesData, isLoading: probesLoading } = useQuery({
+    queryKey: ['architecture-probes'],
+    queryFn: async () => {
+      const res = await fetch('/api/graph/probes');
+      if (!res.ok) throw new Error(`Probes API failed: ${res.status}`);
+      return res.json() as Promise<{ data: ProbeResult[] }>;
     },
   });
 
@@ -69,15 +79,29 @@ export default function DiagnosisPage() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-            <h2 className="text-lg font-semibold text-zinc-100 mb-3">Risk Over Time</h2>
-            <RiskOverTime data={(riskOverTimeData?.data ?? []) as any} />
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-zinc-100 mb-3">Risk Over Time</h2>
+              <RiskOverTime data={(riskOverTimeData?.data ?? []) as any} />
+            </div>
+
+            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+              <h2 className="text-lg font-semibold text-zinc-100 mb-3">Milestone Progress</h2>
+              <MilestoneProgress data={(milestoneData?.data ?? []) as any} />
+            </div>
           </div>
 
           <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-            <h2 className="text-lg font-semibold text-zinc-100 mb-3">Milestone Progress</h2>
-            <MilestoneProgress data={(milestoneData?.data ?? []) as any} />
+            <h2 className="text-lg font-semibold text-zinc-100 mb-1">Probe Results</h2>
+            <p className="text-xs text-zinc-400 mb-4">
+              45 architecture probes grouped by category. Click any file/function cell to jump into Explorer.
+            </p>
+            {probesLoading ? (
+              <div className="text-zinc-500 text-sm">Loading probes...</div>
+            ) : (
+              <ProbeResultsGrid probes={(probesData?.data ?? []) as ProbeResult[]} />
+            )}
           </div>
         </div>
       )}

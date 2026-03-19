@@ -28,6 +28,12 @@ describe('[UI-4] Component exports', () => {
     expect(mod.MilestoneProgress).toBeDefined();
     expect(typeof mod.MilestoneProgress).toBe('function');
   });
+
+  it('exports a ProbeResultsGrid component', async () => {
+    const mod = await import('@/components/ProbeResultsGrid');
+    expect(mod.ProbeResultsGrid).toBeDefined();
+    expect(typeof mod.ProbeResultsGrid).toBe('function');
+  });
 });
 
 // ─── Diagnosis API ───────────────────────────────────────────
@@ -47,6 +53,23 @@ describe('[UI-4] Diagnosis API route', () => {
       expect(res.status).toBeLessThan(500);
     } catch {
       // Dev server not running — route file existence is sufficient
+    }
+  });
+});
+
+describe('[UI-4] Probes API route', () => {
+  it('GET /api/graph/probes route exists and responds when server is available', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const routePath = path.resolve(import.meta.dirname, '..', 'app', 'api', 'graph', 'probes', 'route.ts');
+    const exists = await fs.access(routePath).then(() => true).catch(() => false);
+    expect(exists).toBe(true);
+
+    try {
+      const res = await fetch('http://localhost:3000/api/graph/probes');
+      expect(res.status).toBeLessThan(500);
+    } catch {
+      // Dev server not running — file existence check is enough for CI/local test runs
     }
   });
 });
@@ -104,6 +127,12 @@ describe('[UI-4] milestoneProgress query', () => {
 // ─── Page integration ────────────────────────────────────────
 
 describe('[UI-4] page integration', () => {
+  it('exports /diagnosis page component', async () => {
+    const mod = await import('@/app/diagnosis/page');
+    expect(mod.default).toBeDefined();
+    expect(typeof mod.default).toBe('function');
+  });
+
   it('ContextTabs references RiskOverTime and MilestoneProgress', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
@@ -135,6 +164,8 @@ describe('[UI-4] page integration', () => {
     expect(source).toContain('Diagnosis Grid');
     expect(source).toContain('Architecture Probes');
     expect(source).toContain('DiagnosisGrid');
+    expect(source).toContain('ProbeResultsGrid');
+    expect(source).toContain('/api/graph/probes');
   });
 });
 
@@ -146,5 +177,25 @@ describe('[UI-4] recentlyDestabilized query', () => {
     expect(query).toBeDefined();
     expect(query).toContain('$projectId');
     expect(query).toContain("riskTier = 'CRITICAL'");
+  });
+});
+
+describe('[UI-4] Explorer bridge', () => {
+  it('has an /explorer page and focus component', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+
+    const explorerPagePath = path.resolve(import.meta.dirname, '..', 'app', 'explorer', 'page.tsx');
+    const explorerFocusPath = path.resolve(import.meta.dirname, '..', 'components', 'ExplorerFocus.tsx');
+
+    const explorerPageExists = await fs.access(explorerPagePath).then(() => true).catch(() => false);
+    const explorerFocusExists = await fs.access(explorerFocusPath).then(() => true).catch(() => false);
+
+    expect(explorerPageExists).toBe(true);
+    expect(explorerFocusExists).toBe(true);
+
+    const source = await fs.readFile(explorerFocusPath, 'utf-8');
+    expect(source).toContain('focusType');
+    expect(source).toContain('focus');
   });
 });
