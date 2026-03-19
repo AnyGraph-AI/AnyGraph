@@ -14,6 +14,7 @@ import path from 'node:path';
 
 import { glob } from 'glob';
 
+import { validateProjectWrite } from '../guards/project-write-guard.js';
 import { generateDeterministicId } from '../utils/graph-factory.js';
 
 // ============================================================================
@@ -1374,6 +1375,8 @@ export async function ingestToNeo4j(
   const neo4j = await import('neo4j-driver');
   const driver = neo4j.default.driver(neo4jUri, neo4j.default.auth.basic(neo4jUser, neo4jPassword));
   const session = driver.session();
+
+  await validateProjectWrite(driver, parsed.projectId);
 
   let nodesUpserted = 0;
   let edgesCreated = 0;

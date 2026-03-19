@@ -17,6 +17,7 @@ import nodePath from 'node:path';
 import { parsePlanDirectory, ingestToNeo4j, enrichCrossDomain } from '../../../src/core/parsers/plan-parser.js';
 import { emitPlanParserContracts } from '../../../src/core/parsers/meta/parser-contract-emitter.js';
 import { parseDocumentCollection, documentSchemaToIr } from '../../../src/core/adapters/document/document-parser.js';
+import { validateProjectWrite } from '../../../src/core/guards/project-write-guard.js';
 import { materializeIrDocument } from '../../../src/core/ir/ir-materializer.js';
 import { incrementalRecompute } from '../../../src/core/verification/incremental-recompute.js';
 import { Neo4jService } from '../../../src/storage/neo4j/neo4j.service.js';
@@ -181,6 +182,7 @@ async function ingestDocumentProject(project: ProjectInfo): Promise<void> {
   // Preserve canonical document project taxonomy for watcher-managed document projects.
   // Registry and downstream guards rely on this classification.
   const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD));
+  await validateProjectWrite(driver, project.projectId);
   const session = driver.session();
   try {
     await session.run(

@@ -701,6 +701,32 @@ export async function runAnalyze(dir: string, options: { tsconfig?: string; proj
   await runEnrich(projectId);
 }
 
+export async function runRegisterProject(
+  projectId: string,
+  name: string,
+  queryFn: typeof queryNeo4j = queryNeo4j,
+) {
+  const trimmedId = projectId?.trim();
+  const trimmedName = name?.trim();
+  if (!trimmedId || !trimmedName) {
+    console.error('❌ projectId and name are required');
+    process.exit(1);
+  }
+
+  const rows = await queryFn(
+    `MERGE (p:Project {projectId: $projectId})
+     SET p.name = $name,
+         p.displayName = $name,
+         p.registered = true,
+         p.updatedAt = toString(datetime())
+     RETURN p.projectId AS projectId, p.name AS name, coalesce(p.registered, false) AS registered`,
+    { projectId: trimmedId, name: trimmedName },
+  );
+
+  const row = rows[0] || { projectId: trimmedId, name: trimmedName, registered: true };
+  console.log(`✅ Registered project: ${row.projectId} (${row.name}) [registered=${row.registered}]`);
+}
+
 export async function runStatus() {
   console.log('📊 CodeGraph Status\n');
   
@@ -793,6 +819,15 @@ program
   .option('--project-id <id>', 'Custom project ID')
   .option('--name <name>', 'Project name')
   .action(runAnalyze);
+
+program
+  .command('register-project')
+  .description('Register a projectId as human-approved for graph writes')
+  .requiredOption('--id <projectId>', 'Project ID to register')
+  .requiredOption('--name <name>', 'Human-readable project name')
+  .action(async (opts: { id: string; name: string }) => {
+    await runRegisterProject(opts.id, opts.name);
+  });
 
 program
   .command('status')

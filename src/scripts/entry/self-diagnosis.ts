@@ -988,26 +988,26 @@ export async function runDiagnosis(): Promise<DiagResult[]> {
     detail: { total: d38Total, covered: d38Covered, pct: d38Pct },
   });
 
-  // ── D39: False coverage detection (RF-15) ──────
+  // ── D39: Unregistered project leak detection (RF-17) ──────
   const d39 = await query(`
-    MATCH (f:Function {projectId: $pid})
-    WHERE f.hasTestCaller = true
-      AND coalesce(f.lineCoverage, 0) < 0.3
-    RETURN f.name AS name, f.filePath AS filePath,
-           coalesce(f.lineCoverage, 0) AS lineCoverage
-    ORDER BY coalesce(f.lineCoverage, 0) ASC
-    LIMIT 20
-  `, { pid });
+    MATCH (n)
+    WHERE n.projectId IS NOT NULL
+    WITH DISTINCT n.projectId AS pid
+    WHERE NOT EXISTS { MATCH (p:Project {projectId: pid}) WHERE coalesce(p.registered, false) = true }
+    RETURN pid AS projectId
+    ORDER BY projectId
+    LIMIT 50
+  `);
   results.push({
-    id: 'D39', question: 'Are there functions with hasTestCaller=true but lineCoverage < 0.3? (RF-15 false coverage)',
+    id: 'D39', question: 'Are there graph nodes with unregistered projectIds? (RF-17 project registry)',
     answer: d39.length > 0
-      ? `${d39.length} functions have test callers but < 30% runtime line coverage — possible false coverage`
-      : 'No false coverage detected — all test-called functions have ≥ 30% line coverage',
+      ? `${d39.length} unregistered projectId(s) detected in graph writes`
+      : 'No unregistered projectId leaks detected',
     healthy: d39.length === 0,
     nextStep: d39.length > 0
-      ? `Review these functions — test calls may not exercise enough code paths. Consider adding more targeted tests.`
-      : `Good — parse-time and runtime coverage are aligned.`,
-    detail: { falseCoverageCount: d39.length, samples: d39.slice(0, 5) },
+      ? `Register legitimate projects (codegraph register-project --id <projectId> --name <name>) or purge orphan nodes before proceeding.`
+      : `Project write gate is enforcing registered project IDs correctly.`,
+    detail: { unregisteredProjectCount: d39.length, projectIds: d39.map((r: any) => r.projectId) },
   });
 
   return results;

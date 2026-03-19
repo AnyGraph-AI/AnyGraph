@@ -1,4 +1,5 @@
 import { Neo4jService } from '../../storage/neo4j/neo4j.service.js';
+import { validateProjectWrite } from '../guards/project-write-guard.js';
 import { IrDocument, IrEdge, IrNode } from './ir-v1.schema.js';
 import { assertValidIrDocument } from './ir-validator.js';
 
@@ -22,6 +23,8 @@ export class IrMaterializer {
   async materialize(input: unknown, options: IrMaterializeOptions = {}): Promise<IrMaterializeResult> {
     const doc = assertValidIrDocument(input);
     const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
+
+    await validateProjectWrite(this.neo4jService.getDriver(), doc.projectId);
 
     if (options.clearProjectFirst) {
       await this.neo4jService.run(
