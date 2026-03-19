@@ -123,6 +123,7 @@ const DECISION_ROW = /^\|\s*(.+?)\s*\|\s*(.+?)\s*\|(?:\s*(.+?)\s*\|)?$/;
 // Cross-reference patterns — expanded to catch more file types
 const FILE_PATH_REF = /(?:`([^`]+\.[a-z]{1,5})`|(\b[\w/.-]+\.(?:ts|js|py|java|go|rs|md|json|csv|sql|toml|yaml|yml|sh)\b))/g;
 const FUNCTION_REF = /`(\w+(?:\.\w+)*)\(\)`/g;
+const BACKTICK_IDENTIFIER_REF = /`([A-Za-z_][A-Za-z0-9_]*)`/g;
 const PROJECT_ID_REF = /`?(proj_[a-f0-9]{12})`?/g;
 const EFTA_REF = /EFTA\d{8}/g;
 
@@ -730,6 +731,20 @@ function extractCrossReferences(text: string): CrossReference[] {
     }
   }
 
+  // Also capture backticked function-like identifiers without explicit ()
+  // e.g. `computeMaxCallDepth`, `formatRiskTierSummary`.
+  const identRegex = new RegExp(BACKTICK_IDENTIFIER_REF.source, BACKTICK_IDENTIFIER_REF.flags);
+  while ((match = identRegex.exec(text)) !== null) {
+    const ident = match[1];
+    const looksLikeFunction = /^[a-z][A-Za-z0-9_]*$/.test(ident) && /[A-Z_]/.test(ident);
+    if (!looksLikeFunction) continue;
+    const key = `func:${ident}`;
+    if (!seen.has(key)) {
+      refs.push({ type: 'function', value: ident, raw: match[0] });
+      seen.add(key);
+    }
+  }
+
   const projIdRegex = new RegExp(PROJECT_ID_REF.source, PROJECT_ID_REF.flags);
   while ((match = projIdRegex.exec(text)) !== null) {
     const key = `proj:${match[1]}`;
@@ -980,11 +995,54 @@ export async function enrichCrossDomain(
                 evidenceEdges++;
               }
 
+              // Also link explicit TestFile nodes for the same path when present
+              const testFileResult = await session.run(
+                `MATCH (tf)
+                 WHERE (
+                   tf.filePath ENDS WITH $refValue
+                   OR tf.filePath ENDS WITH $filename
+                   OR tf.name ENDS WITH $filename
+                 )
+                 AND (
+                   tf:TestFile
+                   OR tf.coreType = 'TestFile'
+                   OR tf.semanticType = 'test-file'
+                 )
+                 AND ($targetCodeProjectId IS NULL OR tf.projectId = $targetCodeProjectId)
+                 RETURN tf.filePath AS filePath, tf.name AS name, tf.projectId AS projectId
+                 LIMIT 5`,
+                { filename, refValue: ref.refValue, targetCodeProjectId },
+              );
+
+              for (const record of testFileResult.records) {
+                const tfFilePath = record.get('filePath');
+                const tfName = record.get('name');
+                const tfProjectId = record.get('projectId');
+                await session.run(
+                  `MATCH (t {id: $taskId})
+                   MATCH (tf)
+                   WHERE coalesce(tf.projectId, '') = coalesce($tfProjectId, '')
+                     AND (
+                       ($tfFilePath IS NOT NULL AND tf.filePath = $tfFilePath)
+                       OR ($tfFilePath IS NULL AND tf.name = $tfName)
+                     )
+                     AND (tf:TestFile OR tf.coreType = 'TestFile' OR tf.semanticType = 'test-file')
+                   MERGE (t)-[r:HAS_CODE_EVIDENCE]->(tf)
+                   SET r.refType = 'file_path',
+                       r.refValue = $refValue,
+                       r.codeProjectId = $tfProjectId,
+                       r.resolvedAt = datetime(),
+                       r.sourceKind = 'plan-parser'`,
+                  { taskId: ref.taskId, tfFilePath, tfName, refValue: ref.refValue, tfProjectId },
+                );
+                evidenceEdges++;
+              }
+
               await session.run(
                 `MATCH (t {id: $taskId})
                  SET t.hasCodeEvidence = true,
-                     t.codeEvidenceCount = $count`,
-                { taskId: ref.taskId, count: result.records.length },
+                     t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + $count`,
+                { taskId: ref.taskId, count: result.records.length + testFileResult.records.length },
               );
             } else {
               notFound++;

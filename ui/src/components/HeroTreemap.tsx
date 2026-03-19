@@ -12,9 +12,10 @@ export interface HeroTreemapProps {
   readonly fnHeatmapData: Array<Record<string, unknown>>;
   readonly godFilesData: Array<Record<string, unknown>>;
   readonly fnTableData: Array<Record<string, unknown>>;
+  readonly onNavigateToExplorer?: (payload: { focus: string; focusType: 'file' | 'function'; filePath?: string }) => void;
 }
 
-export function HeroTreemap({ fileHeatmapData, fnHeatmapData, godFilesData, fnTableData }: HeroTreemapProps) {
+export function HeroTreemap({ fileHeatmapData, fnHeatmapData, godFilesData, fnTableData, onNavigateToExplorer }: HeroTreemapProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('treemap');
   const [dataMode, setDataMode] = useState<DataMode>('files');
 
@@ -89,18 +90,54 @@ export function HeroTreemap({ fileHeatmapData, fnHeatmapData, godFilesData, fnTa
       <div className="min-h-[60vh] overflow-hidden rounded-xl border border-white/10 bg-[#0b0e13]">
         {dataMode === 'files' ? (
           viewMode === 'treemap' ? (
-            <PainHeatmap data={fileHeatmapData as any} />
+            <PainHeatmap
+              data={fileHeatmapData as any}
+              onCellClick={(file) =>
+                onNavigateToExplorer?.({
+                  focus: file.filePath || file.name,
+                  focusType: 'file',
+                  filePath: file.filePath,
+                })
+              }
+            />
           ) : (
             <div className="p-4">
-              <GodFilesTable data={godFilesData as any} />
+              <GodFilesTable
+                data={godFilesData as any}
+                onRowClick={(file) =>
+                  onNavigateToExplorer?.({
+                    focus: file.filePath || file.name,
+                    focusType: 'file',
+                    filePath: file.filePath,
+                  })
+                }
+              />
             </div>
           )
         ) : (
           viewMode === 'treemap' ? (
-            <PainHeatmap data={mappedFnHeatmap as any} />
+            <PainHeatmap
+              data={mappedFnHeatmap as any}
+              onCellClick={(fn) =>
+                onNavigateToExplorer?.({
+                  focus: fn.name,
+                  focusType: 'function',
+                  filePath: fn.filePath,
+                })
+              }
+            />
           ) : (
             <div className="p-4">
-              <GodFilesTable data={mappedFnTable as any} />
+              <GodFilesTable
+                data={mappedFnTable as any}
+                onRowClick={(fn) =>
+                  onNavigateToExplorer?.({
+                    focus: fn.name,
+                    focusType: 'function',
+                    filePath: fn.filePath,
+                  })
+                }
+              />
             </div>
           )
         )}

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ConnectionIndicator } from './connection-indicator';
 import { AnythingGraphLogo } from './AnythingGraphLogo';
+import { CommandPalette } from './CommandPalette';
 
 const TABS = [
   { href: '/', label: 'Dashboard' },
@@ -43,7 +44,10 @@ export function Navbar() {
           </div>
         </div>
 
-        <ConnectionIndicator />
+        <div className="flex items-center gap-2">
+          <CommandPalette />
+          <ConnectionIndicator />
+        </div>
       </div>
     </nav>
   );

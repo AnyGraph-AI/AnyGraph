@@ -73,8 +73,8 @@ async function main(): Promise<void> {
     let mismatches = await collectMismatches(neo4j);
     let reconciled = false;
 
-    // Self-heal once: refresh Project node counts, then re-check.
-    if (mismatches.length > 0) {
+    // Self-heal with retries: refresh Project node counts, then re-check.
+    for (let attempt = 0; attempt < 3 && mismatches.length > 0; attempt += 1) {
       await neo4j.run(
         `MATCH (p:Project)
          WHERE p.projectId IS NOT NULL
@@ -115,7 +115,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

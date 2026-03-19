@@ -12,7 +12,13 @@ function shortPath(filePath: string): string {
   return parts.slice(-3).join('/');
 }
 
-export function RecentlyDestabilizedAlert({ data }: { data: DestabilizedRow[] }) {
+export function RecentlyDestabilizedAlert({
+  data,
+  onRowClick,
+}: {
+  data: DestabilizedRow[];
+  onRowClick?: (row: DestabilizedRow) => void;
+}) {
   if (!data || data.length === 0) return null;
 
   return (
@@ -23,7 +29,11 @@ export function RecentlyDestabilizedAlert({ data }: { data: DestabilizedRow[] })
       </div>
       <ul className="space-y-1.5">
         {data.slice(0, 5).map((row) => (
-          <li key={`${row.filePath}:${row.name}:${row.observedAt}`} className="text-xs text-red-100/90">
+          <li
+            key={`${row.filePath}:${row.name}:${row.observedAt}`}
+            className={`text-xs text-red-100/90 ${onRowClick ? 'cursor-pointer hover:text-red-200' : ''}`}
+            onClick={() => onRowClick?.(row)}
+          >
             <span className="font-mono">{row.name}</span>
             <span className="text-red-300/80"> — {shortPath(row.filePath)}</span>
           </li>

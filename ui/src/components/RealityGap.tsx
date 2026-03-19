@@ -61,10 +61,12 @@ export function RealityGap({
   data,
   severityFilter: initialSeverity = 'critical-high',
   minGap: initialMinGap = 0,
+  onRowClick,
 }: {
   data: RealityGapRow[];
   severityFilter?: SeverityFilter;
   minGap?: number;
+  onRowClick?: (row: RealityGapRow) => void;
 }) {
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>(initialSeverity);
   const [riskFilter, setRiskFilter] = useState<RiskFilter>('all');
@@ -262,7 +264,8 @@ export function RealityGap({
               {filtered.map((row) => (
                 <tr
                   key={row.name}
-                  className="border-b border-zinc-800/50 hover:bg-zinc-800/30"
+                  className={`border-b border-zinc-800/50 hover:bg-zinc-800/30 ${onRowClick ? 'cursor-pointer' : ''}`}
+                  onClick={() => onRowClick?.(row)}
                 >
                   <td className="py-1.5 pr-2 font-mono text-zinc-200 text-xs truncate max-w-[180px]">
                     {row.name}
@@ -294,7 +297,10 @@ export function RealityGap({
                   </td>
                   <td className="text-right py-1.5 px-0.5">
                     <button
-                      onClick={() => handleSnooze(row.name)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSnooze(row.name);
+                      }}
                       className="text-zinc-700 hover:text-zinc-400 text-xs"
                       title="Snooze for 7 days"
                     >

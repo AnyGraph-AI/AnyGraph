@@ -8,7 +8,13 @@ interface SafestRow {
   centrality: number;
 }
 
-export function SafestAction({ data }: { data: SafestRow[] }) {
+export function SafestAction({
+  data,
+  onRowClick,
+}: {
+  data: SafestRow[];
+  onRowClick?: (row: SafestRow) => void;
+}) {
   if (!data || data.length === 0) {
     return (
       <div className="text-zinc-500 text-sm py-4 text-center">
@@ -26,7 +32,8 @@ export function SafestAction({ data }: { data: SafestRow[] }) {
         {data.slice(0, 10).map((row) => (
           <div
             key={row.name}
-            className="flex items-center justify-between px-3 py-2 bg-zinc-800/50 rounded-lg hover:bg-zinc-800/80 transition-colors"
+            className={`flex items-center justify-between px-3 py-2 bg-zinc-800/50 rounded-lg hover:bg-zinc-800/80 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
+            onClick={() => onRowClick?.(row)}
           >
             <span className="font-mono text-zinc-200 text-sm truncate max-w-[250px]">
               {row.name}

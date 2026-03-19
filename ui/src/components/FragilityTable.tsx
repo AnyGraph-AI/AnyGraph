@@ -45,9 +45,11 @@ function dampenFragility(rawFragility: number, confidence: number, avgConfidence
 export function FragilityTable({
   data,
   avgConfidence = 1,
+  onRowClick,
 }: {
   data: FragilityRow[];
   avgConfidence?: number;
+  onRowClick?: (row: FragilityRow) => void;
 }) {
   if (!data || data.length === 0) {
     return (
@@ -88,7 +90,8 @@ export function FragilityTable({
             {rows.map((row) => (
               <tr
                 key={row.name}
-                className="border-b border-zinc-800/50 hover:bg-zinc-800/30"
+                className={`border-b border-zinc-800/50 hover:bg-zinc-800/30 ${onRowClick ? 'cursor-pointer' : ''}`}
+                onClick={() => onRowClick?.(row)}
               >
                 <td className="py-2 pr-4 font-mono text-zinc-200 truncate max-w-[200px]">
                   {row.name}

@@ -11,9 +11,10 @@ This file is the audit contract for agents and humans.
 1. **Graph first**: query graph truth before assumptions.
 2. **Spec first**: audit against milestone spec text + task contracts.
 3. **Test first for deltas**: write/adjust spec tests before implementation fixes.
-4. **No mixed states**: separate discovery (audit findings) from remediation (code changes).
+4. **Default mode = full shebang**: audit + TDD remediation + plan evidence linkage + re-ingest + closure checks in one flow. `Audit-only/deferred` is exception-only and must be explicitly requested.
 5. **Parser-safe planning**: all plan updates must follow `PLAN_FORMAT.md`.
 6. **No done without evidence**: every closure must have artifacts, checks, and rationale.
+7. **Session scope discipline**: default to one milestone (or one bounded milestone slice) per session to preserve attribution and reduce drift.
 
 References:
 - `WORKFLOW.md`
@@ -30,8 +31,8 @@ Record and store baseline in audit artifacts:
 - Git commit SHA (`git rev-parse HEAD`)
 - Worktree status (`git status --short`)
 - Full test baseline (`npm test`)
-- Enforcement gate sample on target surface (`codegraph enforce <files> --mode enforced`)
-  - Fallback entrypoint: `npx tsx src/scripts/entry/enforce-edit.ts <files> --mode enforced`
+- Enforcement gate sample on target surface (`npx tsx src/scripts/entry/enforce-edit.ts <files> --mode enforced`)
+  - Optional wrapper (if available in PATH): `codegraph enforce <files> --mode enforced`
 - Optional integrity baseline (`npm run done-check`)
 
 If baseline test suite is red:
@@ -42,14 +43,15 @@ If baseline test suite is red:
 
 ## 2) Audit Unit of Work
 
-Audit one milestone at a time.
+Audit one milestone (or one bounded milestone slice) at a time.
 
 For each milestone:
 1. Read milestone header + spec text + tasks.
 2. Build expected behavior matrix from spec clauses.
 3. Compare against current implementation and graph evidence.
 4. Log findings with severity and proof.
-5. Only then create remediation tasks.
+5. Execute TDD remediation for accepted findings in the same flow (unless explicitly deferred).
+6. Update plan task evidence annotations (files/functions/tests), re-ingest, and verify linkage.
 
 Do not audit multiple milestones in one unstructured pass.
 

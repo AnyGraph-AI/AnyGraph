@@ -210,6 +210,14 @@ Write the code that makes the TDD spec tests pass.
 
 Run: `npm test` — all tests (existing + new) should pass.
 
+### Route cold-start UX invariant (for new pages/routes)
+If you add a route that depends on query params/state (example: `/explorer?focus=...`), you must ship all three:
+1. Cold-start empty state (clear message, not blank canvas)
+2. Default seed fallback OR explicit CTA to select a target
+3. Test coverage for no-param behavior
+
+No route is complete if direct-load UX is ambiguous or appears broken.
+
 ### When a pre-existing test breaks (NON-NEGOTIABLE)
 
 If an existing test fails after your implementation, **STOP.** Do not dismiss it. Do not say "this tests an earlier implementation." Diagnose it:
@@ -325,6 +333,43 @@ npm run done-check
 ```
 
 57+ steps. Must exit 0. If it fails, your task is not done.
+
+**Delegation rule:** if the human explicitly says someone else is running `done-check`, do **not** run it locally.
+Record status as: `done-check delegated / pending external result` and continue with all non-done-check verification and evidence linkage.
+
+### 8f. Whole-shebang evidence closure check (mandatory)
+Before claiming milestone/task closure, prove graph evidence completeness:
+
+```cypher
+MATCH (m:Milestone {projectId:'plan_codegraph'})
+WHERE m.name CONTAINS $milestoneName
+MATCH (t:Task)-[:PART_OF]->(m)
+WITH t
+OPTIONAL MATCH (t)-[:HAS_CODE_EVIDENCE]->(e)
+WITH t, collect(e) AS ev
+WITH t,
+  [x IN ev WHERE x IS NOT NULL AND any(l IN labels(x) WHERE l='SourceFile')] AS sf,
+  [x IN ev WHERE x IS NOT NULL AND any(l IN labels(x) WHERE l='Function')] AS fn,
+  [x IN ev WHERE x IS NOT NULL AND any(l IN labels(x) WHERE l='TestFile')] AS tf
+RETURN
+  sum(CASE WHEN t.status='done' THEN 1 ELSE 0 END) AS done,
+  count(t) AS total,
+  sum(CASE WHEN t.status='done' AND size(sf)+size(fn)+size(tf)=0 THEN 1 ELSE 0 END) AS doneWithoutEvidence,
+  sum(size(sf)) AS sourceFileEvidence,
+  sum(size(fn)) AS functionEvidence,
+  sum(size(tf)) AS testFileEvidence
+```
+
+Closure requirements:
+- `doneWithoutEvidence = 0`
+- Evidence includes all three families where applicable: `SourceFile`, `Function`, `TestFile`
+- If a family is intentionally absent, document why in milestone notes.
+
+### 8g. Long-run pipeline handling (operator visibility)
+For heavy commands (`done-check`, full enrichment, large reparses):
+- Run with enough wait/poll budget to avoid fake "hung" status.
+- Provide progress updates every ~2-3 minutes with current step.
+- If runtime exceeds expectation, offer explicit choice: continue / stop / delegate.
 
 ---
 

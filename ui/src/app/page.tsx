@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { confidenceColor } from '@/lib/colors';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { KpiRow } from '@/components/KpiRow';
@@ -13,6 +14,7 @@ import { KpiSkeleton, TreemapSkeleton, PanelSkeleton } from '@/components/ui/loa
 import { EmptyState } from '@/components/ui/empty-state';
 
 export default function Dashboard() {
+  const router = useRouter();
   const {
     project,
     topFiles,
@@ -32,6 +34,15 @@ export default function Dashboard() {
     fileCount,
     riskCounts,
   } = useDashboardData();
+
+  const openExplorer = (payload: { focus: string; focusType: 'file' | 'function'; filePath?: string }) => {
+    const search = new URLSearchParams({
+      focus: payload.focus,
+      focusType: payload.focusType,
+    });
+    if (payload.filePath) search.set('filePath', payload.filePath);
+    router.push(`/explorer?${search.toString()}`);
+  };
 
   if (loading) {
     return (
@@ -97,7 +108,16 @@ export default function Dashboard() {
       )}
 
       <div className="fade-up">
-        <RecentlyDestabilizedAlert data={(recentlyDestabilized?.data ?? []) as any} />
+        <RecentlyDestabilizedAlert
+          data={(recentlyDestabilized?.data ?? []) as any}
+          onRowClick={(row) =>
+            openExplorer({
+              focus: row.filePath || row.name,
+              focusType: 'file',
+              filePath: row.filePath,
+            })
+          }
+        />
       </div>
 
       <div className="fade-up rounded-2xl border border-white/10 bg-white/[0.02] p-5">
@@ -106,6 +126,7 @@ export default function Dashboard() {
           fnHeatmapData={(fnHeatmapData?.data ?? []) as any}
           godFilesData={(topFiles?.data ?? []) as any}
           fnTableData={(fnTableData?.data ?? []) as any}
+          onNavigateToExplorer={openExplorer}
         />
       </div>
 
@@ -115,7 +136,16 @@ export default function Dashboard() {
           <p className="mt-1 font-mono text-[10px] text-zinc-500">Ranked by adjusted pain — highest risk files first</p>
           <div className="mt-3">
             {(topFiles?.data ?? []).length > 0 ? (
-              <GodFilesTable data={(topFiles?.data ?? []) as any} />
+              <GodFilesTable
+                data={(topFiles?.data ?? []) as any}
+                onRowClick={(file) =>
+                  openExplorer({
+                    focus: file.filePath || file.name,
+                    focusType: 'file',
+                    filePath: file.filePath,
+                  })
+                }
+              />
             ) : (
               <EmptyState title="No files found" description="Run codegraph parse to ingest source files" icon="📂" />
             )}
@@ -127,7 +157,15 @@ export default function Dashboard() {
           <p className="mt-1 font-mono text-[10px] text-zinc-500">Where confidence claims exceed actual evidence</p>
           <div className="mt-3">
             {(realityGapData?.data ?? []).length > 0 ? (
-              <RealityGap data={(realityGapData?.data ?? []) as any} />
+              <RealityGap
+                data={(realityGapData?.data ?? []) as any}
+                onRowClick={(row) =>
+                  openExplorer({
+                    focus: row.name,
+                    focusType: 'file',
+                  })
+                }
+              />
             ) : (
               <EmptyState title="No gaps detected" description="All claims have adequate evidence coverage" icon="✅" />
             )}
@@ -142,6 +180,18 @@ export default function Dashboard() {
           riskOverTimeData={(riskOverTimeData?.data ?? []) as any}
           milestoneData={(milestoneData?.data ?? []) as any}
           avgConfidence={avgConfidence}
+          onFragilityClick={(row) =>
+            openExplorer({
+              focus: String(row.name ?? ''),
+              focusType: 'file',
+            })
+          }
+          onSafestClick={(row) =>
+            openExplorer({
+              focus: String(row.name ?? ''),
+              focusType: 'file',
+            })
+          }
         />
       </div>
 
