@@ -20,11 +20,11 @@ type GraphEdge = {
   type: string;
 };
 
-function normalizeSeed(raw: string): string {
+export function normalizeSeed(raw: string): string {
   return decodeURIComponent(raw).trim();
 }
 
-async function resolveRootId(seed: string, projectId: string): Promise<string | null> {
+export async function resolveRootId(seed: string, projectId: string): Promise<string | null> {
   const rows = await cachedQuery<{ id: string }>(
     `MATCH (n)
      WHERE coalesce(n.projectId, '') = $projectId

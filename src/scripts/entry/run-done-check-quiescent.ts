@@ -1,42 +1,57 @@
 import { execSync } from 'node:child_process';
 
-function run(command: string): void {
-  execSync(command, { stdio: 'inherit' });
+export function run(
+  command: string,
+  exec: typeof execSync = execSync,
+): void {
+  exec(command, { stdio: 'inherit' });
 }
 
-function isWatcherActive(): boolean {
+export function isWatcherActive(
+  exec: typeof execSync = execSync,
+): boolean {
   try {
-    const out = execSync('systemctl --user is-active codegraph-watcher.service', { encoding: 'utf8' }).trim();
+    const out = exec('systemctl --user is-active codegraph-watcher.service', { encoding: 'utf8' }).trim();
     return out === 'active';
   } catch {
     return false;
   }
 }
 
-async function main(): Promise<void> {
-  const wasActive = isWatcherActive();
+export async function main(deps?: {
+  run?: (command: string) => void;
+  isWatcherActive?: () => boolean;
+  log?: (message: string) => void;
+}): Promise<void> {
+  const doRun = deps?.run ?? run;
+  const watcherActive = deps?.isWatcherActive ?? isWatcherActive;
+  const log = deps?.log ?? ((message: string) => console.log(message));
+
+  const wasActive = watcherActive();
 
   try {
     if (wasActive) {
-      console.log('[done-check] Pausing codegraph-watcher.service for quiescent verification...');
-      run('systemctl --user stop codegraph-watcher.service');
+      log('[done-check] Pausing codegraph-watcher.service for quiescent verification...');
+      doRun('systemctl --user stop codegraph-watcher.service');
     }
 
-    run('npm run done-check:core');
+    doRun('npm run done-check:core');
   } finally {
     if (wasActive) {
-      console.log('[done-check] Resuming codegraph-watcher.service...');
-      run('systemctl --user start codegraph-watcher.service');
+      log('[done-check] Resuming codegraph-watcher.service...');
+      doRun('systemctl --user start codegraph-watcher.service');
     }
   }
 }
 
-main().catch((error) => {
-  console.error(
-    JSON.stringify({
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    }),
-  );
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(
+      JSON.stringify({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    process.exit(1);
+  });
+}
