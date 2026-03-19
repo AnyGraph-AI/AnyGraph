@@ -7,23 +7,30 @@ import { fetchQuery } from '@/lib/fetchQuery';
 
 const DEFAULT_PROJECT_ID = 'proj_c0d3e9a1f200';
 
-export function useDashboardData() {
+type DashboardFilterParams = {
+  projectId?: string;
+  days?: number;
+};
+
+export function useDashboardData(params: DashboardFilterParams = {}) {
+  const projectId = params.projectId ?? DEFAULT_PROJECT_ID;
+  const days = Math.max(1, Math.min(30, params.days ?? 7));
   const { data: project, isLoading: projectLoading } = useQuery({
-    queryKey: ['project-summary'],
+    queryKey: ['project-summary', projectId],
     queryFn: () =>
-      fetchQuery(QUERIES.projectSummary, { projectId: DEFAULT_PROJECT_ID }),
+      fetchQuery(QUERIES.projectSummary, { projectId }),
   });
 
   const { data: topFiles, isLoading: filesLoading } = useQuery({
-    queryKey: ['god-files'],
+    queryKey: ['god-files', projectId],
     queryFn: () =>
-      fetchQuery(QUERIES.godFiles, { projectId: DEFAULT_PROJECT_ID, limit: 10 }),
+      fetchQuery(QUERIES.godFiles, { projectId, limit: 10 }),
   });
 
   const { data: riskDist, isLoading: riskLoading } = useQuery({
-    queryKey: ['risk-distribution'],
+    queryKey: ['risk-distribution', projectId],
     queryFn: () =>
-      fetchQuery(QUERIES.riskDistribution, { projectId: DEFAULT_PROJECT_ID }),
+      fetchQuery(QUERIES.riskDistribution, { projectId }),
   });
 
   const { data: planHealth, isLoading: planLoading } = useQuery({
@@ -33,45 +40,45 @@ export function useDashboardData() {
   });
 
   const { data: heatmapData, isLoading: heatmapLoading } = useQuery({
-    queryKey: ['pain-heatmap'],
+    queryKey: ['pain-heatmap', projectId],
     queryFn: () =>
-      fetchQuery(QUERIES.painHeatmap, { projectId: DEFAULT_PROJECT_ID, limit: 100 }),
+      fetchQuery(QUERIES.painHeatmap, { projectId, limit: 100 }),
   });
 
   const { data: fnHeatmapData, isLoading: fnHeatmapLoading } = useQuery({
-    queryKey: ['function-heatmap'],
+    queryKey: ['function-heatmap', projectId],
     queryFn: () =>
-      fetchQuery(QUERIES.functionHeatmap, { projectId: DEFAULT_PROJECT_ID, limit: 100 }),
+      fetchQuery(QUERIES.functionHeatmap, { projectId, limit: 100 }),
   });
 
   const { data: fnTableData, isLoading: fnTableLoading } = useQuery({
-    queryKey: ['function-god-files'],
+    queryKey: ['function-god-files', projectId],
     queryFn: () =>
-      fetchQuery(QUERIES.functionGodFiles, { projectId: DEFAULT_PROJECT_ID, limit: 50 }),
+      fetchQuery(QUERIES.functionGodFiles, { projectId, limit: 50 }),
   });
 
   const { data: realityGapData } = useQuery({
-    queryKey: ['reality-gap'],
+    queryKey: ['reality-gap', projectId],
     queryFn: () =>
-      fetchQuery(QUERIES.realityGap, { projectId: DEFAULT_PROJECT_ID, limit: 50 }),
+      fetchQuery(QUERIES.realityGap, { projectId, limit: 50 }),
   });
 
   const { data: fragilityData } = useQuery({
-    queryKey: ['fragility-index'],
+    queryKey: ['fragility-index', projectId],
     queryFn: () =>
-      fetchQuery(QUERIES.fragilityIndex, { projectId: DEFAULT_PROJECT_ID, limit: 50 }),
+      fetchQuery(QUERIES.fragilityIndex, { projectId, limit: 50 }),
   });
 
   const { data: safestData } = useQuery({
-    queryKey: ['safest-action'],
+    queryKey: ['safest-action', projectId],
     queryFn: () =>
-      fetchQuery(QUERIES.safestAction, { projectId: DEFAULT_PROJECT_ID, limit: 10 }),
+      fetchQuery(QUERIES.safestAction, { projectId, limit: 10 }),
   });
 
   const { data: riskOverTimeData } = useQuery({
-    queryKey: ['risk-over-time'],
+    queryKey: ['risk-over-time', projectId],
     queryFn: () =>
-      fetchQuery(QUERIES.riskOverTime, { projectId: DEFAULT_PROJECT_ID, limit: 30 }),
+      fetchQuery(QUERIES.riskOverTime, { projectId, limit: 30 }),
   });
 
   const { data: milestoneData } = useQuery({
@@ -81,11 +88,11 @@ export function useDashboardData() {
   });
 
   const { data: recentlyDestabilized } = useQuery({
-    queryKey: ['recently-destabilized'],
+    queryKey: ['recently-destabilized', projectId, days],
     queryFn: () =>
       fetchQuery(QUERIES.recentlyDestabilized, {
-        projectId: DEFAULT_PROJECT_ID,
-        days: 7,
+        projectId,
+        days,
         limit: 10,
       }),
   });

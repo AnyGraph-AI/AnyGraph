@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { confidenceColor } from '@/lib/colors';
 import { useDashboardData } from '@/hooks/useDashboardData';
@@ -13,8 +14,57 @@ import { ProgressRing } from '@/components/ProgressRing';
 import { KpiSkeleton, TreemapSkeleton, PanelSkeleton } from '@/components/ui/loading-skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 
+const DEFAULT_PROJECT_ID = 'proj_c0d3e9a1f200';
+const DEFAULT_RISK = 'CRITICAL,HIGH';
+const DEFAULT_MIN_CONFIDENCE = 0.4;
+const DEFAULT_DAYS = 7;
+
+function parseRiskParam(raw: string | null): string[] {
+  const value = raw?.trim();
+  if (!value) return DEFAULT_RISK.split(',');
+  return value.split(',').map((v) => v.trim().toUpperCase()).filter(Boolean);
+}
+
+function parseNumberParam(raw: string | null, fallback: number, min: number, max: number): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+type DashboardUrlState = {
+  projectId: string;
+  riskFilter: string[];
+  minConfidence: number;
+  days: number;
+};
+
+function parseDashboardFilters(params: URLSearchParams): DashboardUrlState {
+  return {
+    projectId: params.get('project') ?? DEFAULT_PROJECT_ID,
+    riskFilter: parseRiskParam(params.get('risk')),
+    minConfidence: parseNumberParam(params.get('minConfidence'), DEFAULT_MIN_CONFIDENCE, 0, 1),
+    days: parseNumberParam(params.get('days'), DEFAULT_DAYS, 1, 30),
+  };
+}
+
 export default function Dashboard() {
   const router = useRouter();
+  const [urlState, setUrlState] = useState<DashboardUrlState>({
+    projectId: DEFAULT_PROJECT_ID,
+    riskFilter: DEFAULT_RISK.split(','),
+    minConfidence: DEFAULT_MIN_CONFIDENCE,
+    days: DEFAULT_DAYS,
+  });
+
+  useEffect(() => {
+    const sync = () => setUrlState(parseDashboardFilters(new URLSearchParams(window.location.search)));
+    sync();
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
+  }, []);
+
+  const { projectId, riskFilter, minConfidence, days } = urlState;
+
   const {
     project,
     topFiles,
@@ -33,16 +83,49 @@ export default function Dashboard() {
     criticalCount,
     fileCount,
     riskCounts,
-  } = useDashboardData();
+  } = useDashboardData({ projectId, days });
+
+  const setFilter = (patch: Record<string, string>) => {
+    const next = new URLSearchParams(window.location.search);
+    Object.entries(patch).forEach(([key, value]) => {
+      if (!value) next.delete(key);
+      else next.set(key, value);
+    });
+    const nextUrl = `/?${next.toString()}`;
+    window.history.replaceState({}, '', nextUrl);
+    setUrlState(parseDashboardFilters(next));
+    router.replace(nextUrl);
+  };
 
   const openExplorer = (payload: { focus: string; focusType: 'file' | 'function'; filePath?: string }) => {
     const search = new URLSearchParams({
       focus: payload.focus,
       focusType: payload.focusType,
+      project: projectId,
+      risk: riskFilter.join(','),
+      minConfidence: String(minConfidence),
+      days: String(days),
     });
     if (payload.filePath) search.set('filePath', payload.filePath);
     router.push(`/explorer?${search.toString()}`);
   };
+
+  const topFilesRows = (topFiles?.data ?? []) as Array<Record<string, unknown>>;
+  const realityRows = (realityGapData?.data ?? []) as Array<Record<string, unknown>>;
+  const fragilityRows = (fragilityData?.data ?? []) as Array<Record<string, unknown>>;
+  const safestRows = (safestData?.data ?? []) as Array<Record<string, unknown>>;
+
+  const byRiskAndConfidence = (row: Record<string, unknown>) => {
+    const tier = String((row.riskTier ?? row.maxTier ?? 'LOW')).toUpperCase();
+    const confidence = Number(row.confidenceScore ?? 1);
+    const riskPass = riskFilter.length === 0 ? true : riskFilter.includes(tier);
+    return riskPass && confidence >= minConfidence;
+  };
+
+  const filteredTopFiles = useMemo(() => topFilesRows.filter(byRiskAndConfidence), [topFilesRows, riskFilter.join(','), minConfidence]);
+  const filteredRealityRows = useMemo(() => realityRows.filter(byRiskAndConfidence), [realityRows, riskFilter.join(','), minConfidence]);
+  const filteredFragilityRows = useMemo(() => fragilityRows.filter(byRiskAndConfidence), [fragilityRows, riskFilter.join(','), minConfidence]);
+  const filteredSafestRows = useMemo(() => safestRows.filter(byRiskAndConfidence), [safestRows, riskFilter.join(','), minConfidence]);
 
   if (loading) {
     return (
@@ -79,6 +162,49 @@ export default function Dashboard() {
           {fileCount} files · {criticalCount} critical · avg confidence{' '}
           <span style={{ color: confidenceColor(avgConfidence) }}>{(avgConfidence * 100).toFixed(0)}%</span>
         </p>
+      </div>
+
+      <div className="fade-up rounded-xl border border-white/10 bg-white/[0.02] p-4 flex flex-wrap items-center gap-3">
+        <label className="text-[10px] uppercase tracking-[0.08em] text-zinc-500">Project</label>
+        <input
+          value={projectId}
+          onChange={(e) => setFilter({ project: e.target.value })}
+          className="h-8 rounded border border-white/10 bg-black/20 px-2 text-xs text-zinc-200 w-[220px]"
+        />
+
+        <label className="text-[10px] uppercase tracking-[0.08em] text-zinc-500">Risk</label>
+        <select
+          value={riskFilter.join(',')}
+          onChange={(e) => setFilter({ risk: e.target.value })}
+          className="h-8 rounded border border-white/10 bg-black/20 px-2 text-xs text-zinc-200"
+        >
+          <option value="CRITICAL,HIGH">CRITICAL,HIGH</option>
+          <option value="CRITICAL,HIGH,MEDIUM">CRITICAL,HIGH,MEDIUM</option>
+          <option value="CRITICAL,HIGH,MEDIUM,LOW">ALL</option>
+        </select>
+
+        <label className="text-[10px] uppercase tracking-[0.08em] text-zinc-500">Min confidence</label>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(minConfidence * 100)}
+          onChange={(e) => setFilter({ minConfidence: String(Number(e.target.value) / 100) })}
+          className="w-28 accent-[#7ec8e3]"
+        />
+        <span className="font-mono text-xs text-zinc-400 w-10">{Math.round(minConfidence * 100)}%</span>
+
+        <label className="text-[10px] uppercase tracking-[0.08em] text-zinc-500">Days</label>
+        <select
+          value={String(days)}
+          onChange={(e) => setFilter({ days: e.target.value })}
+          className="h-8 rounded border border-white/10 bg-black/20 px-2 text-xs text-zinc-200"
+        >
+          <option value="3">3</option>
+          <option value="7">7</option>
+          <option value="14">14</option>
+          <option value="30">30</option>
+        </select>
       </div>
 
       <div className="fade-up">
@@ -124,7 +250,7 @@ export default function Dashboard() {
         <HeroTreemap
           fileHeatmapData={(heatmapData?.data ?? []) as any}
           fnHeatmapData={(fnHeatmapData?.data ?? []) as any}
-          godFilesData={(topFiles?.data ?? []) as any}
+          godFilesData={filteredTopFiles as any}
           fnTableData={(fnTableData?.data ?? []) as any}
           onNavigateToExplorer={openExplorer}
         />
@@ -135,9 +261,9 @@ export default function Dashboard() {
           <h2 className="text-sm font-semibold tracking-[-0.01em] text-zinc-100">Top Files</h2>
           <p className="mt-1 font-mono text-[10px] text-zinc-500">Ranked by adjusted pain — highest risk files first</p>
           <div className="mt-3">
-            {(topFiles?.data ?? []).length > 0 ? (
+            {filteredTopFiles.length > 0 ? (
               <GodFilesTable
-                data={(topFiles?.data ?? []) as any}
+                data={filteredTopFiles as any}
                 onRowClick={(file) =>
                   openExplorer({
                     focus: file.filePath || file.name,
@@ -156,9 +282,9 @@ export default function Dashboard() {
           <h2 className="text-sm font-semibold tracking-[-0.01em] text-zinc-100">Reality Gap</h2>
           <p className="mt-1 font-mono text-[10px] text-zinc-500">Where confidence claims exceed actual evidence</p>
           <div className="mt-3">
-            {(realityGapData?.data ?? []).length > 0 ? (
+            {filteredRealityRows.length > 0 ? (
               <RealityGap
-                data={(realityGapData?.data ?? []) as any}
+                data={filteredRealityRows as any}
                 onRowClick={(row) =>
                   openExplorer({
                     focus: row.name,
@@ -175,8 +301,8 @@ export default function Dashboard() {
 
       <div className="fade-up rounded-2xl border border-white/10 bg-white/[0.02] p-5">
         <ContextTabs
-          fragilityData={(fragilityData?.data ?? []) as any}
-          safestData={(safestData?.data ?? []) as any}
+          fragilityData={filteredFragilityRows as any}
+          safestData={filteredSafestRows as any}
           riskOverTimeData={(riskOverTimeData?.data ?? []) as any}
           milestoneData={(milestoneData?.data ?? []) as any}
           avgConfidence={avgConfidence}
