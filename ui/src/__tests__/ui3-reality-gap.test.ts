@@ -151,14 +151,15 @@ describe('[UI-3] Gap snooze', () => {
 // ─── Confidence banner ──────────────────────────────────────
 
 describe('[UI-3] Confidence banner', () => {
-  it('page.tsx has confidence banner logic', async () => {
+  it('KpiRow has confidence threshold logic (0.55 amber dot)', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
+    // After UI-V2 extraction, confidence banner logic lives in KpiRow
     const source = await fs.readFile(
-      path.resolve(import.meta.dirname, '..', 'app', 'page.tsx'),
+      path.resolve(import.meta.dirname, '..', 'components', 'KpiRow.tsx'),
       'utf-8',
     );
-    expect(source).toMatch(/avgConfidence|averageConfidence/);
+    expect(source).toMatch(/avgConfidence/);
     expect(source).toMatch(/0\.55/);
   });
 });
@@ -179,16 +180,24 @@ describe('[UI-3] Fragility dampening', () => {
 
 // ─── Page integration ────────────────────────────────────────
 
-describe('[UI-3] page.tsx integration', () => {
-  it('page references all UI-3 components', async () => {
+describe('[UI-3] component tree integration', () => {
+  it('page.tsx or extracted components reference all UI-3 components', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
-    const pagePath = path.resolve(import.meta.dirname, '..', 'app', 'page.tsx');
-    const source = await fs.readFile(pagePath, 'utf-8');
+    // After UI-V2 extraction: RealityGap in page.tsx, FragilityTable/SafestAction in ContextTabs
+    const pageSrc = await fs.readFile(
+      path.resolve(import.meta.dirname, '..', 'app', 'page.tsx'), 'utf-8');
+    const ctxSrc = await fs.readFile(
+      path.resolve(import.meta.dirname, '..', 'components', 'ContextTabs.tsx'), 'utf-8');
+    const kpiSrc = await fs.readFile(
+      path.resolve(import.meta.dirname, '..', 'components', 'KpiRow.tsx'), 'utf-8');
 
-    expect(source).toContain('RealityGap');
-    expect(source).toContain('FragilityTable');
-    expect(source).toContain('RiskDistributionChart');
-    expect(source).toContain('SafestAction');
+    // RealityGap still directly in page.tsx
+    expect(pageSrc).toContain('RealityGap');
+    // FragilityTable and SafestAction in ContextTabs
+    expect(ctxSrc).toContain('FragilityTable');
+    expect(ctxSrc).toContain('SafestAction');
+    // Risk distribution is inline in KpiRow (badges, not chart)
+    expect(kpiSrc).toContain('riskCounts');
   });
 });

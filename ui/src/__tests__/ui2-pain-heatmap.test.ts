@@ -123,11 +123,12 @@ describe('[UI-2] functionHeatmap query', () => {
 // ─── View toggle state ───────────────────────────────────────
 
 describe('[UI-2] View toggle', () => {
-  it('page has view mode toggle (treemap vs table) and data mode toggle (files vs functions)', async () => {
+  it('HeroTreemap has view mode toggle (treemap vs table) and data mode toggle (files vs functions)', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
-    const pagePath = path.resolve(import.meta.dirname, '..', 'app', 'page.tsx');
-    const source = await fs.readFile(pagePath, 'utf-8');
+    // After UI-V2 extraction, view/data mode live in HeroTreemap, not page.tsx
+    const heroPath = path.resolve(import.meta.dirname, '..', 'components', 'HeroTreemap.tsx');
+    const source = await fs.readFile(heroPath, 'utf-8');
 
     // View mode toggle
     expect(source).toMatch(/viewMode/);
@@ -136,7 +137,14 @@ describe('[UI-2] View toggle', () => {
     // Both components referenced
     expect(source).toContain('PainHeatmap');
     expect(source).toContain('GodFilesTable');
-    // Function queries used
+  });
+
+  it('useDashboardData hook fetches function queries', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const hookPath = path.resolve(import.meta.dirname, '..', 'hooks', 'useDashboardData.ts');
+    const source = await fs.readFile(hookPath, 'utf-8');
+
     expect(source).toContain('functionHeatmap');
     expect(source).toContain('functionGodFiles');
   });

@@ -104,11 +104,12 @@ describe('[UI-4] milestoneProgress query', () => {
 // ─── Page integration ────────────────────────────────────────
 
 describe('[UI-4] page integration', () => {
-  it('dashboard references RiskOverTime and MilestoneProgress', async () => {
+  it('ContextTabs references RiskOverTime and MilestoneProgress', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
+    // After UI-V2 extraction, these live in ContextTabs not page.tsx
     const source = await fs.readFile(
-      path.resolve(import.meta.dirname, '..', 'app', 'page.tsx'),
+      path.resolve(import.meta.dirname, '..', 'components', 'ContextTabs.tsx'),
       'utf-8',
     );
     expect(source).toContain('RiskOverTime');
