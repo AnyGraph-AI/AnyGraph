@@ -260,6 +260,79 @@ export const QUERIES = {
     ORDER BY m.projectId, m.name
   `,
 
+  /** Active Context — in-progress/blocked work and gate states */
+  activeContext: `
+    CALL {
+      MATCH (t:Task)-[:PART_OF]->(m:Milestone)
+      WHERE m.projectId STARTS WITH $planProjectPrefix
+        AND t.status IN ['in-progress', 'in_progress', 'in progress']
+      OPTIONAL MATCH (t)-[:HAS_CODE_EVIDENCE]->(sf:SourceFile)
+      WITH t, m, sf
+      ORDER BY t.name
+      LIMIT $limit
+      RETURN 'in_progress_task' AS kind,
+             coalesce(t.id, '') AS taskId,
+             t.name AS taskName,
+             m.name AS milestoneName,
+             coalesce(sf.filePath, '') AS filePath,
+             coalesce(sf.name, '') AS fileName,
+             [] AS blockerNames,
+             0 AS blockerCount,
+             '' AS gateStatus,
+             0 AS criticalCount,
+             false AS tested
+
+      UNION
+
+      MATCH (t:Task)-[:PART_OF]->(m:Milestone)
+      WHERE m.projectId STARTS WITH $planProjectPrefix
+        AND t.status = 'planned'
+      MATCH (t)-[:DEPENDS_ON]->(dep:Task)
+      WHERE dep.status <> 'done'
+      WITH t, m, collect(DISTINCT dep.name)[0..10] AS blockerNames
+      OPTIONAL MATCH (t)-[:HAS_CODE_EVIDENCE]->(sf:SourceFile)
+      WITH t, m, blockerNames, sf
+      ORDER BY size(blockerNames) DESC, t.name
+      LIMIT $limit
+      RETURN 'blocked_task' AS kind,
+             coalesce(t.id, '') AS taskId,
+             t.name AS taskName,
+             m.name AS milestoneName,
+             coalesce(sf.filePath, '') AS filePath,
+             coalesce(sf.name, '') AS fileName,
+             blockerNames,
+             size(blockerNames) AS blockerCount,
+             '' AS gateStatus,
+             0 AS criticalCount,
+             false AS tested
+
+      UNION
+
+      MATCH (sf:SourceFile {projectId: $projectId})
+      OPTIONAL MATCH (sf)-[:CONTAINS]->(fn:Function {projectId: $projectId})
+      WHERE fn.riskTier = 'CRITICAL'
+      WITH sf, count(DISTINCT fn) AS criticalCount
+      WHERE criticalCount > 0
+      OPTIONAL MATCH (sf)-[:TESTED_BY]->(tf:TestFile)
+      WITH sf, criticalCount, count(DISTINCT tf) > 0 AS tested
+      ORDER BY criticalCount DESC, sf.adjustedPain DESC, sf.name
+      LIMIT $limit
+      RETURN 'gate_file' AS kind,
+             '' AS taskId,
+             '' AS taskName,
+             '' AS milestoneName,
+             coalesce(sf.filePath, '') AS filePath,
+             coalesce(sf.name, '') AS fileName,
+             [] AS blockerNames,
+             0 AS blockerCount,
+             CASE WHEN tested THEN 'REQUIRE_APPROVAL' ELSE 'BLOCK' END AS gateStatus,
+             criticalCount,
+             tested
+    }
+    RETURN kind, taskId, taskName, milestoneName, filePath, fileName,
+           blockerNames, blockerCount, gateStatus, criticalCount, tested
+  `,
+
   /** Recently destabilized — CRITICAL functions updated in a rolling window */
   recentlyDestabilized: `
     MATCH (f:Function {projectId: $projectId})
