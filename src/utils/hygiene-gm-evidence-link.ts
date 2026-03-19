@@ -108,6 +108,7 @@ async function main(): Promise<void> {
              MATCH (sf:SourceFile {id: $fileId})
              MERGE (t)-[e:HAS_CODE_EVIDENCE]->(sf)
              SET e.source = 'hygiene-gm-evidence-link',
+                 e.refType = 'file_path',
                  e.linkedAt = datetime($linkedAt),
                  e.milestoneCode = $milestoneCode`,
             {

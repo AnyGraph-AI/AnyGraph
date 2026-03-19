@@ -319,6 +319,7 @@ async function backfillEvidence(): Promise<{
              MATCH (sf:SourceFile {projectId: $codeProjectId, name: $fileName})
              MERGE (t)-[r:HAS_CODE_EVIDENCE]->(sf)
              SET r.source = 'evidence_backfill_fast_track',
+                 r.refType = 'file_path',
                  r.category = $category,
                  r.rank = $rank,
                  r.rationale = $rationale,

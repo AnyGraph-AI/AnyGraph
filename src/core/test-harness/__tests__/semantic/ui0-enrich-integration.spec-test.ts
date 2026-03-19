@@ -164,6 +164,33 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     }
   });
 
+  it('files with zero functions and zero TESTED_BY edges do not default to 100% confidence', async () => {
+    await enrichPrecomputeScores(driver, PROJECT_ID);
+    const session = driver.session();
+    try {
+      const r = await session.run(
+        `MATCH (sf:SourceFile {projectId: $pid})
+         OPTIONAL MATCH (sf)-[:CONTAINS]->(f:Function {projectId: $pid})
+         WITH sf, count(f) AS fnCount
+         WHERE fnCount = 0
+         OPTIONAL MATCH (sf)-[:TESTED_BY]->(tf)
+         WITH sf, fnCount, count(tf) AS testedByCount
+         WHERE testedByCount = 0
+         RETURN sf.name AS name, sf.confidenceScore AS conf
+         LIMIT 50`,
+        { pid: PROJECT_ID },
+      );
+
+      expect(r.records.length).toBeGreaterThan(0);
+      const nonZero = r.records
+        .map((rec) => ({ name: rec.get('name') as string, conf: Number(rec.get('conf') ?? 0) }))
+        .filter((x) => x.conf > 0.000001);
+      expect(nonZero).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+
   it('adjustedPain = painScore * (1 + (1 - confidenceScore)) for all files', async () => {
     await enrichPrecomputeScores(driver, PROJECT_ID);
     const session = driver.session();

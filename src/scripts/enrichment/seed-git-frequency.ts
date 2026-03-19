@@ -253,16 +253,9 @@ export async function enrichGitFrequency(
         * (1.0 + coalesce(fn.churnRelative, 0.0))
     `, { projectId });
 
-    // 9. Recompute risk tiers
-    await session.run(`
-      MATCH (fn:Function {projectId: $projectId})
-      SET fn.riskTier = CASE
-        WHEN fn.riskLevel > 500 THEN 'CRITICAL'
-        WHEN fn.riskLevel > 100 THEN 'HIGH'
-        WHEN fn.riskLevel > 20 THEN 'MEDIUM'
-        ELSE 'LOW'
-      END
-    `, { projectId });
+    // 9. DO NOT set riskTier here.
+    // riskTier ownership belongs exclusively to GC-5 composite-risk scoring.
+    // This script updates churn/riskLevel inputs only.
 
     console.log(`Updated ${sourceFilesUpdated} SourceFiles, propagated to ${functionsUpdated} Functions`);
 

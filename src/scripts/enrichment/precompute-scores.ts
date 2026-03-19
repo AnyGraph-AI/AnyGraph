@@ -394,8 +394,8 @@ export async function enrichPrecomputeScores(
     // (e.g. queries.ts exports a const object, not functions)
     const fileTestedByResult = await session.run(
       `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
-       OPTIONAL MATCH (sf)-[:TESTED_BY]->()
-       WITH sf.id AS sfId, count(*) AS testedByCount
+       OPTIONAL MATCH (sf)-[:TESTED_BY]->(tf)
+       WITH sf.id AS sfId, count(tf) AS testedByCount
        WHERE testedByCount > 0
        RETURN sfId, testedByCount`,
       { projectId },

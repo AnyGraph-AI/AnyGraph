@@ -19,6 +19,7 @@ async function main(): Promise<void> {
        ON CREATE SET
          r.confidence = 'high',
          r.source = 'runtime_document_ingest',
+         r.refType = 'file_path',
          r.linkedAt = toString(datetime())
        RETURN count(DISTINCT n) AS linkedNodes,
               count(DISTINCT p) AS documentProjects`,

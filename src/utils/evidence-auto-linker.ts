@@ -145,6 +145,11 @@ async function main(): Promise<void> {
             MATCH (s) WHERE elementId(s) = $targetId
             MERGE (t)-[e:HAS_CODE_EVIDENCE]->(s)
             ON CREATE SET e.source = 'evidence_auto_linker',
+                          e.refType = CASE
+                            WHEN 'Function' IN labels(s) THEN 'function'
+                            WHEN 'SourceFile' IN labels(s) THEN 'file_path'
+                            ELSE 'auto_link'
+                          END,
                           e.matchType = $matchType,
                           e.confidence = $confidence,
                           e.createdAt = datetime()

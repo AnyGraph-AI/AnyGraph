@@ -8,13 +8,31 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Project } from 'ts-morph';
 import { createEphemeralGraph, type EphemeralGraphRuntime } from '../../ephemeral-graph.js';
 import { Neo4jService } from '../../../../storage/neo4j/neo4j.service.js';
-import { extractWebFrameworkRegistrations } from '../../../../scripts/enrichment/create-entrypoint-edges.js';
+import neo4jDriver from 'neo4j-driver';
+import { enrichEntrypointEdges, extractWebFrameworkRegistrations } from '../../../../scripts/enrichment/create-entrypoint-edges.js';
 
 describe('[GC-7] Entrypoint Dispatch Edges', () => {
   describe('Integration — live graph', () => {
     let neo4j: Neo4jService;
 
-    beforeAll(() => { neo4j = new Neo4jService(); });
+    beforeAll(async () => {
+      neo4j = new Neo4jService();
+
+      // Deterministic precondition for live-graph assertions:
+      // refresh Entrypoint + DISPATCHES_TO materialization before checking counts.
+      const driver = neo4jDriver.driver(
+        process.env.NEO4J_URI ?? 'bolt://localhost:7687',
+        neo4jDriver.auth.basic(
+          process.env.NEO4J_USER ?? 'neo4j',
+          process.env.NEO4J_PASSWORD ?? 'codegraph',
+        ),
+      );
+      try {
+        await enrichEntrypointEdges(driver);
+      } finally {
+        await driver.close();
+      }
+    }, 30000);
     afterAll(async () => { await neo4j.close(); });
 
     function toNum(val: unknown): number {

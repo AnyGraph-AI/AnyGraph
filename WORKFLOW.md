@@ -47,8 +47,8 @@ WHERE m.projectId STARTS WITH 'plan_codegraph'
   AND NOT m.name CONTAINS 'DF'
   AND NOT m.name CONTAINS 'N0'
 OPTIONAL MATCH (t)-[:DEPENDS_ON]->(dep:Task)
-WHERE dep.status <> 'done'
-WITH t, m, collect(dep.name) AS blockers
+WITH t, m, collect(dep) AS deps
+WITH t, m, [d IN deps WHERE d.status <> 'done'] AS blockers
 WHERE size(blockers) = 0
 RETURN t.name AS task, m.name AS milestone
 ORDER BY m.name
