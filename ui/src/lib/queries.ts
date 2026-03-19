@@ -163,7 +163,7 @@ export const QUERIES = {
            WHEN 2 THEN 2
            ELSE 1
          END AS expectedEvidence
-    WITH sf, fnCount, confidence, adjustedPain, fragility,
+    WITH sf, fnCount, maxTierNum, confidence, adjustedPain, fragility,
          evidenceCount, expectedEvidence,
          CASE WHEN expectedEvidence > 0
            THEN toFloat(expectedEvidence - evidenceCount) / expectedEvidence
