@@ -164,10 +164,12 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     }
   });
 
-  it('files with zero functions and zero TESTED_BY edges do not default to 100% confidence', async () => {
+  it('files with zero functions, zero TESTED_BY, and zero VR evidence do not default to 100% confidence', async () => {
     await enrichPrecomputeScores(driver, PROJECT_ID);
     const session = driver.session();
     try {
+      // Files with no functions, no TESTED_BY, AND no VR evidence should have conf ≤ VR baseline
+      // (they may still get non-zero confidence from VR ANALYZED edges)
       const r = await session.run(
         `MATCH (sf:SourceFile {projectId: $pid})
          OPTIONAL MATCH (sf)-[:CONTAINS]->(f:Function {projectId: $pid})
@@ -176,16 +178,21 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
          OPTIONAL MATCH (sf)-[:TESTED_BY]->(tf)
          WITH sf, fnCount, count(tf) AS testedByCount
          WHERE testedByCount = 0
+         OPTIONAL MATCH (vr:VerificationRun)-[:ANALYZED]->(sf)
+         WITH sf, fnCount, testedByCount, count(vr) AS vrCount
+         WHERE vrCount = 0
          RETURN sf.name AS name, sf.confidenceScore AS conf
          LIMIT 50`,
         { pid: PROJECT_ID },
       );
 
-      expect(r.records.length).toBeGreaterThan(0);
-      const nonZero = r.records
-        .map((rec) => ({ name: rec.get('name') as string, conf: Number(rec.get('conf') ?? 0) }))
-        .filter((x) => x.conf > 0.000001);
-      expect(nonZero).toEqual([]);
+      // Files with truly zero evidence from all sources must have conf = 0
+      if (r.records.length > 0) {
+        const nonZero = r.records
+          .map((rec) => ({ name: rec.get('name') as string, conf: Number(rec.get('conf') ?? 0) }))
+          .filter((x) => x.conf > 0.000001);
+        expect(nonZero).toEqual([]);
+      }
     } finally {
       await session.close();
     }

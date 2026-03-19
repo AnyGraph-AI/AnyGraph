@@ -4,6 +4,7 @@
  */
 import neo4j from 'neo4j-driver';
 import { readFileSync, existsSync } from 'fs';
+import { validateProjectWrite } from '../../core/guards/project-write-guard.js';
 
 const GRAPH_FILE = 'godspeed-full-graph.json';
 const PROJECT_ID = 'proj_60d5feed0001';
@@ -26,6 +27,7 @@ async function main() {
 
   // 2. Connect to Neo4j
   const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD));
+  await validateProjectWrite(driver as any, PROJECT_ID);
   const session = driver.session();
 
   try {

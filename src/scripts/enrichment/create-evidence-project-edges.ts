@@ -29,6 +29,7 @@ export async function enrichEvidenceProject(
        MATCH (p:Project {projectId: e.projectId})
        MERGE (e)-[r:FROM_PROJECT]->(p)
        ON CREATE SET r.derived = true, r.source = 'evidence-project', r.created = datetime()
+       SET r.projectId = coalesce(e.projectId, p.projectId)
        RETURN count(r) AS edges`,
     );
     const direct = directResult.records[0]?.get('edges')?.toNumber?.() ??
@@ -49,6 +50,7 @@ export async function enrichEvidenceProject(
        MATCH (p:Project {projectId: t.projectId})
        MERGE (e)-[r:FROM_PROJECT]->(p)
        ON CREATE SET r.derived = true, r.source = 'evidence-project-crosslayer', r.created = datetime()
+       SET r.projectId = coalesce(e.projectId, p.projectId)
        RETURN count(r) AS edges`,
     );
     const crossLayer = crossResult.records[0]?.get('edges')?.toNumber?.() ??

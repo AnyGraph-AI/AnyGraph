@@ -12,6 +12,8 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   validateProjectWrite,
   isProjectScopedWriteQuery,
+  extractProjectIds,
+  isWriteQuery,
   ProjectWriteValidationError,
 } from '../../../../core/guards/project-write-guard.js';
 import { runRegisterProject } from '../../../../cli/cli.js';
@@ -20,7 +22,7 @@ describe('RF-17: project write validation guard', () => {
   it('SPEC: validateProjectWrite throws for unregistered projectId', async () => {
     const close = vi.fn(async () => {});
     const run = vi.fn(async () => ({
-      records: [{ get: (k: string) => (k === 'ok' ? false : undefined) }],
+      records: [{ get: (k: string) => (k === 'registered' ? false : undefined) }],
     }));
 
     const driver = {
@@ -45,11 +47,35 @@ describe('RF-17: project write validation guard', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it('SPEC: write guard triggers only on CREATE/MERGE + projectId params', () => {
+  it('SPEC: write guard recognizes broader write verbs and nested project ids', () => {
+    expect(isWriteQuery('MATCH (n) RETURN count(n)')).toBe(false);
+    expect(isWriteQuery('MATCH (n) SET n.foo = 1')).toBe(true);
+    expect(isWriteQuery('MATCH (n) DETACH DELETE n')).toBe(true);
+    expect(isWriteQuery('CALL apoc.create.relationship(a, "X", {}, b)')).toBe(true);
+
     expect(isProjectScopedWriteQuery('MATCH (n) RETURN count(n)', { projectId: 'p1' })).toBe(false);
     expect(isProjectScopedWriteQuery('CREATE (n:CodeNode {id:$id, projectId:$projectId})', { projectId: 'p1' })).toBe(true);
-    expect(isProjectScopedWriteQuery('MERGE (n:CodeNode {id:$id, projectId:$projectId})', { projectId: 'p1' })).toBe(true);
+    expect(isProjectScopedWriteQuery('MATCH (n {projectId:$projectId}) SET n.x = 1', { projectId: 'p1' })).toBe(true);
+    expect(isProjectScopedWriteQuery('MATCH (n {projectId:$projectId}) DETACH DELETE n', { projectId: 'p1' })).toBe(true);
+    expect(isProjectScopedWriteQuery('UNWIND $nodes AS node MERGE (n {id: node.id}) SET n += node.props', {
+      nodes: [{ id: 'a', props: { projectId: 'p_nested' } }],
+    })).toBe(true);
+    expect(isProjectScopedWriteQuery("MERGE (p:Project {projectId: 'proj_literal'}) SET p.name = 'x'", {})).toBe(true);
     expect(isProjectScopedWriteQuery('MERGE (n:CodeNode {id:$id})', {})).toBe(false);
+  });
+
+  it('SPEC: extractProjectIds resolves direct, nested, and literal query projectIds', () => {
+    const ids = extractProjectIds(
+      "MATCH (n {projectId: 'proj_literal'}) SET n.x = 1",
+      {
+        projectId: 'proj_root',
+        edges: [{ props: { pid: 'proj_nested' } }],
+      },
+    );
+
+    expect(ids).toContain('proj_root');
+    expect(ids).toContain('proj_nested');
+    expect(ids).toContain('proj_literal');
   });
 });
 

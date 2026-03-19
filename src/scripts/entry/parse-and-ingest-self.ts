@@ -7,6 +7,7 @@ import { CORE_TYPESCRIPT_SCHEMA } from '../../../src/core/config/schema.js';
 import neo4j from 'neo4j-driver';
 import { writeFileSync } from 'fs';
 import { execSync } from 'child_process';
+import { validateProjectWrite } from '../../core/guards/project-write-guard.js';
 
 const CODEGRAPH_PATH = '/home/jonathan/.openclaw/workspace/codegraph/';
 const PROJECT_ID = 'proj_c0d3e9a1f200';
@@ -64,6 +65,7 @@ async function main() {
 
   // 3. Connect + clear ONLY self-graph nodes (preserve GodSpeed)
   const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD));
+  await validateProjectWrite(driver as any, PROJECT_ID);
   const session = driver.session();
 
   try {

@@ -33,6 +33,7 @@ export async function enrichClaimProjects(
        MATCH (p:Project {projectId: evidenceProjectId})
        MERGE (c)-[r:SPANS_PROJECT]->(p)
        ON CREATE SET r.derived = true, r.source = 'claim-project', r.created = datetime()
+       SET r.projectId = coalesce(c.projectId, p.projectId)
        RETURN count(r) AS edges`,
       { projectId: projectId ?? null },
     );
@@ -46,6 +47,7 @@ export async function enrichClaimProjects(
        WHERE NOT (c)-[:SPANS_PROJECT]->(p)
        MERGE (c)-[r:SPANS_PROJECT]->(p)
        ON CREATE SET r.derived = true, r.source = 'claim-project-crosslayer', r.created = datetime()
+       SET r.projectId = coalesce(c.projectId, p.projectId)
        RETURN count(r) AS edges`,
     );
     const cross = crossResult.records[0]?.get('edges')?.toNumber?.() ??

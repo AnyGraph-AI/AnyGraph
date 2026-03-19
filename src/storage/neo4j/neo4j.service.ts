@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 
 import { MAX_TRAVERSAL_DEPTH } from '../../constants.js';
 import { getTimeoutConfig } from '../../core/config/timeouts.js';
-import { extractProjectId, isProjectScopedWriteQuery, validateProjectWrite } from '../../core/guards/project-write-guard.js';
+import { extractProjectIds, isProjectScopedWriteQuery, validateProjectWrite } from '../../core/guards/project-write-guard.js';
 
 dotenv.config();
 
@@ -29,11 +29,16 @@ export class Neo4jService {
 
   public async run(query: string, params: Record<string, any> = {}) {
     const timeoutConfig = getTimeoutConfig();
-    const projectId = extractProjectId(params);
+    const projectIds = extractProjectIds(query, params);
 
     const isTestEnv = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
-    if (!isTestEnv && projectId && isProjectScopedWriteQuery(query, params)) {
-      await validateProjectWrite(this.driver, projectId);
+    const forceGuard = process.env.PROJECT_WRITE_GUARD_FORCE === 'true';
+    const bypassForTest = isTestEnv && !forceGuard;
+
+    if (!bypassForTest && isProjectScopedWriteQuery(query, params)) {
+      for (const projectId of projectIds) {
+        await validateProjectWrite(this.driver, projectId);
+      }
     }
 
     const session = this.driver.session();

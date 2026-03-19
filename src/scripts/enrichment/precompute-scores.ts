@@ -405,6 +405,55 @@ export async function enrichPrecomputeScores(
       fileTestedByMap[r.get('sfId') as string] = toNum(r.get('testedByCount'));
     }
 
+    // ── Step 4a-vr: Gather VerificationRun evidence per file ──
+    // evidenceCount = distinct VR nodes that ANALYZED or FLAGS functions in this file
+    // freshnessWeight = exp(-λ * ageDays) where ageDays = days since most recent VR
+    const FRESHNESS_LAMBDA = 0.10; // ~7 day half-life (configurable per project)
+    // Query: per-file, each VR's effectiveConfidence and ranAt
+    const vrEvidenceResult = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       OPTIONAL MATCH (vr:VerificationRun)-[:ANALYZED]->(sf)
+       WITH sf, collect(DISTINCT {ec: vr.effectiveConfidence, ra: vr.ranAt, id: elementId(vr)}) AS directVrs
+       OPTIONAL MATCH (sf)-[:CONTAINS]->(fn:CodeNode)-[:FLAGS]-(vr2:VerificationRun)
+       WITH sf, directVrs, collect(DISTINCT {ec: vr2.effectiveConfidence, ra: vr2.ranAt, id: elementId(vr2)}) AS flagVrs
+       RETURN sf.id AS sfId, directVrs, flagVrs`,
+      { projectId },
+    );
+    const vrEvidenceMap: Record<string, { evidenceCount: number; avgVrConfidence: number; freshnessWeight: number }> = {};
+    const now = Date.now();
+    for (const r of vrEvidenceResult.records) {
+      const sfId = r.get('sfId') as string;
+      const directVrs = r.get('directVrs') as Array<{ec: number | null; ra: string | null; id: string | null}>;
+      const flagVrs = r.get('flagVrs') as Array<{ec: number | null; ra: string | null; id: string | null}>;
+
+      // Deduplicate by VR element id, filter nulls (from OPTIONAL MATCH)
+      const seen = new Set<string>();
+      const allVrs: Array<{ec: number | null; ra: any}> = [];
+      for (const v of [...directVrs, ...flagVrs]) {
+        if (!v.id) continue; // null from OPTIONAL MATCH
+        if (seen.has(v.id)) continue;
+        seen.add(v.id);
+        allVrs.push(v);
+      }
+
+      const confidences = allVrs.map(v => Number(v.ec ?? 0.5)).filter(c => !isNaN(c));
+      const avgVrConfidence = confidences.length > 0
+        ? confidences.reduce((s, c) => s + c, 0) / confidences.length
+        : 0;
+
+      // Freshness from most recent VR
+      let daysSinceLastVr = 365;
+      for (const v of allVrs) {
+        if (v.ra) {
+          const raDate = new Date(v.ra.toString());
+          const days = Math.max(0, Math.floor((now - raDate.getTime()) / (1000 * 60 * 60 * 24)));
+          if (days < daysSinceLastVr) daysSinceLastVr = days;
+        }
+      }
+      const freshnessWeight = Math.exp(-FRESHNESS_LAMBDA * daysSinceLastVr);
+      vrEvidenceMap[sfId] = { evidenceCount: allVrs.length, avgVrConfidence, freshnessWeight };
+    }
+
     // RF-15: Blend parse-time (hasTestCaller) with runtime coverage (lineCoverage).
     // hasTestCaller = binary (0 or 1), lineCoverage = 0.0-1.0.
     // Blend: functionCoverage = max(hasTestCaller ? 0.5 : 0, lineCoverage)
@@ -498,13 +547,16 @@ export async function enrichPrecomputeScores(
     for (const raw of fileRaws) {
       const coverage = coverageMap[raw.sfId] ?? { covered: 0, total: 0 };
 
-      // For confidence: use test coverage as avgEffectiveConfidence proxy
-      // until VerificationRun linkage exists (RF-15+)
+      // Blend test coverage with VR evidence for avgEffectiveConfidence
       const fileCoverage = coverageMap[raw.sfId] ?? { covered: 0, total: 0 };
       const hasTestedBy = (fileTestedByMap[raw.sfId] ?? 0) > 0;
-      const avgEffectiveConfidence = fileCoverage.total > 0
+      const testBasedConfidence = fileCoverage.total > 0
         ? fileCoverage.covered / fileCoverage.total
         : hasTestedBy ? 1.0 : 0;
+
+      // Blend test coverage with VR confidence: max of both signals
+      const vrEvidence = vrEvidenceMap[raw.sfId] ?? { evidenceCount: 0, avgVrConfidence: 0, freshnessWeight: 0 };
+      const avgEffectiveConfidence = Math.max(testBasedConfidence, vrEvidence.avgVrConfidence);
 
       const normalizedChurn = maxChurnTotal > 0
         ? raw.churnTotal / maxChurnTotal
@@ -523,8 +575,8 @@ export async function enrichPrecomputeScores(
         functionDownstreamImpacts: raw.fnDownstreams,
         functionCentralities: raw.fnCentralities,
         avgEffectiveConfidence,
-        evidenceCount: 0, // No VR linkage yet — will be wired in RF-15+
-        freshnessWeight: 0, // No freshness decay yet — will be wired in RF-15+
+        evidenceCount: vrEvidence.evidenceCount,
+        freshnessWeight: vrEvidence.freshnessWeight,
         normalizedChurn,
       });
 
