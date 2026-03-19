@@ -55,7 +55,7 @@ export function RiskDistributionChart({ data }: { data: RiskTierRow[] }) {
               color: '#e4e4e7',
               fontSize: '13px',
             }}
-            formatter={(value: number, _name: string, props: { payload: RiskTierRow }) => [
+            formatter={(value: any, _name: any, props: any) => [
               `${value} (${total > 0 ? ((value / total) * 100).toFixed(1) : 0}%)`,
               props.payload.tier,
             ]}

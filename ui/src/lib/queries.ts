@@ -34,30 +34,6 @@ export const QUERIES = {
     LIMIT $limit
   `,
 
-  /** Reality Gap — high pain, low confidence */
-  realityGap: `
-    MATCH (sf:SourceFile {projectId: $projectId})
-    WHERE sf.fragility > 0
-    RETURN sf.name AS name, sf.filePath AS filePath,
-           sf.fragility AS fragility,
-           sf.painScore AS painScore,
-           sf.confidenceScore AS confidenceScore
-    ORDER BY sf.fragility DESC
-    LIMIT $limit
-  `,
-
-  /** Safest Next Action — low risk, high confidence */
-  safestAction: `
-    MATCH (sf:SourceFile {projectId: $projectId})
-    WHERE sf.confidenceScore >= 0.5 AND sf.painScore < $painThreshold
-    RETURN sf.name AS name, sf.filePath AS filePath,
-           sf.painScore AS painScore,
-           sf.confidenceScore AS confidenceScore,
-           sf.fragility AS fragility
-    ORDER BY sf.fragility ASC
-    LIMIT $limit
-  `,
-
   /** Risk distribution by tier */
   riskDistribution: `
     MATCH (f:Function {projectId: $projectId})

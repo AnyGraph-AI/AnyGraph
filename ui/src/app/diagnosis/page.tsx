@@ -72,12 +72,12 @@ export default function DiagnosisPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
             <h2 className="text-lg font-semibold text-zinc-100 mb-3">Risk Over Time</h2>
-            <RiskOverTime data={riskOverTimeData?.data ?? []} />
+            <RiskOverTime data={(riskOverTimeData?.data ?? []) as any} />
           </div>
 
           <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
             <h2 className="text-lg font-semibold text-zinc-100 mb-3">Milestone Progress</h2>
-            <MilestoneProgress data={milestoneData?.data ?? []} />
+            <MilestoneProgress data={(milestoneData?.data ?? []) as any} />
           </div>
         </div>
       )}

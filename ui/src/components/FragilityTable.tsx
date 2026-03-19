@@ -1,5 +1,7 @@
 'use client';
 
+import { painTextClass } from '@/lib/colors';
+
 interface FragilityRow {
   name: string;
   fragility: number;
@@ -9,11 +11,9 @@ interface FragilityRow {
   centrality: number;
 }
 
+/** Fragility uses pain gradient — normalize to 0-1 for color. max ~5 in practice */
 function getFragilityColor(f: number): string {
-  if (f >= 3) return 'text-red-400';
-  if (f >= 1) return 'text-amber-400';
-  if (f > 0) return 'text-yellow-400';
-  return 'text-emerald-400';
+  return painTextClass(Math.min(f / 5, 1));
 }
 
 /**

@@ -116,6 +116,45 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* ── Design tokens (UI-V1) ──────────────────────────── */
+:root {
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Pain gradient stops */
+  --color-pain-0: hsl(145, 85%, 48%);
+  --color-pain-25: hsl(50, 85%, 46%);
+  --color-pain-50: hsl(28, 85%, 46%);
+  --color-pain-75: hsl(12, 85%, 45%);
+  --color-pain-100: hsl(0, 85%, 45%);
+
+  /* Confidence gradient stops */
+  --color-conf-0: hsl(0, 85%, 45%);
+  --color-conf-25: hsl(15, 85%, 45%);
+  --color-conf-50: hsl(38, 85%, 46%);
+  --color-conf-75: hsl(80, 85%, 47%);
+  --color-conf-100: hsl(145, 85%, 48%);
+}
+
+/* ── Reduced motion ─────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

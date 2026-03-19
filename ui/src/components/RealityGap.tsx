@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { painTextClass } from '@/lib/colors';
 
 interface RealityGapRow {
   name: string;
@@ -14,10 +15,9 @@ interface RealityGapRow {
 
 type SeverityFilter = 'all' | 'critical-high';
 
+/** Gap severity uses pain gradient (higher gap = more dangerous) */
 function getGapColor(gap: number): string {
-  if (gap >= 0.8) return 'text-red-400';
-  if (gap >= 0.5) return 'text-amber-400';
-  return 'text-yellow-400';
+  return painTextClass(gap);
 }
 
 function getGapLabel(gap: number): string {

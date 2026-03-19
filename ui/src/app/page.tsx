@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { QUERIES } from '@/lib/queries';
 import { fetchQuery } from '@/lib/fetchQuery';
@@ -13,11 +13,14 @@ import { SafestAction } from '@/components/SafestAction';
 import { RiskOverTime } from '@/components/RiskOverTime';
 import { MilestoneProgress } from '@/components/MilestoneProgress';
 import { RecentlyDestabilizedAlert } from '@/components/RecentlyDestabilizedAlert';
+import { confidenceColor } from '@/lib/colors';
+import { KPI, PANEL } from '@/lib/tokens';
 
 const DEFAULT_PROJECT_ID = 'proj_c0d3e9a1f200';
 
 type ViewMode = 'treemap' | 'table';
 type DataMode = 'files' | 'functions';
+type ContextTab = 'fragility' | 'safest' | 'riskOverTime' | 'milestones';
 
 export default function Dashboard() {
   const { data: project, isLoading: projectLoading } = useQuery({
@@ -46,6 +49,7 @@ export default function Dashboard() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('treemap');
   const [dataMode, setDataMode] = useState<DataMode>('files');
+  const [contextTab, setContextTab] = useState<ContextTab>('fragility');
 
   const { data: heatmapData, isLoading: heatmapLoading } = useQuery({
     queryKey: ['pain-heatmap'],
@@ -107,283 +111,237 @@ export default function Dashboard() {
 
   const loading = projectLoading || filesLoading || riskLoading || planLoading || heatmapLoading || fnHeatmapLoading || fnTableLoading;
 
-  // Compute average confidence from heatmap data
-  const avgConfidence = (() => {
+  // Computed metrics
+  const avgConfidence = useMemo(() => {
     const files = heatmapData?.data ?? [];
     if (files.length === 0) return 1;
     const sum = files.reduce((acc: number, f: Record<string, unknown>) => acc + (f.confidenceScore as number ?? 0), 0);
     return sum / files.length;
-  })();
+  }, [heatmapData]);
+
+  const criticalCount = useMemo(() => {
+    const tiers = (riskDist?.data ?? []) as Array<{ tier: string; count: number }>;
+    return tiers.find(t => t.tier === 'CRITICAL')?.count ?? 0;
+  }, [riskDist]);
+
+  const fileCount = heatmapData?.data?.length ?? 0;
+
+  const riskCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    const tiers = (riskDist?.data ?? []) as Array<{ tier: string; count: number }>;
+    for (const t of tiers) {
+      map[t.tier] = t.count;
+    }
+    return map;
+  }, [riskDist]);
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        {/* Skeleton KPIs */}
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className={`${PANEL.classes} ${PANEL.padding} animate-pulse`}>
+              <div className="h-8 bg-zinc-800 rounded w-1/2 mb-2" />
+              <div className="h-3 bg-zinc-800 rounded w-2/3" />
+            </div>
+          ))}
+        </div>
+        {/* Skeleton treemap */}
+        <div className="animate-pulse bg-zinc-900/50 rounded-xl min-h-[60vh]" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+
+      {/* ════════════════════════════════════════════════════ */}
+      {/* TIER 1: HERO — KPIs + Treemap                       */}
+      {/* ════════════════════════════════════════════════════ */}
+
+      {/* Header with dynamic subtitle */}
       <div>
-        <h1 className="text-2xl font-bold text-zinc-100">Dashboard</h1>
-        <p className="text-zinc-400 mt-1">
-          Code intelligence — pre-computed, flat reads, zero traversal.
+        <h1 className="text-2xl font-bold text-zinc-100">AnythingGraph</h1>
+        <p className="text-sm text-zinc-500 mt-0.5">
+          {fileCount} files · {criticalCount} critical · avg confidence{' '}
+          <span style={{ color: confidenceColor(avgConfidence) }}>
+            {(avgConfidence * 100).toFixed(0)}%
+          </span>
         </p>
       </div>
 
-      {loading ? (
-        <div className="text-zinc-500">Loading graph data...</div>
-      ) : (
-        <>
-          {/* Confidence Banner — auto-show when avg < 0.55 */}
-          {avgConfidence < 0.55 && (
-            <div className="bg-amber-950/50 border border-amber-800/50 rounded-lg px-4 py-3 flex items-center gap-3">
-              <span className="text-amber-400 text-lg">⚠️</span>
-              <div>
-                <p className="text-amber-200 text-sm font-medium">
-                  Low Project Confidence: {(avgConfidence * 100).toFixed(0)}%
-                </p>
-                <p className="text-amber-400/70 text-xs">
-                  Average file confidence is below 55%. Fragility scores are dampened to reduce noise.
-                  Improve test coverage (RF-14) and add runtime verification (RF-15) to raise confidence.
-                </p>
+      {/* Recently destabilized alert — only shows when relevant */}
+      <RecentlyDestabilizedAlert data={(recentlyDestabilized?.data ?? []) as any} />
+
+      {/* KPI Row — 4 cards with risk distribution integrated */}
+      <div className="grid grid-cols-4 gap-3">
+        {/* Max Adjusted Pain */}
+        <div className={`${PANEL.classes} ${PANEL.padding}`}>
+          <div className={KPI.value}>
+            {(project?.data?.[0]?.maxAdjustedPain as number)?.toFixed(1) ?? '—'}
+          </div>
+          <div className={KPI.label}>Max Pain</div>
+        </div>
+
+        {/* Max Fragility */}
+        <div className={`${PANEL.classes} ${PANEL.padding}`}>
+          <div className={KPI.value}>
+            {(project?.data?.[0]?.maxFragility as number)?.toFixed(1) ?? '—'}
+          </div>
+          <div className={KPI.label}>Max Fragility</div>
+        </div>
+
+        {/* Avg Confidence — with subtle color indicator */}
+        <div className={`${PANEL.classes} ${PANEL.padding}`}>
+          <div className="flex items-baseline gap-2">
+            <span className={KPI.value}>{(avgConfidence * 100).toFixed(0)}%</span>
+            {avgConfidence < 0.55 && (
+              <span
+                className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse"
+                title="Below 55% — scores dampened"
+              />
+            )}
+          </div>
+          <div className={KPI.label}>Avg Confidence</div>
+        </div>
+
+        {/* Risk Distribution — inline badges */}
+        <div className={`${PANEL.classes} ${PANEL.padding}`}>
+          <div className="flex items-baseline gap-1.5">
+            {(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const).map(tier => {
+              const count = riskCounts[tier] ?? 0;
+              if (count === 0) return null;
+              const colors: Record<string, string> = {
+                CRITICAL: 'bg-red-500/20 text-red-400',
+                HIGH: 'bg-orange-500/20 text-orange-400',
+                MEDIUM: 'bg-yellow-500/20 text-yellow-400',
+                LOW: 'bg-emerald-500/20 text-emerald-400',
+              };
+              return (
+                <span
+                  key={tier}
+                  className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold tabular-nums ${colors[tier]}`}
+                  title={tier}
+                >
+                  {count}
+                </span>
+              );
+            })}
+          </div>
+          <div className={KPI.label}>Risk Tiers</div>
+        </div>
+      </div>
+
+      {/* Project Health — compact bar */}
+      {planHealth?.data?.[0] && (() => {
+        const h = planHealth.data[0] as { totalMilestones: number; doneMilestones: number; totalTasks: number; doneTasks: number; readyTasks: number; blockedTasks: number };
+        const milestonePct = h.totalMilestones > 0
+          ? Math.round((h.doneMilestones / h.totalMilestones) * 100)
+          : 0;
+        const taskPct = h.totalTasks > 0
+          ? Math.round((h.doneTasks / h.totalTasks) * 100)
+          : 0;
+        return (
+          <div className={`${PANEL.classes} px-5 py-3 flex items-center gap-8`}>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-500 uppercase tracking-wide">Milestones</span>
+              <span className="text-sm font-semibold text-zinc-200">{h.doneMilestones}/{h.totalMilestones}</span>
+              <div className="w-16 bg-zinc-800 rounded-full h-1.5">
+                <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-200" style={{ width: `${milestonePct}%` }} />
               </div>
             </div>
-          )}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-500 uppercase tracking-wide">Tasks</span>
+              <span className="text-sm font-semibold text-zinc-200">{h.doneTasks}/{h.totalTasks}</span>
+              <div className="w-16 bg-zinc-800 rounded-full h-1.5">
+                <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-200" style={{ width: `${taskPct}%` }} />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-emerald-400 text-sm font-semibold">{h.readyTasks}</span>
+              <span className="text-xs text-zinc-500">ready</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-orange-400 text-sm font-semibold">{h.blockedTasks}</span>
+              <span className="text-xs text-zinc-500">blocked</span>
+            </div>
+          </div>
+        );
+      })()}
 
-          {/* Recently destabilized alert */}
-          <RecentlyDestabilizedAlert data={recentlyDestabilized?.data ?? []} />
-
-          {/* Project Summary */}
-          {project?.data?.[0] && (
-            <div className="grid grid-cols-4 gap-4">
-              {[
-                { label: 'Project', value: project.data[0].name },
-                { label: 'Nodes', value: project.data[0].nodeCount?.toLocaleString() },
-                { label: 'Max Pain', value: project.data[0].maxAdjustedPain?.toFixed(1) },
-                { label: 'Max Fragility', value: project.data[0].maxFragility?.toFixed(1) },
-              ].map((card) => (
-                <div key={card.label} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-                  <div className="text-zinc-400 text-sm">{card.label}</div>
-                  <div className="text-xl font-bold text-zinc-100 mt-1">{card.value}</div>
-                </div>
+      {/* ── TREEMAP: The Hero ─────────────────────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-semibold text-zinc-200">
+            {dataMode === 'files'
+              ? viewMode === 'treemap' ? 'Pain Heatmap' : 'Files by Adjusted Pain'
+              : viewMode === 'treemap' ? 'Risk Heatmap' : 'Functions by Composite Risk'}
+          </h2>
+          <div className="flex gap-2">
+            <div className="flex gap-0.5 bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
+              {(['files', 'functions'] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => setDataMode(mode)}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors duration-150 ${
+                    dataMode === mode
+                      ? 'bg-zinc-700 text-zinc-100'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                </button>
               ))}
             </div>
-          )}
-
-          {/* Risk Distribution */}
-          {riskDist?.data && (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-              <h2 className="text-lg font-semibold text-zinc-100 mb-3">Risk Distribution</h2>
-              <div className="flex gap-4">
-                {riskDist.data.map((tier: { tier: string; count: number }) => (
-                  <div
-                    key={tier.tier}
-                    className={`flex-1 rounded-lg p-3 text-center ${
-                      tier.tier === 'CRITICAL'
-                        ? 'bg-red-950 border border-red-800 text-red-300'
-                        : tier.tier === 'HIGH'
-                        ? 'bg-orange-950 border border-orange-800 text-orange-300'
-                        : tier.tier === 'MEDIUM'
-                        ? 'bg-yellow-950 border border-yellow-800 text-yellow-300'
-                        : 'bg-emerald-950 border border-emerald-800 text-emerald-300'
-                    }`}
-                  >
-                    <div className="text-2xl font-bold">{tier.count}</div>
-                    <div className="text-sm mt-1">{tier.tier}</div>
-                  </div>
-                ))}
-              </div>
+            <div className="flex gap-0.5 bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
+              {(['treemap', 'table'] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors duration-150 ${
+                    viewMode === mode
+                      ? 'bg-zinc-700 text-zinc-100'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  {mode === 'treemap' ? 'Heatmap' : 'Table'}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
+        </div>
 
-          {/* Project Health */}
-          {planHealth?.data?.[0] && (() => {
-            const h = planHealth.data[0];
-            const milestonePct = h.totalMilestones > 0
-              ? Math.round((h.doneMilestones / h.totalMilestones) * 100)
-              : 0;
-            const taskPct = h.totalTasks > 0
-              ? Math.round((h.doneTasks / h.totalTasks) * 100)
-              : 0;
-            return (
-              <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-                <h2 className="text-lg font-semibold text-zinc-100 mb-3">Project Health</h2>
-                <div className="grid grid-cols-4 gap-4">
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-zinc-100">
-                      {h.doneMilestones}/{h.totalMilestones}
-                    </div>
-                    <div className="text-sm text-zinc-400 mt-1">Milestones ({milestonePct}%)</div>
-                    <div className="w-full bg-zinc-800 rounded-full h-1.5 mt-2">
-                      <div
-                        className="bg-emerald-500 h-1.5 rounded-full"
-                        style={{ width: `${milestonePct}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-zinc-100">
-                      {h.doneTasks}/{h.totalTasks}
-                    </div>
-                    <div className="text-sm text-zinc-400 mt-1">Tasks ({taskPct}%)</div>
-                    <div className="w-full bg-zinc-800 rounded-full h-1.5 mt-2">
-                      <div
-                        className="bg-emerald-500 h-1.5 rounded-full"
-                        style={{ width: `${taskPct}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-emerald-400">{h.readyTasks}</div>
-                    <div className="text-sm text-zinc-400 mt-1">Ready (unblocked)</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-orange-400">{h.blockedTasks}</div>
-                    <div className="text-sm text-zinc-400 mt-1">Blocked</div>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
+        {heatmapData?.data && heatmapData.data.length > 500 && (
+          <div className="text-amber-400/80 text-xs mb-2">
+            ⚠ Showing top 500 of {heatmapData.data.length} files
+          </div>
+        )}
 
-          {/* Legend */}
-          <details className="bg-zinc-900 border border-zinc-800 rounded-lg">
-            <summary className="px-4 py-3 cursor-pointer text-zinc-400 hover:text-zinc-200 text-sm font-medium">
-              What do these metrics mean?
-            </summary>
-            <div className="px-4 pb-4 grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
-              <div>
-                <span className="text-zinc-200 font-medium">Pain</span>
-                <span className="text-zinc-500"> — </span>
-                <span className="text-zinc-400">
-                  How much it hurts to change this file. 5-factor weighted score: risk density, churn frequency, test coverage gaps, fan-out complexity, and co-change coupling. Higher = more painful to touch.
-                </span>
-              </div>
-              <div>
-                <span className="text-zinc-200 font-medium">Adjusted Pain</span>
-                <span className="text-zinc-500"> — </span>
-                <span className="text-zinc-400">
-                  Pain amplified by uncertainty. 0% confidence = 2× pain (unknown risk). 100% confidence = 1× pain (well-tested). Formula: pain × (1 + (1 − confidence)).
-                </span>
-              </div>
-              <div>
-                <span className="text-zinc-200 font-medium">Confidence</span>
-                <span className="text-zinc-500"> — </span>
-                <span className="text-zinc-400">
-                  How well-tested and verified this file is. 0% = no tests, no verification. 100% = fully covered. Currently binary (file-level); function-level gradient coming in RF-14.
-                </span>
-              </div>
-              <div>
-                <span className="text-zinc-200 font-medium">Fragility</span>
-                <span className="text-zinc-500"> — </span>
-                <span className="text-zinc-400">
-                  Compound risk: painful AND unprotected AND unstable. Formula: adjustedPain × (1 − confidence) × (1 + churn). Files with 100% confidence have 0 fragility.
-                </span>
-              </div>
-              <div>
-                <span className="text-zinc-200 font-medium">Centrality</span>
-                <span className="text-zinc-500"> — </span>
-                <span className="text-zinc-400">
-                  How connected this file is in the call graph. High centrality = many things depend on it. A change here ripples further.
-                </span>
-              </div>
-              <div>
-                <span className="text-zinc-200 font-medium">Downstream</span>
-                <span className="text-zinc-500"> — </span>
-                <span className="text-zinc-400">
-                  Log-damped count of CRITICAL/HIGH functions reachable from this file. Measures blast radius of a breaking change.
-                </span>
-              </div>
-              <div>
-                <span className="text-zinc-200 font-medium">Risk Tiers</span>
-                <span className="text-zinc-500"> — </span>
-                <span className="text-zinc-400">
-                  Function-level risk classification. CRITICAL = top 15%, HIGH = next 20%, MEDIUM = next 30%, LOW = bottom 35%. Based on composite risk scoring.
-                </span>
-              </div>
-              <div>
-                <span className="text-zinc-200 font-medium">Ready / Blocked</span>
-                <span className="text-zinc-500"> — </span>
-                <span className="text-zinc-400">
-                  Plan tasks with all dependencies satisfied (ready) vs tasks waiting on incomplete prerequisites (blocked).
-                </span>
-              </div>
-            </div>
-          </details>
-
-          {/* Pain Visualization — Treemap / Table Toggle */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold text-zinc-100">
-                {dataMode === 'files'
-                  ? viewMode === 'treemap' ? 'Pain Heatmap — Files' : 'Top Files by Adjusted Pain'
-                  : viewMode === 'treemap' ? 'Risk Heatmap — Functions' : 'Top Functions by Composite Risk'}
-              </h2>
-              <div className="flex gap-3">
-                <div className="flex gap-1 bg-zinc-800 rounded-lg p-0.5">
-                  <button
-                    onClick={() => setDataMode('files')}
-                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
-                      dataMode === 'files'
-                        ? 'bg-zinc-700 text-zinc-100'
-                        : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    Files
-                  </button>
-                  <button
-                    onClick={() => setDataMode('functions')}
-                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
-                      dataMode === 'functions'
-                        ? 'bg-zinc-700 text-zinc-100'
-                        : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    Functions
-                  </button>
-                </div>
-                <div className="flex gap-1 bg-zinc-800 rounded-lg p-0.5">
-                  <button
-                    onClick={() => setViewMode('treemap')}
-                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
-                      viewMode === 'treemap'
-                        ? 'bg-zinc-700 text-zinc-100'
-                        : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    Heatmap
-                  </button>
-                  <button
-                    onClick={() => setViewMode('table')}
-                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
-                      viewMode === 'table'
-                        ? 'bg-zinc-700 text-zinc-100'
-                        : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    Table
-                  </button>
-                </div>
-              </div>
-            </div>
-            {heatmapData?.data && heatmapData.data.length > 500 && (
-              <div className="text-amber-400 text-sm mb-2">
-                ⚠️ Showing top 500 files. {heatmapData.data.length} total files have pain scores.
-              </div>
-            )}
-            {dataMode === 'files' ? (
-              viewMode === 'treemap' ? (
-                <PainHeatmap data={heatmapData?.data ?? []} />
-              ) : (
-                <GodFilesTable data={topFiles?.data ?? []} />
-              )
+        {/* Treemap fills viewport — no card chrome */}
+        <div className="min-h-[60vh] rounded-xl overflow-hidden border border-zinc-800/40 bg-zinc-950">
+          {dataMode === 'files' ? (
+            viewMode === 'treemap' ? (
+              <PainHeatmap data={(heatmapData?.data ?? []) as any} />
             ) : (
-              viewMode === 'treemap' ? (
-                <PainHeatmap
-                  data={(fnHeatmapData?.data ?? []).map((f: Record<string, unknown>) => ({
-                    name: f.name as string,
-                    filePath: f.filePath as string,
-                    adjustedPain: f.compositeRisk as number,
-                    confidenceScore: f.riskTier === 'CRITICAL' ? 0 : f.riskTier === 'HIGH' ? 0.3 : f.riskTier === 'MEDIUM' ? 0.6 : 1.0,
-                    painScore: f.compositeRisk as number,
-                    fragility: 0,
-                  }))}
-                />
-              ) : (
+              <div className="p-4">
+                <GodFilesTable data={(topFiles?.data ?? []) as any} />
+              </div>
+            )
+          ) : (
+            viewMode === 'treemap' ? (
+              <PainHeatmap
+                data={(fnHeatmapData?.data ?? []).map((f: Record<string, unknown>) => ({
+                  name: f.name as string,
+                  filePath: f.filePath as string,
+                  adjustedPain: f.compositeRisk as number,
+                  confidenceScore: f.riskTier === 'CRITICAL' ? 0 : f.riskTier === 'HIGH' ? 0.3 : f.riskTier === 'MEDIUM' ? 0.6 : 1.0,
+                  painScore: f.compositeRisk as number,
+                  fragility: 0,
+                }))}
+              />
+            ) : (
+              <div className="p-4">
                 <GodFilesTable
                   data={(fnTableData?.data ?? []).map((f: Record<string, unknown>) => ({
                     name: `${f.name} (${f.fileName})`,
@@ -396,63 +354,102 @@ export default function Dashboard() {
                     downstreamImpact: f.downstreamImpact as number,
                   }))}
                 />
-              )
-            )}
+              </div>
+            )
+          )}
+        </div>
+      </div>
+
+      {/* ════════════════════════════════════════════════════ */}
+      {/* TIER 2: ACTIONABLE — God Files + Reality Gap         */}
+      {/* ════════════════════════════════════════════════════ */}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className={`${PANEL.classes} ${PANEL.padding}`}>
+          <h2 className={PANEL.headerText}>Top Files</h2>
+          <p className={PANEL.descText}>Ranked by adjusted pain — highest risk files first</p>
+          <div className="mt-3">
+            <GodFilesTable data={(topFiles?.data ?? []) as any} />
           </div>
+        </div>
 
-          {/* UI-3: Reality Gap + Fragility + Risk Distribution + Safest Action */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Reality Gap */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
-                Reality Gap
-              </h2>
-              <RealityGap data={realityGapData?.data ?? []} />
-            </div>
-
-            {/* Risk Distribution Chart */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
-                Risk Distribution
-              </h2>
-              <RiskDistributionChart data={riskDist?.data ?? []} />
-            </div>
-
-            {/* Fragility Index */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
-                Fragility Index
-              </h2>
-              <FragilityTable data={fragilityData?.data ?? []} avgConfidence={avgConfidence} />
-            </div>
-
-            {/* Safest Next Action */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
-                Safest Next Action
-              </h2>
-              <SafestAction data={safestData?.data ?? []} />
-            </div>
+        <div className={`${PANEL.classes} ${PANEL.padding}`}>
+          <h2 className={PANEL.headerText}>Reality Gap</h2>
+          <p className={PANEL.descText}>Where confidence claims exceed actual evidence</p>
+          <div className="mt-3">
+            <RealityGap data={(realityGapData?.data ?? []) as any} />
           </div>
+        </div>
+      </div>
 
-          {/* UI-4: Risk Over Time + Milestone Progress */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
-                Risk Over Time
-              </h2>
-              <RiskOverTime data={riskOverTimeData?.data ?? []} />
-            </div>
+      {/* ════════════════════════════════════════════════════ */}
+      {/* TIER 3: CONTEXT — Tabbed panels                      */}
+      {/* ════════════════════════════════════════════════════ */}
 
-            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-              <h2 className="text-lg font-semibold text-zinc-100 mb-3">
-                Milestone Progress
-              </h2>
-              <MilestoneProgress data={milestoneData?.data ?? []} />
+      <div className={`${PANEL.classes}`}>
+        {/* Tab pills */}
+        <div className="flex items-center gap-1 px-5 pt-4 pb-0 border-b border-zinc-800/40">
+          {([
+            { key: 'fragility' as const, label: 'Fragility' },
+            { key: 'safest' as const, label: 'Safest Actions' },
+            { key: 'riskOverTime' as const, label: 'Risk Trend' },
+            { key: 'milestones' as const, label: 'Milestones' },
+          ]).map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setContextTab(tab.key)}
+              className={`px-3 py-2 text-xs font-medium rounded-t-md transition-colors duration-150 -mb-px ${
+                contextTab === tab.key
+                  ? 'bg-zinc-800/80 text-zinc-100 border-b-2 border-zinc-100'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab content */}
+        <div className={PANEL.padding}>
+          {contextTab === 'fragility' && (
+            <FragilityTable data={(fragilityData?.data ?? []) as any} avgConfidence={avgConfidence} />
+          )}
+          {contextTab === 'safest' && (
+            <SafestAction data={(safestData?.data ?? []) as any} />
+          )}
+          {contextTab === 'riskOverTime' && (
+            <RiskOverTime data={(riskOverTimeData?.data ?? []) as any} />
+          )}
+          {contextTab === 'milestones' && (
+            <MilestoneProgress data={(milestoneData?.data ?? []) as any} />
+          )}
+        </div>
+      </div>
+
+      {/* Legend — collapsible, below everything */}
+      <details className={`${PANEL.classes}`}>
+        <summary className="px-5 py-3 cursor-pointer text-zinc-500 hover:text-zinc-300 text-xs font-medium">
+          What do these metrics mean?
+        </summary>
+        <div className="px-5 pb-4 grid grid-cols-2 gap-x-8 gap-y-2 text-xs">
+          {[
+            ['Pain', 'How much it hurts to change this file. 5-factor weighted: risk density, churn, coverage gaps, fan-out, co-change coupling.'],
+            ['Adjusted Pain', 'Pain amplified by uncertainty. 0% confidence = 2× pain. Formula: pain × (1 + (1 − confidence)).'],
+            ['Confidence', 'How well-tested and verified. 3-factor: effective confidence × 0.5 + evidence count × 0.3 + freshness × 0.2.'],
+            ['Fragility', 'Compound risk: painful AND unprotected AND unstable. Formula: adjustedPain × (1 − confidence) × (1 + churn).'],
+            ['Centrality', 'How connected in the call graph. High centrality = changes ripple further.'],
+            ['Downstream', 'Log-damped count of CRITICAL/HIGH functions reachable. Measures blast radius.'],
+            ['Risk Tiers', 'CRITICAL (top 15%), HIGH (next 20%), MEDIUM (next 30%), LOW (bottom 35%). Based on composite risk.'],
+            ['Reality Gap', 'Where confidence exceeds evidence. High gap = false certainty.'],
+          ].map(([term, desc]) => (
+            <div key={term}>
+              <span className="text-zinc-300 font-medium">{term}</span>
+              <span className="text-zinc-600"> — </span>
+              <span className="text-zinc-500">{desc}</span>
             </div>
-          </div>
-        </>
-      )}
+          ))}
+        </div>
+      </details>
     </div>
   );
 }

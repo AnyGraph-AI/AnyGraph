@@ -9,6 +9,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from '@tanstack/react-table';
+import { confidenceColor, confidenceTextClass } from '@/lib/colors';
 
 export interface GodFile {
   name: string;
@@ -65,7 +66,7 @@ export function GodFilesTable({ data, onRowClick }: GodFilesTableProps) {
         cell: (info) => {
           const v = info.getValue<number>();
           return (
-            <span className={v >= 0.5 ? 'text-emerald-400' : 'text-red-400'}>
+            <span className={confidenceTextClass(v)}>
               {(v * 100).toFixed(0)}%
             </span>
           );
@@ -129,7 +130,7 @@ export function GodFilesTable({ data, onRowClick }: GodFilesTableProps) {
               }`}
               onClick={() => onRowClick?.(row.original)}
             >
-              {row.getVisibleCells().map((cell) => (
+              {row.getVisibleCells().map((cell, idx) => (
                 <td
                   key={cell.id}
                   className={`py-2 px-2 text-zinc-300 ${
@@ -137,6 +138,9 @@ export function GodFilesTable({ data, onRowClick }: GodFilesTableProps) {
                       ? 'text-right'
                       : ''
                   }`}
+                  style={idx === 0 ? {
+                    borderLeft: `3px solid ${confidenceColor(row.original.confidenceScore)}`,
+                  } : undefined}
                 >
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </td>

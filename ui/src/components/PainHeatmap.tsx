@@ -2,6 +2,7 @@
 
 import React, { useMemo } from 'react';
 import { Treemap, ResponsiveContainer, Tooltip } from 'recharts';
+import { confidenceColor, painOpacity } from '@/lib/colors';
 
 export interface HeatmapFile {
   name: string;
@@ -15,20 +16,6 @@ export interface HeatmapFile {
 export interface PainHeatmapProps {
   data: HeatmapFile[];
   onCellClick?: (file: HeatmapFile) => void;
-}
-
-/** Map confidence 0–1 to a color: red (0%) → amber (50%) → green (100%) */
-function confidenceColor(conf: number): string {
-  if (conf >= 0.8) return '#059669';   // emerald-600
-  if (conf >= 0.5) return '#d97706';   // amber-600
-  if (conf >= 0.2) return '#ea580c';   // orange-600
-  return '#dc2626';                     // red-600
-}
-
-/** Map adjustedPain to fill opacity: higher pain = more intense */
-function painOpacity(pain: number, maxPain: number): number {
-  if (maxPain === 0) return 0.3;
-  return 0.3 + 0.7 * (pain / maxPain);
 }
 
 interface TreemapContentProps {
@@ -59,8 +46,8 @@ function CustomCell({
         height={height}
         fill={fill}
         fillOpacity={opacity}
-        stroke="#27272a"
-        strokeWidth={2}
+        stroke="#18181b"
+        strokeWidth={1}
         aria-label={`${name}: pain ${adjustedPain.toFixed(2)}, confidence ${(confidenceScore * 100).toFixed(0)}%`}
       />
       {/* SVG stripe overlay for low-confidence cells */}
@@ -139,7 +126,7 @@ export function PainHeatmap({ data, onCellClick }: PainHeatmapProps) {
   }
 
   return (
-    <div className="w-full" style={{ height: Math.max(300, Math.min(600, data.length * 8)) }}>
+    <div className="w-full h-full" style={{ minHeight: '55vh' }}>
       <ResponsiveContainer width="100%" height="100%">
         <Treemap
           data={treemapData}

@@ -71,7 +71,7 @@ export function MilestoneProgress({ data }: { data: MilestoneRow[] }) {
                   color: '#e4e4e7',
                   fontSize: '12px',
                 }}
-                formatter={(value: number, _name: string, props: { payload: MilestoneRow & { name: string } }) => [
+                formatter={(value: any, _name: any, props: any) => [
                   `${props.payload.done}/${props.payload.total} (${value}%)`,
                   props.payload.name,
                 ]}
