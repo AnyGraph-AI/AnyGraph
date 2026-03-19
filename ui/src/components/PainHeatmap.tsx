@@ -126,7 +126,7 @@ export function PainHeatmap({ data, onCellClick }: PainHeatmapProps) {
   }
 
   return (
-    <div className="w-full h-full" style={{ minHeight: '55vh' }}>
+    <div className="w-full" style={{ height: 'max(55vh, 400px)' }}>
       <ResponsiveContainer width="100%" height="100%">
         <Treemap
           data={treemapData}

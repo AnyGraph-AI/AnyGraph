@@ -176,8 +176,14 @@ export const QUERIES = {
            toInteger(expectedEvidence) AS expectedEvidence,
            round(gapScore * 1000) / 1000.0 AS gapScore,
            adjustedPain,
-           fragility
-    ORDER BY gapScore DESC
+           fragility,
+           CASE maxTierNum
+             WHEN 4 THEN 'CRITICAL'
+             WHEN 3 THEN 'HIGH'
+             WHEN 2 THEN 'MEDIUM'
+             ELSE 'LOW'
+           END AS riskTier
+    ORDER BY gapScore DESC, adjustedPain DESC
     LIMIT $limit
   `,
 
