@@ -137,15 +137,23 @@ You don't need MCP. `cypher-shell` works. MCP adds convenience.
 ```bash
 npm run probe-architecture     # 46 structural probes
 npm run self-diagnosis          # 39 health checks with next-step guidance
-npm run done-check              # 57+ step integrity gate (MUST pass before declaring done)
+npm run done-check              # 77-step integrity gate (MUST pass before declaring done)
 npm run rebuild-derived         # Nuke + rebuild all derived edges
 npm run graph:metrics           # Record GraphMetricsSnapshot node
 ```
 
+### Verification scan
+```bash
+npm run verification:scan       # Semgrep + ESLint → VR nodes + ANALYZED edges (~30s)
+```
+Run this on every done-check or after significant code changes. Without it:
+- All functions get `NO_VERIFICATION` flag → LOWs vanish (all promoted to MEDIUM+)
+- Confidence scores collapse (evidence=0, freshness=0)
+- Risk tier distribution is artificially inflated
+
 ### Enrichment
 ```bash
 npm run enrich:test-coverage    # Scan test files → TESTED_BY edges
-npm run verification:scan       # Semgrep + ESLint SARIF scan → VR nodes
 ```
 
 ### Enforcement
@@ -317,6 +325,8 @@ OPENAI_API_KEY=required_for_embeddings  # in codegraph/.env
 5. **Source change → `npm run build` → restart watcher.** Runtime reads `dist/`, not `src/`.
 6. **Don't weaken tests to match bugged code.** If a test fails and the code is wrong, flag it and wait.
 7. **`npm run done-check` must exit 0** before any task is declared done.
-8. **1,052 tests.** Full suite in ~21s. No excuses for skipping.
+8. **1,136+ tests.** Full suite in ~21s. No excuses for skipping.
 9. **Use `sourceCode` property** to read function implementations from graph before opening files.
 10. **Conventional Commits:** `type(scope): description` — feat, fix, docs, test, refactor, chore.
+11. **Never report partial enrichment as truth.** Running 2-3 enrichments manually gives incomplete numbers because steps have dependencies (e.g., composite-risk consumes temporal-coupling flags). Run `done-check` for authoritative metrics, or explicitly caveat which steps were skipped.
+12. **Multi-agent: wrap graph writes with `flock`.** See "Graph Write Lock" in WORKFLOW.md. All Neo4j-writing commands must use `flock /tmp/codegraph-pipeline.lock <command>` to prevent concurrent mutation.

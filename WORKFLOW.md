@@ -336,7 +336,9 @@ Note: diagnosis output goes to stdout only, not to the graph. Check for new red 
 npm run done-check
 ```
 
-57+ steps. Must exit 0. If it fails, your task is not done.
+77 steps. Must exit 0. If it fails, your task is not done.
+
+**⚠️ Partial enrichment trap:** If you need quick numbers mid-task, running individual enrichment scripts (e.g., `enrich:composite-risk` alone) produces misleading output because enrichment steps have dependencies. Composite-risk consumes temporal-coupling flags; precompute-scores consumes composite-risk output. Skipping upstream steps = stale inputs = wrong numbers. Use `done-check` for authoritative metrics.
 
 **Delegation rule:** if the human explicitly says someone else is running `done-check`, do **not** run it locally.
 Record status as: `done-check delegated / pending external result` and continue with all non-done-check verification and evidence linkage.
@@ -390,7 +392,45 @@ The pre-commit hook runs the enforcement gate automatically. If it blocks, you m
 
 After commit:
 - Re-run `npm run enrich:test-coverage` (so TESTED_BY edges update for your new test files)
+- Re-run `npm run verification:scan` (so VR nodes and ANALYZED edges are fresh — without this, all functions keep `NO_VERIFICATION` flag and LOWs vanish)
 - Verify the graph sees your changes: query the files you modified, confirm risk tiers and test coverage are current
+
+---
+
+## Graph Write Lock (Multi-Agent)
+
+When multiple agents share this codebase, all commands that **write to Neo4j** must be wrapped with `flock` to prevent concurrent graph mutations:
+
+```bash
+flock /tmp/codegraph-pipeline.lock npm run done-check
+flock /tmp/codegraph-pipeline.lock npm run enrich:composite-risk
+flock /tmp/codegraph-pipeline.lock npm run rebuild-derived
+flock /tmp/codegraph-pipeline.lock npx tsx src/core/parsers/plan-parser.ts ... --ingest
+flock /tmp/codegraph-pipeline.lock npm run verification:scan
+```
+
+**How it works:** `flock` is a Linux kernel-level file lock. If another agent holds the lock, your process **sleeps** until they finish. No race conditions, no advisory honor system. Lock releases automatically if the holder crashes.
+
+**Non-blocking mode** (skip instead of wait):
+```bash
+flock -n /tmp/codegraph-pipeline.lock npm run done-check || echo "Pipeline locked, skipping"
+```
+
+**What needs the lock:**
+- Any `npm run enrich:*` command
+- `npm run done-check` / `done-check:core`
+- `npm run rebuild-derived`
+- `npm run verification:scan`
+- Plan parser `--ingest`
+- Any script that writes nodes, edges, or properties to Neo4j
+
+**What does NOT need the lock:**
+- Read-only Cypher queries (`MATCH ... RETURN`)
+- File edits, test runs, builds
+- `npm test`, `npm run build`
+- `enforce-edit` (read-only gate check)
+
+**Critical rule:** All agents must use the same lockfile path (`/tmp/codegraph-pipeline.lock`). If one agent uses a different path, the lock doesn't protect against it.
 
 ---
 
@@ -412,10 +452,10 @@ After commit:
 |----------|-------------------|-----|
 | What's the next unblocked task? | ✅ | Task status + DEPENDS_ON |
 | Which files does this task touch? | ✅ (done tasks) / ❌ (planned) | Done tasks have backtick annotations → HAS_CODE_EVIDENCE. Planned tasks have 0 evidence. |
-| Is this file tested? | ✅ | TESTED_BY edges (161 edges, 80 TestFile nodes) |
+| Is this file tested? | ✅ | TESTED_BY edges (118 tested files, 105 TestFile nodes) |
 | What's the risk tier of functions in this file? | ✅ | riskTier property on Function nodes |
 | Should the gate block this commit? | ✅ | `codegraph enforce` or `enforceEdit` MCP tool |
-| What spec-test patterns exist? | ⚠️ Partial | 80 TestFile nodes in graph, but recent RF tests may lag |
+| What spec-test patterns exist? | ⚠️ Partial | 105 TestFile nodes in graph, but recent spec tests may lag |
 | What did diagnosis say? | ❌ | Stdout only, 0 AuditCheck nodes in graph |
 | What invariants must hold? | ❌ | Code only, not graph nodes |
 | What was blocked/approved last week? | ❌ | Gate decisions not persisted to graph |
