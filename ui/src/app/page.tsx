@@ -31,19 +31,41 @@ function parseNumberParam(raw: string | null, fallback: number, min: number, max
   return Math.max(min, Math.min(max, parsed));
 }
 
+const TIER_BY_NUM: Record<number, string> = {
+  4: 'CRITICAL',
+  3: 'HIGH',
+  2: 'MEDIUM',
+  1: 'LOW',
+  0: 'UNKNOWN',
+};
+
+function normalizeTier(row: Record<string, unknown>): string {
+  const direct = String(row.riskTier ?? row.maxTier ?? '').toUpperCase();
+  if (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'].includes(direct)) return direct;
+  const num = Number(row.riskTierNum ?? row.maxTierNum ?? 0);
+  return TIER_BY_NUM[num] ?? 'UNKNOWN';
+}
+
+type DashboardView = 'dashboard' | 'gaps' | 'fragility';
+
 type DashboardUrlState = {
   projectId: string;
   riskFilter: string[];
   minConfidence: number;
   days: number;
+  view: DashboardView;
 };
 
 function parseDashboardFilters(params: URLSearchParams): DashboardUrlState {
+  const rawView = params.get('view');
+  const view: DashboardView = rawView === 'gaps' || rawView === 'fragility' ? rawView : 'dashboard';
+
   return {
     projectId: params.get('project') ?? DEFAULT_PROJECT_ID,
     riskFilter: parseRiskParam(params.get('risk')),
     minConfidence: parseNumberParam(params.get('minConfidence'), DEFAULT_MIN_CONFIDENCE, 0, 1),
     days: parseNumberParam(params.get('days'), DEFAULT_DAYS, 1, 30),
+    view,
   };
 }
 
@@ -54,6 +76,7 @@ export default function Dashboard() {
     riskFilter: DEFAULT_RISK.split(','),
     minConfidence: DEFAULT_MIN_CONFIDENCE,
     days: DEFAULT_DAYS,
+    view: 'dashboard',
   });
 
   useEffect(() => {
@@ -63,7 +86,7 @@ export default function Dashboard() {
     return () => window.removeEventListener('popstate', sync);
   }, []);
 
-  const { projectId, riskFilter, minConfidence, days } = urlState;
+  const { projectId, riskFilter, minConfidence, days, view } = urlState;
 
   const {
     project,
@@ -105,6 +128,7 @@ export default function Dashboard() {
       risk: riskFilter.join(','),
       minConfidence: String(minConfidence),
       days: String(days),
+      view,
     });
     if (payload.filePath) search.set('filePath', payload.filePath);
     router.push(`/explorer?${search.toString()}`);
@@ -116,7 +140,7 @@ export default function Dashboard() {
   const safestRows = (safestData?.data ?? []) as Array<Record<string, unknown>>;
 
   const byRiskAndConfidence = (row: Record<string, unknown>) => {
-    const tier = String((row.riskTier ?? row.maxTier ?? 'LOW')).toUpperCase();
+    const tier = normalizeTier(row);
     const confidence = Number(row.confidenceScore ?? 1);
     const riskPass = riskFilter.length === 0 ? true : riskFilter.includes(tier);
     return riskPass && confidence >= minConfidence;
@@ -126,6 +150,21 @@ export default function Dashboard() {
   const filteredRealityRows = useMemo(() => realityRows.filter(byRiskAndConfidence), [realityRows, riskFilter.join(','), minConfidence]);
   const filteredFragilityRows = useMemo(() => fragilityRows.filter(byRiskAndConfidence), [fragilityRows, riskFilter.join(','), minConfidence]);
   const filteredSafestRows = useMemo(() => safestRows.filter(byRiskAndConfidence), [safestRows, riskFilter.join(','), minConfidence]);
+
+  const filterSummary = `risk=${riskFilter.join(',')} · minConf=${Math.round(minConfidence * 100)}%`;
+  const panelCounts = {
+    topFiles: `${filteredTopFiles.length}/${topFilesRows.length}`,
+    reality: `${filteredRealityRows.length}/${realityRows.length}`,
+    fragility: `${filteredFragilityRows.length}/${fragilityRows.length}`,
+  };
+
+  useEffect(() => {
+    if (view === 'dashboard') return;
+    const id = view === 'gaps' ? 'gaps-view' : 'fragility-view';
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [view]);
 
   if (loading) {
     return (
@@ -180,7 +219,7 @@ export default function Dashboard() {
         >
           <option value="CRITICAL,HIGH">CRITICAL,HIGH</option>
           <option value="CRITICAL,HIGH,MEDIUM">CRITICAL,HIGH,MEDIUM</option>
-          <option value="CRITICAL,HIGH,MEDIUM,LOW">ALL</option>
+          <option value="CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN">ALL</option>
         </select>
 
         <label className="text-[10px] uppercase tracking-[0.08em] text-zinc-500">Min confidence</label>
@@ -204,6 +243,17 @@ export default function Dashboard() {
           <option value="7">7</option>
           <option value="14">14</option>
           <option value="30">30</option>
+        </select>
+
+        <label className="text-[10px] uppercase tracking-[0.08em] text-zinc-500">View</label>
+        <select
+          value={view}
+          onChange={(e) => setFilter({ view: e.target.value })}
+          className="h-8 rounded border border-white/10 bg-black/20 px-2 text-xs text-zinc-200"
+        >
+          <option value="dashboard">Dashboard</option>
+          <option value="gaps">Gaps</option>
+          <option value="fragility">Fragility</option>
         </select>
       </div>
 
@@ -260,6 +310,7 @@ export default function Dashboard() {
         <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
           <h2 className="text-sm font-semibold tracking-[-0.01em] text-zinc-100">Top Files</h2>
           <p className="mt-1 font-mono text-[10px] text-zinc-500">Ranked by adjusted pain — highest risk files first</p>
+          <p className="mt-1 font-mono text-[10px] text-zinc-600">Visible {panelCounts.topFiles} · {filterSummary}</p>
           <div className="mt-3">
             {filteredTopFiles.length > 0 ? (
               <GodFilesTable
@@ -273,14 +324,15 @@ export default function Dashboard() {
                 }
               />
             ) : (
-              <EmptyState title="No files found" description="Run codegraph parse to ingest source files" icon="📂" />
+              <EmptyState title="No files match current filters" description="Try widening risk/min-confidence filters or include UNKNOWN tier." icon="📂" />
             )}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+        <div id="gaps-view" className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
           <h2 className="text-sm font-semibold tracking-[-0.01em] text-zinc-100">Reality Gap</h2>
           <p className="mt-1 font-mono text-[10px] text-zinc-500">Where confidence claims exceed actual evidence</p>
+          <p className="mt-1 font-mono text-[10px] text-zinc-600">Visible {panelCounts.reality} · {filterSummary}</p>
           <div className="mt-3">
             {filteredRealityRows.length > 0 ? (
               <RealityGap
@@ -293,13 +345,14 @@ export default function Dashboard() {
                 }
               />
             ) : (
-              <EmptyState title="No gaps detected" description="All claims have adequate evidence coverage" icon="✅" />
+              <EmptyState title="No gaps match current filters" description="Try widening risk/min-confidence filters or include UNKNOWN tier." icon="✅" />
             )}
           </div>
         </div>
       </div>
 
-      <div className="fade-up rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+      <div id="fragility-view" className="fade-up rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+        <p className="mb-2 font-mono text-[10px] text-zinc-600">Visible {panelCounts.fragility} · {filterSummary}</p>
         <ContextTabs
           fragilityData={filteredFragilityRows as any}
           safestData={filteredSafestRows as any}

@@ -286,12 +286,46 @@ RETURN
 ORDER BY projectId, claimType, status
 ```
 
+## Q18 — Canonical File Risk Tier Contract (GC-11)
+
+```cypher
+MATCH (sf:SourceFile {projectId: $projectId})
+OPTIONAL MATCH (sf)-[:CONTAINS]->(fn:Function)
+WITH sf,
+     max(CASE fn.riskTier
+       WHEN 'CRITICAL' THEN 4
+       WHEN 'HIGH' THEN 3
+       WHEN 'MEDIUM' THEN 2
+       WHEN 'LOW' THEN 1
+       ELSE 0
+     END) AS riskTierNum
+RETURN
+  sf.id AS sourceFileId,
+  sf.filePath AS filePath,
+  CASE riskTierNum
+    WHEN 4 THEN 'CRITICAL'
+    WHEN 3 THEN 'HIGH'
+    WHEN 2 THEN 'MEDIUM'
+    WHEN 1 THEN 'LOW'
+    ELSE 'UNKNOWN'
+  END AS riskTier,
+  coalesce(riskTierNum, 0) AS riskTierNum,
+  coalesce(sf.riskTierSummary, '0') AS riskTierSummary
+ORDER BY filePath
+```
+
+Contract notes:
+- Canonical file-level filter fields are `SourceFile.riskTier` + `SourceFile.riskTierNum`.
+- Deterministic rule: file tier = max contained `Function.riskTier`.
+- Files with no tiered functions must return `UNKNOWN`/`0` (never implicit `LOW`).
+- `riskTierSummary` is compatibility/display-only and must not be used as the canonical filter key.
+
 ---
 
 ## Enforcement
 
 - New metrics must be added to this file first.
-- Tooling should reference query IDs (`Q1..Q17`) rather than copying raw Cypher.
+- Tooling should reference query IDs (`Q1..Q18`) rather than copying raw Cypher.
 - Readiness semantics are defined only by `DEPENDS_ON` edges (not `BLOCKS` or inferred heuristics) in canonical next-task outputs.
 - Baseline-aware drift checks must emit `baselineRef` and `baselineTimestamp` (S6 contract output).
 - Trend reporting must be graph-native (`IntegritySnapshot`) and not re-derived from ad-hoc file bucketing in status tooling.
@@ -301,7 +335,9 @@ ORDER BY projectId, claimType, status
 
 ## Versioning
 
-- Contract version: `v1.8`
+- Contract version: `v1.9`
+- Migration note (v1.9): Added Q18 canonical file-risk-tier contract (`riskTier`, `riskTierNum`, `UNKNOWN` semantics) and froze migration policy for `riskTierSummary` as compatibility/display-only.
+- Affected surfaces: file-level dashboard filters (`godFiles`, `fragilityIndex`), enrichment outputs for `SourceFile` tier fields, query-contract verification gates.
 - Migration note (v1.8): Added Q14-Q17 canonical project/claim surfaces (counts, status, drift, claims) to establish one contract for project counts/status/drift/claims; enables Governance G3 contract-first metric tooling.
 - Affected surfaces: registry reports, project status dashboards, drift/status scripts, claim status reports.
 - Migration note (v1.7): Added Q12/Q13 for graph-native integrity snapshot history and release baseline selection; standardized S6 output fields (`baselineRef`, `baselineTimestamp`) and trend sourcing from `IntegritySnapshot`.

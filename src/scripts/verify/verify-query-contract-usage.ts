@@ -13,6 +13,7 @@ const TARGET_FILES = [
   'src/scripts/tools/reconcile-project-registry.ts',
 ];
 
+const QUERY_FILE = 'ui/src/lib/queries.ts';
 const REQUIRED_IMPORT = 'query-contract.js';
 
 const FORBIDDEN_PATTERNS: RegExp[] = [
@@ -21,6 +22,12 @@ const FORBIDDEN_PATTERNS: RegExp[] = [
   /MATCH \(s:IntegritySnapshot\)/i,
   /MATCH \(c:Claim\)/i,
 ];
+
+function extractQueryBlock(fileContent: string, queryName: string): string | null {
+  const re = new RegExp(`${queryName}:\\s*` + '`' + `([\\s\\S]*?)` + '`' + `,?`, 'm');
+  const match = fileContent.match(re);
+  return match?.[1] ?? null;
+}
 
 function main(): void {
   const results: CheckResult[] = [];
@@ -43,6 +50,32 @@ function main(): void {
       reasons,
     });
   }
+
+  // GC-11 contract gate: file-level dashboard queries must expose canonical file tier fields.
+  const queryReasons: string[] = [];
+  const queryFilePath = join(process.cwd(), QUERY_FILE);
+  const queryContent = readFileSync(queryFilePath, 'utf8');
+
+  for (const queryName of ['godFiles', 'fragilityIndex']) {
+    const block = extractQueryBlock(queryContent, queryName);
+    if (!block) {
+      queryReasons.push(`${queryName} query block missing`);
+      continue;
+    }
+
+    if (!/AS\s+riskTier\b/i.test(block)) {
+      queryReasons.push(`${queryName} missing canonical riskTier field`);
+    }
+    if (!/AS\s+riskTierNum\b/i.test(block)) {
+      queryReasons.push(`${queryName} missing canonical riskTierNum field`);
+    }
+  }
+
+  results.push({
+    file: QUERY_FILE,
+    ok: queryReasons.length === 0,
+    reasons: queryReasons,
+  });
 
   const failing = results.filter((r) => !r.ok);
   if (failing.length > 0) {

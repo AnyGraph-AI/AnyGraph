@@ -271,6 +271,7 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const trimmedLine = line.trim();
     const lineNum = i + 1;
 
     // --- Milestone headers ---
@@ -695,6 +696,56 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       currentTaskName = text;
       stats.tasks++;
       continue;
+    }
+
+    // --- Continuation lines (prose after a checkbox) ---
+    // Lines that don't match any structural pattern but follow a checkbox
+    // may contain backtick artifact refs (EVIDENCE:, Details:, Scope:, plain annotation).
+    // Extract cross-references and attribute them to the parent task.
+    // DEPENDS_ON and BLOCKS lines are handled above and skip this via `continue`.
+    if (currentTaskId && trimmedLine.length > 0) {
+      // Only treat indented or label-prefixed lines as continuation
+      const isContinuation =
+        /^\s{2,}/.test(line) || // indented 2+ spaces
+        /^\s*(?:Details|EVIDENCE|Scope|Evidence|RF-\d+|Context|Artifacts?):?\s/i.test(trimmedLine);
+
+      if (isContinuation) {
+        const contRefs = extractCrossReferences(trimmedLine);
+        if (contRefs.length > 0) {
+          stats.crossRefs += contRefs.length;
+
+          // Update the task node's crossRefCount and crossRefs
+          const taskNode = nodes.find((n) => n.id === currentTaskId);
+          if (taskNode) {
+            const existingRefs = (taskNode.properties.crossRefs as string) || '';
+            const newRefStrs = contRefs.map((r) => `${r.type}:${r.value}`);
+            const allRefStrs = existingRefs ? existingRefs.split('|').concat(newRefStrs) : newRefStrs;
+            // Deduplicate
+            const uniqueRefs = [...new Set(allRefStrs)];
+            taskNode.properties.crossRefs = uniqueRefs.join('|');
+            taskNode.properties.crossRefCount = uniqueRefs.length;
+          }
+
+          // Add to unresolved refs for enrichment
+          for (const ref of contRefs) {
+            if (ref.type === 'file_path' || ref.type === 'function' || ref.type === 'project_id' || ref.type === 'project_name') {
+              // Deduplicate against existing refs for this task
+              const isDup = unresolvedRefs.some(
+                (r) => r.taskId === currentTaskId && r.refType === ref.type && r.refValue === ref.value,
+              );
+              if (!isDup) {
+                unresolvedRefs.push({
+                  taskId: currentTaskId,
+                  taskName: currentTaskName ?? '',
+                  refType: ref.type,
+                  refValue: ref.value,
+                });
+              }
+            }
+          }
+        }
+        continue;
+      }
     }
 
   }

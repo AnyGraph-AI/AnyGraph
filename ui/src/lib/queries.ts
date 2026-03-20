@@ -45,7 +45,9 @@ export const QUERIES = {
            sf.confidenceScore AS confidenceScore,
            sf.basePain AS basePain,
            sf.centrality AS centrality,
-           sf.downstreamImpact AS downstreamImpact
+           sf.downstreamImpact AS downstreamImpact,
+           coalesce(sf.riskTier, 'UNKNOWN') AS riskTier,
+           coalesce(sf.riskTierNum, 0) AS riskTierNum
     ORDER BY sf.adjustedPain DESC
     LIMIT $limit
   `,
@@ -212,7 +214,9 @@ export const QUERIES = {
            coalesce(sf.confidenceScore, 0) AS confidenceScore,
            coalesce(sf.adjustedPain, 0) AS adjustedPain,
            coalesce(sf.painScore, 0) AS painScore,
-           coalesce(sf.centrality, 0) AS centrality
+           coalesce(sf.centrality, 0) AS centrality,
+           coalesce(sf.riskTier, 'UNKNOWN') AS riskTier,
+           coalesce(sf.riskTierNum, 0) AS riskTierNum
     ORDER BY sf.fragility DESC
     LIMIT $limit
   `,
