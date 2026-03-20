@@ -25,6 +25,10 @@ import {
   computeConfidenceScore,
   computeFragility,
   computeAdjustedPain,
+  computeActiveGateStatus,
+  tierToNum,
+  numToTier,
+  deriveFileRiskTier,
   computeSourceFileScores,
   type SourceFileScoreInput,
 } from '../../../../scripts/enrichment/precompute-scores.js';
@@ -116,6 +120,35 @@ describe('[UI-0] formatRiskTierSummary', () => {
   it('returns 0 for empty/invalid tiers', () => {
     expect(formatRiskTierSummary([])).toBe('0');
     expect(formatRiskTierSummary([null, undefined, 'UNKNOWN'])).toBe('0');
+  });
+});
+
+describe('[GC-11] canonical file risk tier derivation', () => {
+  it('maps tiers to numeric severity', () => {
+    expect(tierToNum('CRITICAL')).toBe(4);
+    expect(tierToNum('HIGH')).toBe(3);
+    expect(tierToNum('MEDIUM')).toBe(2);
+    expect(tierToNum('LOW')).toBe(1);
+    expect(tierToNum('UNKNOWN')).toBe(0);
+    expect(tierToNum(null)).toBe(0);
+  });
+
+  it('maps numeric severity to canonical tier', () => {
+    expect(numToTier(4)).toBe('CRITICAL');
+    expect(numToTier(3)).toBe('HIGH');
+    expect(numToTier(2)).toBe('MEDIUM');
+    expect(numToTier(1)).toBe('LOW');
+    expect(numToTier(0)).toBe('UNKNOWN');
+  });
+
+  it('derives file tier from max contained function tier', () => {
+    expect(deriveFileRiskTier(['LOW', 'HIGH', 'MEDIUM'])).toEqual({ riskTierNum: 3, riskTier: 'HIGH' });
+    expect(deriveFileRiskTier(['CRITICAL', 'LOW'])).toEqual({ riskTierNum: 4, riskTier: 'CRITICAL' });
+  });
+
+  it('returns UNKNOWN when no tiered functions exist', () => {
+    expect(deriveFileRiskTier([])).toEqual({ riskTierNum: 0, riskTier: 'UNKNOWN' });
+    expect(deriveFileRiskTier([null, undefined, 'UNKNOWN'])).toEqual({ riskTierNum: 0, riskTier: 'UNKNOWN' });
   });
 });
 
@@ -295,6 +328,20 @@ describe('[UI-0] normalize', () => {
 });
 
 // ─── computeSourceFileScores integration ───────────────────────
+
+describe('[UI-8] computeActiveGateStatus', () => {
+  it('returns ALLOW when no CRITICAL functions exist', () => {
+    expect(computeActiveGateStatus({ criticalFunctionCount: 0, hasTestEvidence: false })).toBe('ALLOW');
+  });
+
+  it('returns REQUIRE_APPROVAL for tested CRITICAL files', () => {
+    expect(computeActiveGateStatus({ criticalFunctionCount: 2, hasTestEvidence: true })).toBe('REQUIRE_APPROVAL');
+  });
+
+  it('returns BLOCK for untested CRITICAL files', () => {
+    expect(computeActiveGateStatus({ criticalFunctionCount: 1, hasTestEvidence: false })).toBe('BLOCK');
+  });
+});
 
 describe('[UI-0] computeSourceFileScores', () => {
   it('computes all properties with corrected formulas', () => {

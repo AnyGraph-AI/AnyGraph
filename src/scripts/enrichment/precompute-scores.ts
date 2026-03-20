@@ -16,6 +16,11 @@
  *   - confidenceScore: 3-factor (effectiveConf×0.5 + evidenceCount×0.3 + freshness×0.2)
  *   - adjustedPain: painScore * (1 + (1 - confidenceScore)) — uncertainty AMPLIFIES
  *   - fragility: adjustedPain * (1 - confidenceScore) * (1 + normalizedChurn)
+ *   - activeInProgressTaskCount: in-progress plan tasks linked via HAS_CODE_EVIDENCE
+ *   - activeBlockedTaskCount: planned tasks linked to file with unresolved dependencies
+ *   - activeBlockerCount: unresolved dependency count across linked blocked tasks
+ *   - activeCriticalFunctionCount: number of CRITICAL functions in this file
+ *   - activeGateStatus: ALLOW | REQUIRE_APPROVAL | BLOCK (file-scoped RF-2 posture)
  *
  * DECISION-FORMULA-REVIEW-2026-03-17: All formulas verified against Decision nodes in Neo4j.
  * Do NOT change these formulas without reading the Decision Log in UI_DASHBOARD.md.
@@ -175,6 +180,40 @@ export function formatRiskTierSummary(riskTiers: Array<string | null | undefined
   return parts.length > 0 ? parts.join(',') : '0';
 }
 
+export type FileRiskTier = 'UNKNOWN' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+/**
+ * Canonical GC-11 file-level tier derivation.
+ * Rule: max contained Function.riskTier (UNKNOWN when no tiered functions).
+ */
+export function tierToNum(tier: string | null | undefined): number {
+  switch (tier) {
+    case 'CRITICAL': return 4;
+    case 'HIGH': return 3;
+    case 'MEDIUM': return 2;
+    case 'LOW': return 1;
+    default: return 0;
+  }
+}
+
+export function numToTier(num: number): FileRiskTier {
+  switch (num) {
+    case 4: return 'CRITICAL';
+    case 3: return 'HIGH';
+    case 2: return 'MEDIUM';
+    case 1: return 'LOW';
+    default: return 'UNKNOWN';
+  }
+}
+
+export function deriveFileRiskTier(riskTiers: Array<string | null | undefined>): {
+  riskTierNum: number;
+  riskTier: FileRiskTier;
+} {
+  const riskTierNum = riskTiers.reduce((max, tier) => Math.max(max, tierToNum(tier)), 0);
+  return { riskTierNum, riskTier: numToTier(riskTierNum) };
+}
+
 /**
  * Normalize fanInCount to 0.0-1.0 within project population.
  */
@@ -283,6 +322,21 @@ export function computeAdjustedPain(
   confidenceScore: number,
 ): number {
   return painScore * (1 + (1 - confidenceScore));
+}
+
+export interface ActiveGateInput {
+  criticalFunctionCount: number;
+  hasTestEvidence: boolean;
+}
+
+export type ActiveGateStatus = 'ALLOW' | 'REQUIRE_APPROVAL' | 'BLOCK';
+
+/**
+ * File-scoped RF-2 gate posture used by UI-8 Active Context precompute.
+ */
+export function computeActiveGateStatus(input: ActiveGateInput): ActiveGateStatus {
+  if (input.criticalFunctionCount <= 0) return 'ALLOW';
+  return input.hasTestEvidence ? 'REQUIRE_APPROVAL' : 'BLOCK';
 }
 
 /**
@@ -508,6 +562,54 @@ export async function enrichPrecomputeScores(
       claimCountMap[r.get('sfId') as string] = toNum(r.get('claimCount'));
     }
 
+    // UI-8 Active Context (Backend): in-progress task count per file.
+    const activeInProgressResult = await session.run(
+      `CALL {
+         MATCH (t:Task)-[:HAS_CODE_EVIDENCE]->(sf:CodeNode:SourceFile {projectId: $projectId})
+         WHERE toLower(coalesce(t.status, '')) IN ['in-progress', 'in_progress', 'in progress']
+         RETURN sf.id AS sfId, t.id AS taskId
+         UNION
+         MATCH (t:Task)-[:HAS_CODE_EVIDENCE]->(fn:CodeNode:Function {projectId: $projectId})
+         WHERE toLower(coalesce(t.status, '')) IN ['in-progress', 'in_progress', 'in progress']
+         MATCH (sf:CodeNode:SourceFile {projectId: $projectId})-[:CONTAINS]->(fn)
+         RETURN sf.id AS sfId, t.id AS taskId
+       }
+       RETURN sfId, count(DISTINCT taskId) AS activeInProgressTaskCount`,
+      { projectId },
+    );
+    const activeInProgressMap: Record<string, number> = {};
+    for (const r of activeInProgressResult.records) {
+      activeInProgressMap[r.get('sfId') as string] = toNum(r.get('activeInProgressTaskCount'));
+    }
+
+    // UI-8 Active Context (Backend): blocked task + blocker counts per file.
+    const blockedTaskResult = await session.run(
+      `CALL {
+         MATCH (t:Task {status: 'planned'})-[:DEPENDS_ON]->(dep:Task)
+         WHERE dep.status <> 'done'
+         WITH t, count(DISTINCT dep) AS blockerCount
+         MATCH (t)-[:HAS_CODE_EVIDENCE]->(sf:CodeNode:SourceFile {projectId: $projectId})
+         RETURN sf.id AS sfId, t.id AS taskId, blockerCount
+         UNION
+         MATCH (t:Task {status: 'planned'})-[:DEPENDS_ON]->(dep:Task)
+         WHERE dep.status <> 'done'
+         WITH t, count(DISTINCT dep) AS blockerCount
+         MATCH (t)-[:HAS_CODE_EVIDENCE]->(fn:CodeNode:Function {projectId: $projectId})
+         MATCH (sf:CodeNode:SourceFile {projectId: $projectId})-[:CONTAINS]->(fn)
+         RETURN sf.id AS sfId, t.id AS taskId, blockerCount
+       }
+       RETURN sfId, collect(DISTINCT {taskId: taskId, blockerCount: blockerCount}) AS blockedTaskRows`,
+      { projectId },
+    );
+    const activeBlockedTaskMap: Record<string, number> = {};
+    const activeBlockerCountMap: Record<string, number> = {};
+    for (const r of blockedTaskResult.records) {
+      const sfId = r.get('sfId') as string;
+      const blockedTaskRows = (r.get('blockedTaskRows') as Array<{ taskId: string; blockerCount: number }>) ?? [];
+      activeBlockedTaskMap[sfId] = blockedTaskRows.length;
+      activeBlockerCountMap[sfId] = blockedTaskRows.reduce((sum, row) => sum + toNum(row.blockerCount), 0);
+    }
+
     // File-level TESTED_BY fallback: files with no Functions but with TESTED_BY edges
     // (e.g. queries.ts exports a const object, not functions)
     const fileTestedByResult = await session.run(
@@ -611,6 +713,8 @@ export async function enrichPrecomputeScores(
       fnDownstreams: number[];
       fnCentralities: number[];
       riskTierSummary: string;
+      riskTierNum: number;
+      riskTier: FileRiskTier;
       blastRadiusDepth: number;
       temporalCouplingCount: number;
       busFactor: number;
@@ -618,6 +722,11 @@ export async function enrichPrecomputeScores(
       verificationFailCount: number;
       claimCount: number;
       hiddenCouplingCount: number;
+      activeInProgressTaskCount: number;
+      activeBlockedTaskCount: number;
+      activeBlockerCount: number;
+      activeCriticalFunctionCount: number;
+      activeGateStatus: ActiveGateStatus;
     }
 
     const fileRaws: FileRaw[] = [];
@@ -647,6 +756,9 @@ export async function enrichPrecomputeScores(
       const fnDownstreams = fnIds.map((id) => downstreamImpacts[id] ?? 0);
       const fnCentralities = fnIds.map((id) => centralityMap[id] ?? 0);
       const fnDepths = fnIds.map((id) => computeMaxCallDepth(id, adjacency));
+      const { riskTierNum, riskTier } = deriveFileRiskTier(riskTiers);
+      const activeCriticalFunctionCount = riskTiers.filter((tier) => tier === 'CRITICAL').length;
+      const hasTestEvidence = testCoverage > 0 || (fileTestedByMap[sfId] ?? 0) > 0;
 
       fileRaws.push({
         sfId,
@@ -660,6 +772,8 @@ export async function enrichPrecomputeScores(
         fnDownstreams,
         fnCentralities,
         riskTierSummary: formatRiskTierSummary(riskTiers),
+        riskTierNum,
+        riskTier,
         blastRadiusDepth: fnDepths.length > 0 ? Math.max(...fnDepths) : 0,
         temporalCouplingCount: coChangeCount,
         busFactor: busFactorMap[sfId] ?? 0,
@@ -667,6 +781,11 @@ export async function enrichPrecomputeScores(
         verificationFailCount: verificationFailMap[sfId] ?? 0,
         claimCount: claimCountMap[sfId] ?? 0,
         hiddenCouplingCount: hiddenCouplingMap[sfId] ?? 0,
+        activeInProgressTaskCount: activeInProgressMap[sfId] ?? 0,
+        activeBlockedTaskCount: activeBlockedTaskMap[sfId] ?? 0,
+        activeBlockerCount: activeBlockerCountMap[sfId] ?? 0,
+        activeCriticalFunctionCount,
+        activeGateStatus: computeActiveGateStatus({ criticalFunctionCount: activeCriticalFunctionCount, hasTestEvidence }),
       });
     }
 
@@ -687,6 +806,8 @@ export async function enrichPrecomputeScores(
       fragility: number;
       adjustedPain: number;
       riskTierSummary: string;
+      riskTierNum: number;
+      riskTier: FileRiskTier;
       blastRadiusDepth: number;
       temporalCouplingCount: number;
       busFactor: number;
@@ -694,6 +815,11 @@ export async function enrichPrecomputeScores(
       verificationFailCount: number;
       claimCount: number;
       hiddenCouplingCount: number;
+      activeInProgressTaskCount: number;
+      activeBlockedTaskCount: number;
+      activeBlockerCount: number;
+      activeCriticalFunctionCount: number;
+      activeGateStatus: ActiveGateStatus;
     }[] = [];
 
     for (const raw of fileRaws) {
@@ -736,6 +862,8 @@ export async function enrichPrecomputeScores(
         id: raw.sfId,
         ...scores,
         riskTierSummary: raw.riskTierSummary,
+        riskTierNum: raw.riskTierNum,
+        riskTier: raw.riskTier,
         blastRadiusDepth: raw.blastRadiusDepth,
         temporalCouplingCount: raw.temporalCouplingCount,
         busFactor: raw.busFactor,
@@ -743,6 +871,11 @@ export async function enrichPrecomputeScores(
         verificationFailCount: raw.verificationFailCount,
         claimCount: raw.claimCount,
         hiddenCouplingCount: raw.hiddenCouplingCount,
+        activeInProgressTaskCount: raw.activeInProgressTaskCount,
+        activeBlockedTaskCount: raw.activeBlockedTaskCount,
+        activeBlockerCount: raw.activeBlockerCount,
+        activeCriticalFunctionCount: raw.activeCriticalFunctionCount,
+        activeGateStatus: raw.activeGateStatus,
       });
     }
 
@@ -760,13 +893,20 @@ export async function enrichPrecomputeScores(
              sf.fragility = u.fragility,
              sf.adjustedPain = u.adjustedPain,
              sf.riskTierSummary = u.riskTierSummary,
+             sf.riskTierNum = u.riskTierNum,
+             sf.riskTier = u.riskTier,
              sf.blastRadiusDepth = u.blastRadiusDepth,
              sf.temporalCouplingCount = u.temporalCouplingCount,
              sf.busFactor = u.busFactor,
              sf.stateFieldCount = u.stateFieldCount,
              sf.verificationFailCount = u.verificationFailCount,
              sf.claimCount = u.claimCount,
-             sf.hiddenCouplingCount = u.hiddenCouplingCount
+             sf.hiddenCouplingCount = u.hiddenCouplingCount,
+             sf.activeInProgressTaskCount = u.activeInProgressTaskCount,
+             sf.activeBlockedTaskCount = u.activeBlockedTaskCount,
+             sf.activeBlockerCount = u.activeBlockerCount,
+             sf.activeCriticalFunctionCount = u.activeCriticalFunctionCount,
+             sf.activeGateStatus = u.activeGateStatus
          RETURN count(sf) AS updated`,
         { updates: fileUpdates },
       );
@@ -779,6 +919,8 @@ export async function enrichPrecomputeScores(
     const indexes = [
       'CREATE INDEX IF NOT EXISTS FOR (sf:SourceFile) ON (sf.painScore)',
       'CREATE INDEX IF NOT EXISTS FOR (sf:SourceFile) ON (sf.adjustedPain)',
+      'CREATE INDEX IF NOT EXISTS FOR (sf:SourceFile) ON (sf.riskTier)',
+      'CREATE INDEX IF NOT EXISTS FOR (sf:SourceFile) ON (sf.riskTierNum)',
       'CREATE INDEX IF NOT EXISTS FOR (f:Function) ON (f.riskTier)',
     ];
     for (const idx of indexes) {
@@ -808,6 +950,10 @@ export async function enrichPrecomputeScores(
       const maxVerificationFailCount = Math.max(...fileUpdates.map((u) => u.verificationFailCount));
       const maxClaimCount = Math.max(...fileUpdates.map((u) => u.claimCount));
       const maxHiddenCouplingCount = Math.max(...fileUpdates.map((u) => u.hiddenCouplingCount));
+      const maxActiveInProgressTaskCount = Math.max(...fileUpdates.map((u) => u.activeInProgressTaskCount));
+      const maxActiveBlockedTaskCount = Math.max(...fileUpdates.map((u) => u.activeBlockedTaskCount));
+      const maxActiveBlockerCount = Math.max(...fileUpdates.map((u) => u.activeBlockerCount));
+      const maxActiveCriticalFunctionCount = Math.max(...fileUpdates.map((u) => u.activeCriticalFunctionCount));
 
       await session.run(
         `MATCH (p:Project {projectId: $projectId})
@@ -821,7 +967,11 @@ export async function enrichPrecomputeScores(
              p.maxStateFieldCount = $maxStateFieldCount,
              p.maxVerificationFailCount = $maxVerificationFailCount,
              p.maxClaimCount = $maxClaimCount,
-             p.maxHiddenCouplingCount = $maxHiddenCouplingCount`,
+             p.maxHiddenCouplingCount = $maxHiddenCouplingCount,
+             p.maxActiveInProgressTaskCount = $maxActiveInProgressTaskCount,
+             p.maxActiveBlockedTaskCount = $maxActiveBlockedTaskCount,
+             p.maxActiveBlockerCount = $maxActiveBlockerCount,
+             p.maxActiveCriticalFunctionCount = $maxActiveCriticalFunctionCount`,
         {
           projectId,
           maxPainScore,
@@ -835,9 +985,13 @@ export async function enrichPrecomputeScores(
           maxVerificationFailCount,
           maxClaimCount,
           maxHiddenCouplingCount,
+          maxActiveInProgressTaskCount,
+          maxActiveBlockedTaskCount,
+          maxActiveBlockerCount,
+          maxActiveCriticalFunctionCount,
         },
       );
-      console.log(`[UI-0] Project maxima stored: painScore=${maxPainScore.toFixed(2)}, adjustedPain=${maxAdjustedPain.toFixed(2)}, fragility=${maxFragility.toFixed(2)}, centrality=${maxCentrality.toFixed(2)}, blastDepth=${maxBlastRadiusDepth}, temporal=${maxTemporalCouplingCount}, busFactor=${maxBusFactor}, stateFields=${maxStateFieldCount}, verificationFails=${maxVerificationFailCount}, claims=${maxClaimCount}, hiddenCoupling=${maxHiddenCouplingCount}`);
+      console.log(`[UI-0] Project maxima stored: painScore=${maxPainScore.toFixed(2)}, adjustedPain=${maxAdjustedPain.toFixed(2)}, fragility=${maxFragility.toFixed(2)}, centrality=${maxCentrality.toFixed(2)}, blastDepth=${maxBlastRadiusDepth}, temporal=${maxTemporalCouplingCount}, busFactor=${maxBusFactor}, stateFields=${maxStateFieldCount}, verificationFails=${maxVerificationFailCount}, claims=${maxClaimCount}, hiddenCoupling=${maxHiddenCouplingCount}, activeInProgress=${maxActiveInProgressTaskCount}, activeBlocked=${maxActiveBlockedTaskCount}, blockers=${maxActiveBlockerCount}, criticalFunctions=${maxActiveCriticalFunctionCount}`);
     }
 
     return { functionsUpdated, filesUpdated };

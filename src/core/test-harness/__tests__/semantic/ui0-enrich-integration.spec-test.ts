@@ -57,6 +57,8 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
             OR sf.downstreamImpact IS NULL
             OR sf.centrality IS NULL
             OR sf.riskTierSummary IS NULL
+            OR sf.riskTier IS NULL
+            OR sf.riskTierNum IS NULL
             OR sf.blastRadiusDepth IS NULL
             OR sf.temporalCouplingCount IS NULL
             OR sf.busFactor IS NULL
@@ -64,11 +66,58 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
             OR sf.verificationFailCount IS NULL
             OR sf.claimCount IS NULL
             OR sf.hiddenCouplingCount IS NULL
+            OR sf.activeInProgressTaskCount IS NULL
+            OR sf.activeBlockedTaskCount IS NULL
+            OR sf.activeBlockerCount IS NULL
+            OR sf.activeCriticalFunctionCount IS NULL
+            OR sf.activeGateStatus IS NULL
          RETURN sf.name AS name`,
         { pid: PROJECT_ID },
       );
       const nullFiles = r.records.map((rec) => rec.get('name'));
       expect(nullFiles).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('activeGateStatus is always one of ALLOW/REQUIRE_APPROVAL/BLOCK', async () => {
+    await enrichPrecomputeScores(driver, PROJECT_ID);
+    const session = driver.session();
+    try {
+      const r = await session.run(
+        `MATCH (sf:SourceFile {projectId: $pid})
+         WHERE NOT sf.activeGateStatus IN ['ALLOW', 'REQUIRE_APPROVAL', 'BLOCK']
+         RETURN sf.name AS name, sf.activeGateStatus AS activeGateStatus`,
+        { pid: PROJECT_ID },
+      );
+      const invalid = r.records.map((rec) => ({
+        name: rec.get('name'),
+        activeGateStatus: rec.get('activeGateStatus'),
+      }));
+      expect(invalid).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('riskTier is always canonical and riskTierNum is 0..4', async () => {
+    await enrichPrecomputeScores(driver, PROJECT_ID);
+    const session = driver.session();
+    try {
+      const r = await session.run(
+        `MATCH (sf:SourceFile {projectId: $pid})
+         WHERE NOT sf.riskTier IN ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+            OR sf.riskTierNum < 0 OR sf.riskTierNum > 4
+         RETURN sf.name AS name, sf.riskTier AS riskTier, sf.riskTierNum AS riskTierNum`,
+        { pid: PROJECT_ID },
+      );
+      const invalid = r.records.map((rec) => ({
+        name: rec.get('name'),
+        riskTier: rec.get('riskTier'),
+        riskTierNum: rec.get('riskTierNum'),
+      }));
+      expect(invalid).toEqual([]);
     } finally {
       await session.close();
     }
@@ -92,6 +141,37 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     }
   });
 
+  it('file riskTier matches max contained Function riskTier', async () => {
+    await enrichPrecomputeScores(driver, PROJECT_ID);
+    const session = driver.session();
+    try {
+      const r = await session.run(
+        `MATCH (sf:SourceFile {projectId: $pid})
+         OPTIONAL MATCH (sf)-[:CONTAINS]->(fn:Function {projectId: $pid})
+         WITH sf,
+              max(CASE fn.riskTier
+                WHEN 'CRITICAL' THEN 4
+                WHEN 'HIGH' THEN 3
+                WHEN 'MEDIUM' THEN 2
+                WHEN 'LOW' THEN 1
+                ELSE 0
+              END) AS expectedNum
+         WITH sf, coalesce(expectedNum, 0) AS expectedNum
+         WHERE sf.riskTierNum <> expectedNum
+         RETURN sf.name AS name, sf.riskTierNum AS actualNum, expectedNum`,
+        { pid: PROJECT_ID },
+      );
+      const mismatches = r.records.map((rec) => ({
+        name: rec.get('name'),
+        actualNum: rec.get('actualNum'),
+        expectedNum: rec.get('expectedNum'),
+      }));
+      expect(mismatches).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+
   it('Project node has core + expanded maxima set', async () => {
     await enrichPrecomputeScores(driver, PROJECT_ID);
     const session = driver.session();
@@ -108,7 +188,11 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
                 p.maxStateFieldCount AS maxState,
                 p.maxVerificationFailCount AS maxVFail,
                 p.maxClaimCount AS maxClaim,
-                p.maxHiddenCouplingCount AS maxHidden`,
+                p.maxHiddenCouplingCount AS maxHidden,
+                p.maxActiveInProgressTaskCount AS maxActiveInProgress,
+                p.maxActiveBlockedTaskCount AS maxActiveBlocked,
+                p.maxActiveBlockerCount AS maxActiveBlockers,
+                p.maxActiveCriticalFunctionCount AS maxActiveCritical`,
         { pid: PROJECT_ID },
       );
       const rec = r.records[0];
@@ -124,6 +208,10 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
       const maxVFail = rec.get('maxVFail');
       const maxClaim = rec.get('maxClaim');
       const maxHidden = rec.get('maxHidden');
+      const maxActiveInProgress = rec.get('maxActiveInProgress');
+      const maxActiveBlocked = rec.get('maxActiveBlocked');
+      const maxActiveBlockers = rec.get('maxActiveBlockers');
+      const maxActiveCritical = rec.get('maxActiveCritical');
       expect(typeof maxPain).toBe('number');
       expect(typeof maxAdj).toBe('number');
       expect(typeof maxFrag).toBe('number');
@@ -135,6 +223,10 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
       expect(typeof maxVFail).toBe('number');
       expect(typeof maxClaim).toBe('number');
       expect(typeof maxHidden).toBe('number');
+      expect(typeof maxActiveInProgress).toBe('number');
+      expect(typeof maxActiveBlocked).toBe('number');
+      expect(typeof maxActiveBlockers).toBe('number');
+      expect(typeof maxActiveCritical).toBe('number');
       expect(maxPain).toBeGreaterThan(0);
       expect(maxAdj).toBeGreaterThan(0);
       expect(maxCent).toBeGreaterThan(0);
