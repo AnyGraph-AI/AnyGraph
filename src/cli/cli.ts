@@ -283,7 +283,8 @@ export async function runParse(dir: string, options: { tsconfig?: string; projec
   const startIngest = Date.now();
   const neo4jService = new Neo4jService();
   const BATCH_SIZE = 500;
-  
+
+  try {
   if (freshMode) {
     // Fresh mode: wipe everything and CREATE (original behavior)
     console.log('  🗑️  Clearing existing project data...');
@@ -380,22 +381,43 @@ export async function runParse(dir: string, options: { tsconfig?: string; projec
     console.log();
     
     // Remove stale nodes (in graph but not in parse output)
+    // SAFETY: Only remove stale nodes from directories the parser actually scanned.
+    // Without this scoping, a partial parse (e.g. only ui/) would delete all src/ nodes.
     const parsedNodeIds = new Set(nodes.map((n: any) => (n as any).nodeId || (n as any).id));
-    const existingNodes = await queryNeo4j(
-      `MATCH (n:CodeNode {projectId: $projectId})
-       WHERE NOT n:Entrypoint AND NOT n:Field AND NOT n:UnresolvedReference
-         AND NOT n:VerificationResult AND NOT n:AnalysisScope AND NOT n:VerificationBundle
-         AND NOT n:GraphMetricsSnapshot AND NOT n:AuditCheck AND NOT n:InvariantViolation
-         AND NOT n:EvaluationRun AND NOT n:MetricResult AND NOT n:TestCase
-       RETURN n.nodeId AS nodeId`,
-      { projectId },
+    const parsedFilePaths = new Set(
+      nodes
+        .map((n: any) => n.properties?.filePath || n.filePath)
+        .filter(Boolean) as string[],
     );
+    const parsedDirs = new Set<string>();
+    for (const fp of parsedFilePaths) {
+      // Collect unique parent directories of all parsed files
+      const dir = fp.substring(0, fp.lastIndexOf('/'));
+      if (dir) parsedDirs.add(dir);
+    }
+    // Build a list of directory prefixes to scope stale removal
+    const dirPrefixes = Array.from(parsedDirs);
+
+    // Only query nodes whose filePath falls under a parsed directory
+    const existingNodes = dirPrefixes.length > 0
+      ? await queryNeo4j(
+          `MATCH (n:CodeNode {projectId: $projectId})
+           WHERE NOT n:Entrypoint AND NOT n:Field AND NOT n:UnresolvedReference
+             AND NOT n:VerificationResult AND NOT n:AnalysisScope AND NOT n:VerificationBundle
+             AND NOT n:GraphMetricsSnapshot AND NOT n:AuditCheck AND NOT n:InvariantViolation
+             AND NOT n:EvaluationRun AND NOT n:MetricResult AND NOT n:TestCase
+             AND n.filePath IS NOT NULL
+             AND any(prefix IN $dirPrefixes WHERE n.filePath STARTS WITH prefix)
+           RETURN n.nodeId AS nodeId`,
+          { projectId, dirPrefixes },
+        )
+      : [];
     const staleNodeIds = existingNodes
       .filter(n => n.nodeId && !parsedNodeIds.has(n.nodeId))
       .map(n => n.nodeId);
     
     if (staleNodeIds.length > 0) {
-      console.log(`  🧹 Removing ${staleNodeIds.length} stale nodes...`);
+      console.log(`  🧹 Removing ${staleNodeIds.length} stale nodes (scoped to ${dirPrefixes.length} parsed directories)...`);
       await neo4jService.run(
         'MATCH (n:CodeNode {projectId: $projectId}) WHERE n.nodeId IN $staleIds DETACH DELETE n',
         { projectId, staleIds: staleNodeIds },
@@ -429,6 +451,9 @@ export async function runParse(dir: string, options: { tsconfig?: string; projec
     console.log(`\n✅ Project "${projectName}" parsed. Run \`codegraph enrich ${projectId}\` next.`);
   } else {
     console.log(`\n✅ Project "${projectName}" reparsed. Derived layers rebuilt.`);
+  }
+  } finally {
+    await neo4jService.close();
   }
 }
 
@@ -858,5 +883,7 @@ export async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  void main();
+  main()
+    .then(() => process.exit(0))
+    .catch((err) => { console.error(err); process.exit(1); });
 }

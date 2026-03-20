@@ -5,6 +5,9 @@ import { usePathname } from 'next/navigation';
 import { ConnectionIndicator } from './connection-indicator';
 import { AnythingGraphLogo } from './AnythingGraphLogo';
 import { CommandPalette } from './CommandPalette';
+import { SaveViewButton } from './SaveViewButton';
+import { LoadViewDropdown } from './LoadViewDropdown';
+import { CopyLinkButton } from './CopyLinkButton';
 
 const TABS = [
   { href: '/', label: 'Dashboard' },
@@ -45,6 +48,9 @@ export function Navbar() {
         </div>
 
         <div className="flex items-center gap-2">
+          <SaveViewButton />
+          <LoadViewDropdown />
+          <CopyLinkButton />
           <CommandPalette />
           <ConnectionIndicator />
         </div>

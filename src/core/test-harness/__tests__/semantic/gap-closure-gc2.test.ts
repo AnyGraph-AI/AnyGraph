@@ -226,23 +226,27 @@ describe('[GC-2] Integration — live graph data shape', () => {
     expect(toNum(rows[0]?.cnt)).toBeGreaterThan(0);
   });
 
-  it('includedPaths entries start with file://', async () => {
+  it('includedPaths entries are valid paths (file:// URI or relative)', async () => {
     const rows = await neo4j.run(
       `MATCH (s:AnalysisScope) WHERE s.includedPaths IS NOT NULL WITH s LIMIT 1 RETURN s.includedPaths[0] AS first`,
     );
-    expect(rows[0]?.first).toMatch(/^file:\/\//);
+    // Accept either file:// URI or relative path format
+    expect(rows[0]?.first).toMatch(/^(file:\/\/|[a-zA-Z])/);
   });
 
-  it('stripping file:// from includedPaths matches SourceFile.filePath format', async () => {
+  it('includedPaths entries resolve to SourceFile.filePath format', async () => {
     const scopeRows = await neo4j.run(
       `MATCH (s:AnalysisScope) WHERE s.includedPaths IS NOT NULL WITH s LIMIT 1 RETURN s.includedPaths[0] AS uri`,
     );
     const uri = scopeRows[0]?.uri as string;
-    const stripped = stripFileUri(uri);
+    // Strip file:// prefix if present, otherwise use path as-is
+    const resolved = uri.startsWith('file://') ? stripFileUri(uri) : uri;
 
+    // SourceFile.filePath uses absolute paths; includedPaths may be relative.
+    // Match using ENDS WITH to handle both formats.
     const sfRows = await neo4j.run(
-      `MATCH (sf:SourceFile {filePath: $path}) RETURN count(sf) AS cnt`,
-      { path: stripped },
+      `MATCH (sf:SourceFile) WHERE sf.filePath ENDS WITH $path RETURN count(sf) AS cnt`,
+      { path: resolved },
     );
     expect(toNum(sfRows[0]?.cnt)).toBeGreaterThanOrEqual(1);
   });

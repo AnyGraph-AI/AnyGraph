@@ -1662,5 +1662,7 @@ export async function main() {
 // Run if executed directly
 const isDirectRun = process.argv[1]?.endsWith('plan-parser.js') || process.argv[1]?.endsWith('plan-parser.ts');
 if (isDirectRun) {
-  main().catch(console.error);
+  main()
+    .then(() => process.exit(0))
+    .catch((err) => { console.error(err); process.exit(1); });
 }
