@@ -70,6 +70,25 @@ Exit codes: 0=ALLOW, 1=BLOCK, 2=REQUIRE_APPROVAL
 
   const neo4j = new Neo4jService();
   try {
+    const policyRows = await neo4j.run(
+      `MATCH (sf:SourceFile {projectId: $projectId})
+       WHERE sf.filePath IN $filePaths
+       RETURN sf.filePath AS filePath,
+              coalesce(sf.configRiskClass, 'NONE') AS configRiskClass,
+              coalesce(sf.productionRiskExcluded, false) AS productionRiskExcluded`,
+      { projectId, filePaths },
+    ) as Array<{ filePath: string; configRiskClass: string; productionRiskExcluded: boolean }>;
+
+    const policyDiagnostics = {
+      governanceCriticalConfigFiles: (policyRows ?? [])
+        .filter((r) => r.configRiskClass === 'GOVERNANCE_CRITICAL_CONFIG')
+        .map((r) => r.filePath),
+      exampleAssetFiles: (policyRows ?? [])
+        .filter((r) => r.configRiskClass === 'EXAMPLE_ASSET' || r.productionRiskExcluded)
+        .map((r) => r.filePath),
+      configRiskClassByFile: Object.fromEntries((policyRows ?? []).map((r) => [r.filePath, r.configRiskClass])),
+    };
+
     // Resolve affected nodes
     const affectedNodes = await resolveAffectedNodes(neo4j, filePaths, projectId);
 
@@ -89,7 +108,7 @@ Exit codes: 0=ALLOW, 1=BLOCK, 2=REQUIRE_APPROVAL
     const result = evaluateEnforcementGate(config, affectedNodes);
 
     if (jsonOutput) {
-      console.log(JSON.stringify({ ...result, blastRadius: blastRadiusNodes }, null, 2));
+      console.log(JSON.stringify({ ...result, blastRadius: blastRadiusNodes, policyDiagnostics }, null, 2));
     } else {
       // Human-readable output
       const icon = result.decision === 'ALLOW' ? '✅' : result.decision === 'BLOCK' ? '🚫' : '⚠️';
@@ -99,6 +118,13 @@ Exit codes: 0=ALLOW, 1=BLOCK, 2=REQUIRE_APPROVAL
 
       if (result.riskSummary.untestedCriticalCount > 0) {
         console.log(`   ⚠️  ${result.riskSummary.untestedCriticalCount} CRITICAL function(s) have NO test coverage`);
+      }
+
+      if (policyDiagnostics.governanceCriticalConfigFiles.length > 0) {
+        console.log(`   🛡️  Governance-critical config surface: ${policyDiagnostics.governanceCriticalConfigFiles.join(', ')}`);
+      }
+      if (policyDiagnostics.exampleAssetFiles.length > 0) {
+        console.log(`   🧪 Example asset surface (production risk excluded): ${policyDiagnostics.exampleAssetFiles.join(', ')}`);
       }
 
       if (result.approvalRequired) {

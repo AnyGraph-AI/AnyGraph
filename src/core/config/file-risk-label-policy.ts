@@ -1,8 +1,15 @@
 export type FileRiskLabelPolicyMode = 'included' | 'excluded';
+export type ConfigRiskClass = 'NONE' | 'GOVERNANCE_CRITICAL_CONFIG' | 'EXAMPLE_ASSET';
 
 export interface FileRiskLabelPolicyEntry {
   label: string;
   mode: FileRiskLabelPolicyMode;
+  reason: string;
+}
+
+export interface ConfigRiskPatternEntry {
+  className: Exclude<ConfigRiskClass, 'NONE'>;
+  pattern: RegExp;
   reason: string;
 }
 
@@ -35,4 +42,50 @@ export function policyMap(): Map<string, FileRiskLabelPolicyEntry> {
 
 export function includedLabels(): string[] {
   return FILE_RISK_LABEL_POLICY.filter((e) => e.mode === 'included').map((e) => e.label);
+}
+
+/**
+ * TODO-4 Task 8/9:
+ * Path-based config-risk family classification used by enrichment + gate diagnostics.
+ */
+export const CONFIG_RISK_PATTERN_POLICY: ConfigRiskPatternEntry[] = [
+  {
+    className: 'GOVERNANCE_CRITICAL_CONFIG',
+    pattern: /(^|\/)vitest\.config\.[cm]?[jt]s$/i,
+    reason: 'Vitest config controls verification contracts and governance-sensitive test/gate behavior.',
+  },
+  {
+    className: 'GOVERNANCE_CRITICAL_CONFIG',
+    pattern: /(^|\/)eslint\.config\.[cm]?[jt]s$/i,
+    reason: 'Lint config governs static-analysis policy and verification signal quality.',
+  },
+  {
+    className: 'GOVERNANCE_CRITICAL_CONFIG',
+    pattern: /(^|\/)tsconfig(\.[^.\/]+)?\.json$/i,
+    reason: 'TypeScript compiler config changes semantic model and parser/verification interpretation.',
+  },
+  {
+    className: 'EXAMPLE_ASSET',
+    pattern: /(^|\/)examples\//i,
+    reason: 'Example/demo assets are excluded from production risk tiers by default but remain in coverage/drift inventory.',
+  },
+];
+
+export function classifyConfigRisk(filePath: string | null | undefined): ConfigRiskClass {
+  if (!filePath) return 'NONE';
+  const normalized = filePath.replace(/\\/g, '/');
+  for (const entry of CONFIG_RISK_PATTERN_POLICY) {
+    if (entry.pattern.test(normalized)) {
+      return entry.className;
+    }
+  }
+  return 'NONE';
+}
+
+export function isGovernanceCriticalConfig(filePath: string | null | undefined): boolean {
+  return classifyConfigRisk(filePath) === 'GOVERNANCE_CRITICAL_CONFIG';
+}
+
+export function isExampleAssetPath(filePath: string | null | undefined): boolean {
+  return classifyConfigRisk(filePath) === 'EXAMPLE_ASSET';
 }

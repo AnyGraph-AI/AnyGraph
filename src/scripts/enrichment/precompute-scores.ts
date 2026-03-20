@@ -26,6 +26,7 @@
  * Do NOT change these formulas without reading the Decision Log in UI_DASHBOARD.md.
  */
 import type { Driver } from 'neo4j-driver';
+import { classifyConfigRisk, type ConfigRiskClass } from '../../core/config/file-risk-label-policy.js';
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -744,6 +745,8 @@ export async function enrichPrecomputeScores(
       importFanInCount: number;
       importFanOutCount: number;
       structuralRoutingSurface: boolean;
+      configRiskClass: ConfigRiskClass;
+      productionRiskExcluded: boolean;
       blastRadiusDepth: number;
       temporalCouplingCount: number;
       busFactor: number;
@@ -786,10 +789,16 @@ export async function enrichPrecomputeScores(
       const fnDownstreams = fnIds.map((id) => downstreamImpacts[id] ?? 0);
       const fnCentralities = fnIds.map((id) => centralityMap[id] ?? 0);
       const fnDepths = fnIds.map((id) => computeMaxCallDepth(id, adjacency));
-      const { riskTierNum, riskTier } = deriveFileRiskTier(riskTiers);
+      const configRiskClass = classifyConfigRisk(filePath);
+      const productionRiskExcluded = configRiskClass === 'EXAMPLE_ASSET';
+      const canonicalTier = deriveFileRiskTier(riskTiers);
+      const riskTierNum = productionRiskExcluded ? 0 : canonicalTier.riskTierNum;
+      const riskTier: FileRiskTier = productionRiskExcluded ? 'UNKNOWN' : canonicalTier.riskTier;
       const importFan = importFanMap[sfId] ?? { fanIn: 0, fanOut: 0 };
       const structuralRoutingSurface = isStructuralRoutingSurface(filePath);
-      const activeCriticalFunctionCount = riskTiers.filter((tier) => tier === 'CRITICAL').length;
+      const activeCriticalFunctionCount = productionRiskExcluded
+        ? 0
+        : riskTiers.filter((tier) => tier === 'CRITICAL').length;
       const hasTestEvidence = testCoverage > 0 || (fileTestedByMap[sfId] ?? 0) > 0;
 
       fileRaws.push({
@@ -803,12 +812,14 @@ export async function enrichPrecomputeScores(
         churnTotal,
         fnDownstreams,
         fnCentralities,
-        riskTierSummary: formatRiskTierSummary(riskTiers),
+        riskTierSummary: productionRiskExcluded ? 'EXCLUDED_EXAMPLE' : formatRiskTierSummary(riskTiers),
         riskTierNum,
         riskTier,
         importFanInCount: importFan.fanIn,
         importFanOutCount: importFan.fanOut,
         structuralRoutingSurface,
+        configRiskClass,
+        productionRiskExcluded,
         blastRadiusDepth: fnDepths.length > 0 ? Math.max(...fnDepths) : 0,
         temporalCouplingCount: coChangeCount,
         busFactor: busFactorMap[sfId] ?? 0,
@@ -846,6 +857,8 @@ export async function enrichPrecomputeScores(
       importFanInCount: number;
       importFanOutCount: number;
       structuralRoutingSurface: boolean;
+      configRiskClass: ConfigRiskClass;
+      productionRiskExcluded: boolean;
       blastRadiusDepth: number;
       temporalCouplingCount: number;
       busFactor: number;
@@ -905,6 +918,8 @@ export async function enrichPrecomputeScores(
         importFanInCount: raw.importFanInCount,
         importFanOutCount: raw.importFanOutCount,
         structuralRoutingSurface: raw.structuralRoutingSurface,
+        configRiskClass: raw.configRiskClass,
+        productionRiskExcluded: raw.productionRiskExcluded,
         blastRadiusDepth: raw.blastRadiusDepth,
         temporalCouplingCount: raw.temporalCouplingCount,
         busFactor: raw.busFactor,
@@ -939,6 +954,8 @@ export async function enrichPrecomputeScores(
              sf.importFanInCount = u.importFanInCount,
              sf.importFanOutCount = u.importFanOutCount,
              sf.structuralRoutingSurface = u.structuralRoutingSurface,
+             sf.configRiskClass = u.configRiskClass,
+             sf.productionRiskExcluded = u.productionRiskExcluded,
              sf.blastRadiusDepth = u.blastRadiusDepth,
              sf.temporalCouplingCount = u.temporalCouplingCount,
              sf.busFactor = u.busFactor,

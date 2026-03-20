@@ -62,6 +62,8 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
             OR sf.importFanInCount IS NULL
             OR sf.importFanOutCount IS NULL
             OR sf.structuralRoutingSurface IS NULL
+            OR sf.configRiskClass IS NULL
+            OR sf.productionRiskExcluded IS NULL
             OR sf.blastRadiusDepth IS NULL
             OR sf.temporalCouplingCount IS NULL
             OR sf.busFactor IS NULL
@@ -126,6 +128,50 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     }
   });
 
+  it('configRiskClass is always one of NONE/GOVERNANCE_CRITICAL_CONFIG/EXAMPLE_ASSET', async () => {
+    await enrichPrecomputeScores(driver, PROJECT_ID);
+    const session = driver.session();
+    try {
+      const r = await session.run(
+        `MATCH (sf:SourceFile {projectId: $pid})
+         WHERE NOT sf.configRiskClass IN ['NONE', 'GOVERNANCE_CRITICAL_CONFIG', 'EXAMPLE_ASSET']
+         RETURN sf.name AS name, sf.configRiskClass AS configRiskClass`,
+        { pid: PROJECT_ID },
+      );
+      const invalid = r.records.map((rec) => ({
+        name: rec.get('name'),
+        configRiskClass: rec.get('configRiskClass'),
+      }));
+      expect(invalid).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('example assets are excluded from production risk tiers by default', async () => {
+    await enrichPrecomputeScores(driver, PROJECT_ID);
+    const session = driver.session();
+    try {
+      const r = await session.run(
+        `MATCH (sf:SourceFile {projectId: $pid})
+         WHERE sf.configRiskClass = 'EXAMPLE_ASSET'
+         RETURN count(sf) AS total,
+                sum(CASE WHEN sf.productionRiskExcluded = true THEN 1 ELSE 0 END) AS excluded,
+                sum(CASE WHEN sf.riskTier = 'UNKNOWN' AND sf.riskTierNum = 0 THEN 1 ELSE 0 END) AS canonicalUnknown`,
+        { pid: PROJECT_ID },
+      );
+      const total = Number(r.records[0]?.get('total') ?? 0);
+      const excluded = Number(r.records[0]?.get('excluded') ?? 0);
+      const canonicalUnknown = Number(r.records[0]?.get('canonicalUnknown') ?? 0);
+      if (total > 0) {
+        expect(excluded).toBe(total);
+        expect(canonicalUnknown).toBe(total);
+      }
+    } finally {
+      await session.close();
+    }
+  });
+
   it('every Function has downstreamImpact and centralityNormalized', async () => {
     await enrichPrecomputeScores(driver, PROJECT_ID);
     const session = driver.session();
@@ -161,7 +207,8 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
                 ELSE 0
               END) AS expectedNum
          WITH sf, coalesce(expectedNum, 0) AS expectedNum
-         WHERE sf.riskTierNum <> expectedNum
+         WHERE coalesce(sf.productionRiskExcluded, false) = false
+           AND sf.riskTierNum <> expectedNum
          RETURN sf.name AS name, sf.riskTierNum AS actualNum, expectedNum`,
         { pid: PROJECT_ID },
       );
