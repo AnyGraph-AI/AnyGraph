@@ -22,6 +22,7 @@ export interface ContextTabsProps {
   readonly riskOverTimeData: Array<Record<string, unknown>>;
   readonly milestoneData: Array<Record<string, unknown>>;
   readonly avgConfidence: number;
+  readonly initialTab?: ContextTab;
   readonly onFragilityClick?: (row: Record<string, unknown>) => void;
   readonly onSafestClick?: (row: Record<string, unknown>) => void;
 }
@@ -32,10 +33,15 @@ export function ContextTabs({
   riskOverTimeData,
   milestoneData,
   avgConfidence,
+  initialTab = 'fragility',
   onFragilityClick,
   onSafestClick,
 }: ContextTabsProps) {
-  const [contextTab, setContextTab] = useState<ContextTab>('fragility');
+  const [contextTab, setContextTab] = useState<ContextTab>(initialTab);
+
+  useEffect(() => {
+    setContextTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

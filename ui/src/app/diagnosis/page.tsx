@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { DiagnosisGrid } from '@/components/DiagnosisGrid';
 import { RiskOverTime } from '@/components/RiskOverTime';
@@ -13,8 +14,33 @@ const DEFAULT_PROJECT_ID = 'proj_c0d3e9a1f200';
 
 type Tab = 'diagnosis' | 'probes';
 
+function parseTab(raw: string | null): Tab {
+  return raw === 'probes' ? 'probes' : 'diagnosis';
+}
+
 export default function DiagnosisPage() {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>('diagnosis');
+
+  useEffect(() => {
+    const sync = () => {
+      const next = parseTab(new URLSearchParams(window.location.search).get('tab'));
+      setTab(next);
+    };
+
+    sync();
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
+  }, []);
+
+  const setTabAndUrl = (next: Tab) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('tab', next);
+    const nextUrl = `/diagnosis?${params.toString()}`;
+    window.history.replaceState({}, '', nextUrl);
+    setTab(next);
+    router.replace(nextUrl);
+  };
 
   const { data: diagnosisData, isLoading: diagnosisLoading } = useQuery({
     queryKey: ['diagnosis-grid'],
@@ -53,7 +79,7 @@ export default function DiagnosisPage() {
 
       <div className="flex gap-2 bg-zinc-900 border border-zinc-800 rounded-lg p-1 w-fit">
         <button
-          onClick={() => setTab('diagnosis')}
+          onClick={() => setTabAndUrl('diagnosis')}
           className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
             tab === 'diagnosis' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
           }`}
@@ -61,7 +87,7 @@ export default function DiagnosisPage() {
           Diagnosis Grid
         </button>
         <button
-          onClick={() => setTab('probes')}
+          onClick={() => setTabAndUrl('probes')}
           className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
             tab === 'probes' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
           }`}

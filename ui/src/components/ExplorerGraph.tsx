@@ -80,12 +80,16 @@ function shortName(name: string): string {
   return name.length > 28 ? `${name.slice(0, 28)}…` : name;
 }
 
+function parseMode(raw: string | null): Mode {
+  return raw === 'danger-paths' ? 'danger-paths' : 'neighbors';
+}
+
 export function ExplorerGraph() {
   const params = useSearchParams();
   const focus = params.get('focus') ?? params.get('filePath') ?? params.get('nodeId') ?? '';
 
   const [resolvedFocus, setResolvedFocus] = useState('');
-  const [mode, setMode] = useState<Mode>('neighbors');
+  const [mode, setMode] = useState<Mode>(parseMode(params.get('mode')));
   const [graph, setGraph] = useState<GraphResponse['data'] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -158,6 +162,11 @@ export function ExplorerGraph() {
       cancelled = true;
     };
   }, [focus]);
+
+  useEffect(() => {
+    const fromUrl = parseMode(params.get('mode'));
+    setMode((prev) => (prev === fromUrl ? prev : fromUrl));
+  }, [params]);
 
   useEffect(() => {
     if (!resolvedFocus) return;
@@ -365,7 +374,12 @@ export function ExplorerGraph() {
               <button
                 key={m}
                 className={`px-2 py-1 text-xs rounded ${mode === m ? 'bg-[#7ec8e3]/20 text-[#7ec8e3]' : 'text-zinc-400'}`}
-                onClick={() => setMode(m)}
+                onClick={() => {
+                  const next = new URLSearchParams(params.toString());
+                  next.set('mode', m);
+                  window.history.replaceState({}, '', `/explorer?${next.toString()}`);
+                  setMode(m);
+                }}
               >
                 {m}
               </button>

@@ -8,10 +8,10 @@ import { CommandPalette } from './CommandPalette';
 
 const TABS = [
   { href: '/', label: 'Dashboard' },
-  { href: '/explorer', label: 'Explorer' },
-  { href: '/diagnosis', label: 'Diagnosis' },
-  { href: '/gaps', label: 'Gaps' },
-  { href: '/fragility', label: 'Fragility' },
+  { href: '/explorer?mode=neighbors', label: 'Explorer' },
+  { href: '/diagnosis?tab=diagnosis', label: 'Diagnosis' },
+  { href: '/?view=gaps', label: 'Gaps' },
+  { href: '/?view=fragility', label: 'Fragility' },
 ] as const;
 
 export function Navbar() {
