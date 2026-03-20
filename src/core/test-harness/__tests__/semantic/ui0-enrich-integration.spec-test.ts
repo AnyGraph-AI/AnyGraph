@@ -59,6 +59,9 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
             OR sf.riskTierSummary IS NULL
             OR sf.riskTier IS NULL
             OR sf.riskTierNum IS NULL
+            OR sf.importFanInCount IS NULL
+            OR sf.importFanOutCount IS NULL
+            OR sf.structuralRoutingSurface IS NULL
             OR sf.blastRadiusDepth IS NULL
             OR sf.temporalCouplingCount IS NULL
             OR sf.busFactor IS NULL
@@ -141,13 +144,14 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     }
   });
 
-  it('file riskTier matches max contained Function riskTier', async () => {
+  it('file riskTier matches max contained executable-node riskTier', async () => {
     await enrichPrecomputeScores(driver, PROJECT_ID);
     const session = driver.session();
     try {
       const r = await session.run(
         `MATCH (sf:SourceFile {projectId: $pid})
-         OPTIONAL MATCH (sf)-[:CONTAINS]->(fn:Function {projectId: $pid})
+         OPTIONAL MATCH (sf)-[:CONTAINS]->(fn {projectId: $pid})
+         WHERE fn:Function OR fn:Method OR fn:FunctionDeclaration
          WITH sf,
               max(CASE fn.riskTier
                 WHEN 'CRITICAL' THEN 4
@@ -167,6 +171,27 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
         expectedNum: rec.get('expectedNum'),
       }));
       expect(mismatches).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('structural routing surfaces are flagged for index.ts files', async () => {
+    await enrichPrecomputeScores(driver, PROJECT_ID);
+    const session = driver.session();
+    try {
+      const r = await session.run(
+        `MATCH (sf:SourceFile {projectId: $pid})
+         WHERE sf.filePath ENDS WITH '/index.ts'
+         RETURN count(sf) AS total,
+                sum(CASE WHEN sf.structuralRoutingSurface = true THEN 1 ELSE 0 END) AS flagged`,
+        { pid: PROJECT_ID },
+      );
+      const total = Number(r.records[0]?.get('total') ?? 0);
+      const flagged = Number(r.records[0]?.get('flagged') ?? 0);
+      if (total > 0) {
+        expect(flagged).toBe(total);
+      }
     } finally {
       await session.close();
     }

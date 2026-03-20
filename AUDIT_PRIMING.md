@@ -128,6 +128,12 @@ When a task is done, append backtick artifact refs:
 - functions/components: `` `functionName` ``
 - tests: `` `...spec-test.ts` `` with key test names
 
+For long remediation receipts, use parser-safe continuation lines:
+- first checkbox line = short action summary,
+- follow-up lines = `Details:` / `EVIDENCE:` with explicit backtick refs.
+
+This is required for prose-safe evidence linking in plan parser ingestion.
+
 Use `NO_CODE_EVIDENCE_OK(reason)` only for tasks that genuinely produce no code artifacts.
 
 ---

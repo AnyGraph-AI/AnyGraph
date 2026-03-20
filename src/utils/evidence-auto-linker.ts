@@ -14,12 +14,13 @@
  */
 
 import { Neo4jService } from '../../src/storage/neo4j/neo4j.service.js';
+import { classifyAssetForEvidence, matchExplicitRefs, type AutoLinkMatchType } from './evidence-auto-linker-utils.js';
 
 interface LinkResult {
   taskName: string;
   targetName: string;
   targetFile: string;
-  matchType: 'exact_file' | 'function_name' | 'keyword';
+  matchType: AutoLinkMatchType;
   confidence: number;
 }
 
@@ -32,6 +33,7 @@ async function main(): Promise<void> {
     const unlinkedTasks = await neo4j.run(`
       MATCH (t:CodeNode:Task {status: 'done'})
       WHERE t.projectId STARTS WITH 'plan_'
+        AND t.noCodeEvidenceOK IS NULL
         AND NOT (t)-[:HAS_CODE_EVIDENCE]->()
       RETURN t.name AS name, t.projectId AS planProjectId, elementId(t) AS taskElementId
     `);
@@ -82,7 +84,14 @@ async function main(): Promise<void> {
 
     // 3. Match tasks to code assets
     const links: LinkResult[] = [];
-    const linkEdges: Array<{ taskElementId: string; targetElementId: string; matchType: string; confidence: number }> = [];
+    const linkEdges: Array<{
+      taskElementId: string;
+      targetElementId: string;
+      matchType: string;
+      confidence: number;
+      refType: string;
+      evidenceRole: 'target' | 'proof';
+    }> = [];
 
     for (const task of unlinkedTasks) {
       const taskName = String(task.name).toLowerCase();
@@ -92,6 +101,22 @@ async function main(): Promise<void> {
 
       const assets = codeAssets.get(codeId);
       if (!assets) continue;
+
+      // Strategy 0: Explicit backtick refs (`file.ts`, `functionName`, `ClassName`)
+      const explicitMatches = matchExplicitRefs(String(task.name), assets);
+      for (const match of explicitMatches) {
+        const evidence = classifyAssetForEvidence(match.asset);
+        links.push({ taskName: String(task.name), targetName: match.asset.name, targetFile: match.asset.filePath, matchType: match.matchType, confidence: match.confidence });
+        linkEdges.push({
+          taskElementId: String(task.taskElementId),
+          targetElementId: match.asset.elementId,
+          matchType: match.matchType,
+          confidence: match.confidence,
+          refType: evidence.refType,
+          evidenceRole: evidence.evidenceRole,
+        });
+      }
+      if (explicitMatches.length > 0) continue; // explicit refs are authoritative
 
       // Strategy 1: Exact file name match
       // Only match filenames that are specific enough (not index.ts, schema.ts, utils.ts, etc.)
@@ -106,8 +131,16 @@ async function main(): Promise<void> {
       });
 
       for (const match of fileMatches) {
+        const evidence = classifyAssetForEvidence(match);
         links.push({ taskName: String(task.name), targetName: match.name, targetFile: match.filePath, matchType: 'exact_file', confidence: 0.95 });
-        linkEdges.push({ taskElementId: String(task.taskElementId), targetElementId: match.elementId, matchType: 'exact_file', confidence: 0.95 });
+        linkEdges.push({
+          taskElementId: String(task.taskElementId),
+          targetElementId: match.elementId,
+          matchType: 'exact_file',
+          confidence: 0.95,
+          refType: evidence.refType,
+          evidenceRole: evidence.evidenceRole,
+        });
       }
 
       if (fileMatches.length > 0) continue; // Skip further matching if file match found
@@ -130,8 +163,16 @@ async function main(): Promise<void> {
 
       // Take top 3 function matches at most
       for (const match of funcMatches.slice(0, 3)) {
+        const evidence = classifyAssetForEvidence(match);
         links.push({ taskName: String(task.name), targetName: match.name, targetFile: match.filePath, matchType: 'function_name', confidence: 0.85 });
-        linkEdges.push({ taskElementId: String(task.taskElementId), targetElementId: match.elementId, matchType: 'function_name', confidence: 0.85 });
+        linkEdges.push({
+          taskElementId: String(task.taskElementId),
+          targetElementId: match.elementId,
+          matchType: 'function_name',
+          confidence: 0.85,
+          refType: evidence.refType,
+          evidenceRole: evidence.evidenceRole,
+        });
       }
     }
 
@@ -145,11 +186,8 @@ async function main(): Promise<void> {
             MATCH (s) WHERE elementId(s) = $targetId
             MERGE (t)-[e:HAS_CODE_EVIDENCE]->(s)
             ON CREATE SET e.source = 'evidence_auto_linker',
-                          e.refType = CASE
-                            WHEN 'Function' IN labels(s) THEN 'function'
-                            WHEN 'SourceFile' IN labels(s) THEN 'file_path'
-                            ELSE 'auto_link'
-                          END,
+                          e.refType = $refType,
+                          e.evidenceRole = $evidenceRole,
                           e.matchType = $matchType,
                           e.confidence = $confidence,
                           e.createdAt = datetime()
@@ -158,6 +196,8 @@ async function main(): Promise<void> {
             targetId: edge.targetElementId,
             matchType: edge.matchType,
             confidence: edge.confidence,
+            refType: edge.refType,
+            evidenceRole: edge.evidenceRole,
           });
           created++;
         } catch (err: any) {
@@ -170,6 +210,7 @@ async function main(): Promise<void> {
     const remaining = await neo4j.run(`
       MATCH (t:CodeNode:Task {status: 'done'})
       WHERE t.projectId STARTS WITH 'plan_'
+        AND t.noCodeEvidenceOK IS NULL
         AND NOT (t)-[:HAS_CODE_EVIDENCE]->()
       RETURN count(t) AS cnt
     `);

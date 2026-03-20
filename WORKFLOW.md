@@ -284,9 +284,13 @@ git diff --name-only HEAD~1
 ```
 
 ### Rules:
-- Every file touched gets a backtick reference
-- Every new function/export gets a backtick reference
-- Every test file gets a backtick reference with key test names
+- Keep the first checkbox line parser-friendly (short action statement).
+- Put long explanation in continuation lines prefixed with `Details:` or `EVIDENCE:`.
+- Every file touched gets a backtick reference.
+- Every new function/export gets a backtick reference.
+- Every test file gets a backtick reference with key test names.
+- Continuation lines are parsed for evidence refs (prose-safe), so long receipts are allowed when structured.
+- Do not rely on plain prose without backticks; explicit refs are still the canonical linkage path.
 - Don't skip this step — it's the receipt system. Future agents and the graph depend on it.
 - When M8 (evidenceRole semantics) lands, these annotations enable `target` vs `proof` classification automatically.
 

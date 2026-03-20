@@ -214,6 +214,12 @@ export function deriveFileRiskTier(riskTiers: Array<string | null | undefined>):
   return { riskTierNum, riskTier: numToTier(riskTierNum) };
 }
 
+export function isStructuralRoutingSurface(filePath: string | null | undefined): boolean {
+  if (!filePath) return false;
+  const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+  return normalized.endsWith('/index.ts') || normalized.endsWith('/index.tsx');
+}
+
 /**
  * Normalize fanInCount to 0.0-1.0 within project population.
  */
@@ -477,6 +483,7 @@ export async function enrichPrecomputeScores(
             collect(DISTINCT f.fanOutCount) AS fanOuts,
             collect(f.riskTier) AS riskTiers
        RETURN sf.id AS sfId,
+              sf.filePath AS filePath,
               fnIds,
               risks,
               fanOuts,
@@ -497,6 +504,25 @@ export async function enrichPrecomputeScores(
     const coChangeMap: Record<string, number> = {};
     for (const r of coChangeResult.records) {
       coChangeMap[r.get('sfId') as string] = toNum(r.get('coChangeCount'));
+    }
+
+    // Import fan-in/fan-out per file (structural routing metrics)
+    const importFanResult = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       OPTIONAL MATCH (src:CodeNode:SourceFile {projectId: $projectId})-[:IMPORTS]->(sf)
+       WITH sf, count(DISTINCT src) AS importFanInCount
+       OPTIONAL MATCH (sf)-[:IMPORTS]->(dst:CodeNode:SourceFile {projectId: $projectId})
+       RETURN sf.id AS sfId,
+              importFanInCount,
+              count(DISTINCT dst) AS importFanOutCount`,
+      { projectId },
+    );
+    const importFanMap: Record<string, { fanIn: number; fanOut: number }> = {};
+    for (const r of importFanResult.records) {
+      importFanMap[r.get('sfId') as string] = {
+        fanIn: toNum(r.get('importFanInCount')),
+        fanOut: toNum(r.get('importFanOutCount')),
+      };
     }
 
     // Hidden coupling: files that co-change without import in either direction
@@ -715,6 +741,9 @@ export async function enrichPrecomputeScores(
       riskTierSummary: string;
       riskTierNum: number;
       riskTier: FileRiskTier;
+      importFanInCount: number;
+      importFanOutCount: number;
+      structuralRoutingSurface: boolean;
       blastRadiusDepth: number;
       temporalCouplingCount: number;
       busFactor: number;
@@ -732,6 +761,7 @@ export async function enrichPrecomputeScores(
     const fileRaws: FileRaw[] = [];
     for (const r of fileDataResult.records) {
       const sfId = r.get('sfId') as string;
+      const filePath = (r.get('filePath') as string | null) ?? '';
       const fnIds = (r.get('fnIds') as string[]).filter((id) => id != null);
       const risks = (r.get('risks') as number[]).filter((v) => v != null).map(toNum);
       const fanOuts = (r.get('fanOuts') as number[]).filter((v) => v != null).map(toNum);
@@ -757,6 +787,8 @@ export async function enrichPrecomputeScores(
       const fnCentralities = fnIds.map((id) => centralityMap[id] ?? 0);
       const fnDepths = fnIds.map((id) => computeMaxCallDepth(id, adjacency));
       const { riskTierNum, riskTier } = deriveFileRiskTier(riskTiers);
+      const importFan = importFanMap[sfId] ?? { fanIn: 0, fanOut: 0 };
+      const structuralRoutingSurface = isStructuralRoutingSurface(filePath);
       const activeCriticalFunctionCount = riskTiers.filter((tier) => tier === 'CRITICAL').length;
       const hasTestEvidence = testCoverage > 0 || (fileTestedByMap[sfId] ?? 0) > 0;
 
@@ -774,6 +806,9 @@ export async function enrichPrecomputeScores(
         riskTierSummary: formatRiskTierSummary(riskTiers),
         riskTierNum,
         riskTier,
+        importFanInCount: importFan.fanIn,
+        importFanOutCount: importFan.fanOut,
+        structuralRoutingSurface,
         blastRadiusDepth: fnDepths.length > 0 ? Math.max(...fnDepths) : 0,
         temporalCouplingCount: coChangeCount,
         busFactor: busFactorMap[sfId] ?? 0,
@@ -808,6 +843,9 @@ export async function enrichPrecomputeScores(
       riskTierSummary: string;
       riskTierNum: number;
       riskTier: FileRiskTier;
+      importFanInCount: number;
+      importFanOutCount: number;
+      structuralRoutingSurface: boolean;
       blastRadiusDepth: number;
       temporalCouplingCount: number;
       busFactor: number;
@@ -864,6 +902,9 @@ export async function enrichPrecomputeScores(
         riskTierSummary: raw.riskTierSummary,
         riskTierNum: raw.riskTierNum,
         riskTier: raw.riskTier,
+        importFanInCount: raw.importFanInCount,
+        importFanOutCount: raw.importFanOutCount,
+        structuralRoutingSurface: raw.structuralRoutingSurface,
         blastRadiusDepth: raw.blastRadiusDepth,
         temporalCouplingCount: raw.temporalCouplingCount,
         busFactor: raw.busFactor,
@@ -895,6 +936,9 @@ export async function enrichPrecomputeScores(
              sf.riskTierSummary = u.riskTierSummary,
              sf.riskTierNum = u.riskTierNum,
              sf.riskTier = u.riskTier,
+             sf.importFanInCount = u.importFanInCount,
+             sf.importFanOutCount = u.importFanOutCount,
+             sf.structuralRoutingSurface = u.structuralRoutingSurface,
              sf.blastRadiusDepth = u.blastRadiusDepth,
              sf.temporalCouplingCount = u.temporalCouplingCount,
              sf.busFactor = u.busFactor,

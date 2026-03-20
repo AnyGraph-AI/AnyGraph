@@ -8,6 +8,7 @@
  * within the same API request.
  */
 import neo4j, { type Driver, type Session } from 'neo4j-driver';
+import { logUiQueryAudit, toHash } from './query-audit';
 
 // ─── Connection Pool (singleton) ───────────────────────────────
 
@@ -68,7 +69,20 @@ export async function cachedQuery<T = Record<string, unknown>>(
 ): Promise<T[]> {
   const key = cacheKey(cypher, params);
   const cached = queryCache.get(key);
+  const queryPreview = cypher.replace(/\s+/g, ' ').trim().slice(0, 240);
+  const queryHash = toHash(cypher);
+  const paramsHash = toHash(JSON.stringify(params));
+
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    await logUiQueryAudit({
+      ts: new Date().toISOString(),
+      queryHash,
+      queryPreview,
+      paramsHash,
+      cacheHit: true,
+      rowCount: Array.isArray(cached.result) ? cached.result.length : undefined,
+      ok: true,
+    });
     return cached.result as T[];
   }
 
@@ -78,6 +92,7 @@ export async function cachedQuery<T = Record<string, unknown>>(
     safeParams[k] = typeof v === 'number' && Number.isInteger(v) ? neo4j.int(v) : v;
   }
 
+  const started = Date.now();
   const session = getSession();
   try {
     const result = await session.run(cypher, safeParams);
@@ -92,7 +107,31 @@ export async function cachedQuery<T = Record<string, unknown>>(
       return obj as T;
     });
     queryCache.set(key, { result: rows, ts: Date.now() });
+
+    await logUiQueryAudit({
+      ts: new Date().toISOString(),
+      queryHash,
+      queryPreview,
+      paramsHash,
+      cacheHit: false,
+      durationMs: Date.now() - started,
+      rowCount: rows.length,
+      ok: true,
+    });
+
     return rows;
+  } catch (error: unknown) {
+    await logUiQueryAudit({
+      ts: new Date().toISOString(),
+      queryHash,
+      queryPreview,
+      paramsHash,
+      cacheHit: false,
+      durationMs: Date.now() - started,
+      ok: false,
+      error: error instanceof Error ? error.message.slice(0, 300) : 'unknown-error',
+    });
+    throw error;
   } finally {
     await session.close();
   }

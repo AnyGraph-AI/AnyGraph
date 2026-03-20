@@ -112,6 +112,8 @@ Tasks are the atomic work units. They become `Task` nodes linked to their parent
 - Indentation of 2+ spaces marks a sub-task (`isSubTask: true`)
 - Task text is everything after the checkbox
 - Tasks are assigned to the most recent milestone, sprint, or section header above them
+- Keep the checkbox line parser-friendly (short action statement); put long rationale in continuation lines.
+- Continuation lines prefixed with `Details:` / `EVIDENCE:` are parsed for backtick cross-references.
 
 **What goes in task text:**
 - Describe the work, not the checkbox. "Implement X" not "Done"
@@ -119,6 +121,9 @@ Tasks are the atomic work units. They become `Task` nodes linked to their parent
 - Reference functions with parens: `` `parseFile()` ``
 - Reference projects with IDs: `proj_c0d3e9a1f200`
 - These cross-references are automatically extracted and resolved against the code graph
+- For long completion receipts, append continuation lines:
+  - `Details: ...` (narrative)
+  - `EVIDENCE: `file.ts` `functionName` `test-file.spec-test.ts`` (explicit artifact refs)
 
 ---
 

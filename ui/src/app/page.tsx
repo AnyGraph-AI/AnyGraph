@@ -6,6 +6,7 @@ import { confidenceColor } from '@/lib/colors';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { KpiRow } from '@/components/KpiRow';
 import { HeroTreemap } from '@/components/HeroTreemap';
+import { ActiveContextPanel } from '@/components/active-context';
 import { ContextTabs } from '@/components/ContextTabs';
 import { RealityGap } from '@/components/RealityGap';
 import { GodFilesTable } from '@/components/GodFilesTable';
@@ -101,6 +102,7 @@ export default function Dashboard() {
     riskOverTimeData,
     milestoneData,
     recentlyDestabilized,
+    activeContextData,
     loading,
     avgConfidence,
     criticalCount,
@@ -255,6 +257,16 @@ export default function Dashboard() {
           <option value="gaps">Gaps</option>
           <option value="fragility">Fragility</option>
         </select>
+      </div>
+
+      <div className="fade-up">
+        <ActiveContextPanel
+          inProgressTasks={(activeContextData?.data?.inProgressTasks as any[]) ?? []}
+          blockedTasks={(activeContextData?.data?.blockedTasks as any[]) ?? []}
+          gateBlocked={(activeContextData?.data?.gateBlocked as any[]) ?? []}
+          gateRequireApproval={(activeContextData?.data?.gateRequireApproval as any[]) ?? []}
+          onNavigateToExplorer={openExplorer}
+        />
       </div>
 
       <div className="fade-up">

@@ -29,6 +29,7 @@ import {
   tierToNum,
   numToTier,
   deriveFileRiskTier,
+  isStructuralRoutingSurface,
   computeSourceFileScores,
   type SourceFileScoreInput,
 } from '../../../../scripts/enrichment/precompute-scores.js';
@@ -149,6 +150,18 @@ describe('[GC-11] canonical file risk tier derivation', () => {
   it('returns UNKNOWN when no tiered functions exist', () => {
     expect(deriveFileRiskTier([])).toEqual({ riskTierNum: 0, riskTier: 'UNKNOWN' });
     expect(deriveFileRiskTier([null, undefined, 'UNKNOWN'])).toEqual({ riskTierNum: 0, riskTier: 'UNKNOWN' });
+  });
+});
+
+describe('[TODO-4] structural routing surface detection', () => {
+  it('flags barrel index files as structural routing surfaces', () => {
+    expect(isStructuralRoutingSurface('/repo/src/core/ir/index.ts')).toBe(true);
+    expect(isStructuralRoutingSurface('/repo/src/core/ir/index.tsx')).toBe(true);
+  });
+
+  it('does not flag non-index files', () => {
+    expect(isStructuralRoutingSurface('/repo/src/core/ir/parser.ts')).toBe(false);
+    expect(isStructuralRoutingSurface('/repo/vitest.config.ts')).toBe(false);
   });
 });
 

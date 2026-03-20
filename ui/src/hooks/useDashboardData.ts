@@ -5,6 +5,12 @@ import { useQuery } from '@tanstack/react-query';
 import { QUERIES } from '@/lib/queries';
 import { fetchQuery } from '@/lib/fetchQuery';
 
+async function fetchActiveContext(projectId: string): Promise<{ data: Record<string, unknown> }> {
+  const res = await fetch(`/api/graph/active-context?projectId=${encodeURIComponent(projectId)}`);
+  if (!res.ok) throw new Error(`Active context failed: ${res.statusText}`);
+  return res.json();
+}
+
 const DEFAULT_PROJECT_ID = 'proj_c0d3e9a1f200';
 
 type DashboardFilterParams = {
@@ -97,6 +103,11 @@ export function useDashboardData(params: DashboardFilterParams = {}) {
       }),
   });
 
+  const { data: activeContextData } = useQuery({
+    queryKey: ['active-context', projectId],
+    queryFn: () => fetchActiveContext(projectId),
+  });
+
   const loading = projectLoading || filesLoading || riskLoading || planLoading || heatmapLoading || fnHeatmapLoading || fnTableLoading;
 
   const avgConfidence = useMemo(() => {
@@ -136,6 +147,7 @@ export function useDashboardData(params: DashboardFilterParams = {}) {
     riskOverTimeData,
     milestoneData,
     recentlyDestabilized,
+    activeContextData,
     // Computed
     loading,
     avgConfidence,
