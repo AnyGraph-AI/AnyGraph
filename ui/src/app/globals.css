@@ -150,7 +150,7 @@
 }
 
 .fade-up {
-  animation: fadeUp 460ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: fadeUp 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 ::-webkit-scrollbar {

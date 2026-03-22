@@ -70,3 +70,16 @@ export const KPI = {
   /** Label text */
   label: 'text-xs uppercase tracking-wide text-zinc-500 mt-1',
 } as const;
+
+/** Accent color palette — semantic accent colors for KPI cards, nav active state, and risk indicators */
+export const ACCENT = {
+  danger:  '#ff4757',  // Critical / Max Pain
+  warning: '#ff7f50',  // Fragility / high-risk
+  caution: '#ffc048',  // Confidence warning
+  info:    '#7ec8e3',  // Info / active nav state
+} as const;
+
+/** Surface colors — panel, nav, and overlay backgrounds */
+export const SURFACE = {
+  nav: '#0a0c10',      // Navbar background (use with opacity suffix: + 'D9' for 85%)
+} as const;

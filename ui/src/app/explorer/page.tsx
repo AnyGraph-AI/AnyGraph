@@ -1,5 +1,9 @@
-import { Suspense } from 'react';
-import { ExplorerGraph } from '@/components/ExplorerGraph';
+import React, { Suspense } from 'react';
+import { GraphSkeleton } from '@/components/ui/loading-skeleton';
+
+const ExplorerGraph = React.lazy(() =>
+  import('@/components/ExplorerGraph').then(m => ({ default: m.ExplorerGraph }))
+);
 
 export default function ExplorerPage() {
   return (
@@ -9,7 +13,7 @@ export default function ExplorerPage() {
         <p className="text-zinc-400 mt-1">Neighbors mode + danger paths mode with graph-native filters and caps.</p>
       </div>
 
-      <Suspense fallback={<div className="text-zinc-500 text-sm">Loading explorer...</div>}>
+      <Suspense fallback={<GraphSkeleton />}>
         <ExplorerGraph />
       </Suspense>
     </div>

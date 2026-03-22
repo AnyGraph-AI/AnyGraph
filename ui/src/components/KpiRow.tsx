@@ -2,6 +2,7 @@
 
 import { KpiCard } from '@/components/ui/kpi-card';
 import { RiskBadge, type RiskTier } from '@/components/ui/risk-badge';
+import { ACCENT } from '@/lib/tokens';
 
 export interface KpiRowProps {
   readonly maxPain: number | null;
@@ -14,23 +15,23 @@ const TIERS: RiskTier[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 
 export function KpiRow({ maxPain, maxFragility, avgConfidence, riskCounts }: KpiRowProps) {
   return (
-    <div className="grid grid-cols-4 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
       <KpiCard
         value={maxPain?.toFixed(1) ?? '—'}
         label="Max Pain"
-        accentColor="#ff4757"
+        accentColor={ACCENT.danger}
       />
 
       <KpiCard
         value={maxFragility?.toFixed(1) ?? '—'}
         label="Max Fragility"
-        accentColor="#ff7f50"
+        accentColor={ACCENT.warning}
       />
 
       <KpiCard
         value={`${(avgConfidence * 100).toFixed(0)}%`}
         label="Avg Confidence"
-        accentColor="#ffc048"
+        accentColor={ACCENT.caution}
         indicator={
           avgConfidence < 0.55 ? (
             <span
@@ -44,7 +45,7 @@ export function KpiRow({ maxPain, maxFragility, avgConfidence, riskCounts }: Kpi
       <KpiCard
         value=""
         label="Risk Tiers"
-        accentColor="#7ec8e3"
+        accentColor={ACCENT.info}
         indicator={
           <div className="flex items-center gap-1.5">
             {TIERS.map(tier => {
