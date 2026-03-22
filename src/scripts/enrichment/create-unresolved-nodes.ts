@@ -10,20 +10,12 @@
  * 
  * Usage: npx tsx create-unresolved-nodes.ts
  */
-import neo4j from 'neo4j-driver';
+import neo4j, { type Driver } from 'neo4j-driver';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const driver = neo4j.driver(
-  process.env.NEO4J_URI || 'bolt://localhost:7687',
-  neo4j.auth.basic(
-    process.env.NEO4J_USER || 'neo4j',
-    process.env.NEO4J_PASSWORD || 'codegraph'
-  )
-);
-
-async function run(label: string, cypher: string) {
+export async function runCypher(driver: Driver, label: string, cypher: string): Promise<number> {
   const session = driver.session();
   try {
     const result = await session.run(cypher);
@@ -39,18 +31,23 @@ async function run(label: string, cypher: string) {
   }
 }
 
-async function main() {
+export async function createUnresolvedNodes(driver: Driver): Promise<{
+  cleared: number;
+  created: number;
+  localFailures: number;
+  assetImports: number;
+}> {
   console.log('\n🔍 Creating UnresolvedReference nodes\n');
 
   // Clear existing unresolved nodes
-  await run('Cleared old UnresolvedReference nodes', `
+  const cleared = await runCypher(driver, 'Cleared old UnresolvedReference nodes', `
     MATCH (u:UnresolvedReference) DETACH DELETE u
     RETURN count(u) AS count
   `);
 
   // 1. Unresolved imports — Import nodes without RESOLVES_TO
   console.log('\n1. Unresolved imports (Import → no RESOLVES_TO):');
-  await run('Created UnresolvedReference nodes for imports', `
+  const created = await runCypher(driver, 'Created UnresolvedReference nodes for imports', `
     MATCH (imp:Import)
     WHERE NOT (imp)-[:RESOLVES_TO]->()
     OPTIONAL MATCH (sf:SourceFile)-[:CONTAINS]->(imp)
@@ -79,6 +76,8 @@ async function main() {
 
   // 2. Classify: external packages vs local resolution failures  
   const session = driver.session();
+  let localFailures = 0;
+  let assetImports = 0;
   try {
     console.log('\n2. Classifying unresolved imports:');
     const classified = await session.run(`
@@ -87,8 +86,11 @@ async function main() {
       ORDER BY count DESC
     `);
     for (const r of classified.records) {
-      const icon = r.get('reason') === 'external-package' ? '📦' : '⚠️';
-      console.log(`  ${icon} ${r.get('reason')}: ${r.get('count')}`);
+      const reason = r.get('reason') as string;
+      const cnt = Number(r.get('count'));
+      const icon = reason === 'external-package' ? '📦' : '⚠️';
+      console.log(`  ${icon} ${reason}: ${cnt}`);
+      if (reason === 'asset-import') assetImports = cnt;
     }
 
     // 3. Show the local resolution failures (the real problems)
@@ -99,6 +101,7 @@ async function main() {
       ORDER BY u.file, u.rawText
       LIMIT 20
     `);
+    localFailures = local.records.length;
     if (local.records.length > 0) {
       for (const r of local.records) {
         console.log(`  ⚠️  ${r.get('name')} in ${r.get('file')}`);
@@ -141,23 +144,40 @@ async function main() {
       MATCH (u:UnresolvedReference {reason: 'local-module-not-found'})
       RETURN count(u) AS count
     `);
-    const localFailures = Number(localCount.records[0].get('count'));
-    if (localFailures === 0) {
+    const localCountNum = Number(localCount.records[0].get('count'));
+    if (localCountNum === 0) {
       console.log(`  ✅ All local imports resolved — unresolved are external packages only`);
     } else {
-      console.log(`  ⚠️  ${localFailures} local imports failed to resolve — these are real blind spots`);
+      console.log(`  ⚠️  ${localCountNum} local imports failed to resolve — these are real blind spots`);
     }
 
   } finally {
     await session.close();
   }
 
-  await driver.close();
   console.log('\n✅ UnresolvedReference nodes created!');
   console.log('   Query: MATCH (u:UnresolvedReference) RETURN u.kind, u.reason, u.rawText, u.file');
+
+  return { cleared, created, localFailures, assetImports };
 }
 
-main().catch(err => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+// CLI entry point — only runs when executed directly
+const isDirectRun = process.argv[1]?.endsWith('create-unresolved-nodes.ts') ||
+                    process.argv[1]?.endsWith('create-unresolved-nodes.js');
+
+if (isDirectRun) {
+  const driver = neo4j.driver(
+    process.env.NEO4J_URI || 'bolt://localhost:7687',
+    neo4j.auth.basic(
+      process.env.NEO4J_USER || 'neo4j',
+      process.env.NEO4J_PASSWORD || 'codegraph'
+    )
+  );
+
+  createUnresolvedNodes(driver)
+    .then(() => driver.close())
+    .catch(err => {
+      console.error('Fatal:', err);
+      process.exit(1);
+    });
+}

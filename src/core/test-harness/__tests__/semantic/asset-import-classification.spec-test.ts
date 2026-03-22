@@ -1,27 +1,30 @@
 /**
  * Tests for asset-import classification in create-unresolved-nodes.ts
  *
- * Verifies that CSS/image/font/JSON imports starting with '.' are classified
- * as 'asset-import' instead of 'local-module-not-found'. This prevents false
- * positives in integrity:verify's unresolved local reference count.
+ * Directly imports and calls createUnresolvedNodes() so the test coverage
+ * enrichment step can trace the TESTED_BY edge to the source file.
  *
  * Regression test for: globals.css in ui/src/app/layout.tsx was incorrectly
  * classified as local-module-not-found, causing integrity:verify to fail.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import neo4j, { Driver } from 'neo4j-driver';
+import neo4j, { type Driver } from 'neo4j-driver';
+import { createUnresolvedNodes } from '../../../../scripts/enrichment/create-unresolved-nodes.js';
 
 const PROJECT_ID = 'proj_c0d3e9a1f200';
 
 describe('Asset import classification (create-unresolved-nodes)', () => {
   let driver: Driver;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     driver = neo4j.driver(
       'bolt://localhost:7687',
       neo4j.auth.basic('neo4j', 'codegraph'),
     );
-  });
+
+    // Run the actual function under test
+    await createUnresolvedNodes(driver);
+  }, 45000);
 
   afterAll(async () => {
     await driver.close();
@@ -43,7 +46,7 @@ describe('Asset import classification (create-unresolved-nodes)', () => {
     }
   });
 
-  it('no local-module-not-found for any CSS/SCSS/image/font imports', async () => {
+  it('no local-module-not-found for any asset-type imports', async () => {
     const session = driver.session();
     try {
       const result = await session.run(
@@ -60,7 +63,7 @@ describe('Asset import classification (create-unresolved-nodes)', () => {
             OR u.rawText ENDS WITH '.woff'
             OR u.rawText ENDS WITH '.woff2'
             OR u.rawText ENDS WITH '.json'
-         RETURN u.rawText AS rawText, u.reason AS reason`,
+         RETURN u.rawText AS rawText`,
         { pid: PROJECT_ID },
       );
       expect(result.records).toHaveLength(0);
@@ -84,18 +87,14 @@ describe('Asset import classification (create-unresolved-nodes)', () => {
     }
   });
 
-  it('asset-import nodes exist for known asset extensions', async () => {
-    const session = driver.session();
-    try {
-      const result = await session.run(
-        `MATCH (u:UnresolvedReference {projectId: $pid, reason: 'asset-import'})
-         RETURN count(u) AS cnt`,
-        { pid: PROJECT_ID },
-      );
-      const count = result.records[0].get('cnt').toNumber();
-      expect(count).toBeGreaterThan(0);
-    } finally {
-      await session.close();
-    }
-  });
+  it('createUnresolvedNodes returns structured results with asset count', async () => {
+    const result = await createUnresolvedNodes(driver);
+    expect(result).toHaveProperty('cleared');
+    expect(result).toHaveProperty('created');
+    expect(result).toHaveProperty('localFailures');
+    expect(result).toHaveProperty('assetImports');
+    expect(result.localFailures).toBe(0);
+    expect(result.assetImports).toBeGreaterThan(0);
+    expect(result.created).toBeGreaterThan(0);
+  }, 30000);
 });

@@ -102,7 +102,7 @@ describe('RF-5: Explainability Paths + Evidence Debt', () => {
       for (let i = 0; i < first.length; i++) {
         expect(first[i].hash).toBe(second[i].hash);
       }
-    }, 15_000);
+    });
   });
 
   describe('bounded path-slice policy', () => {
