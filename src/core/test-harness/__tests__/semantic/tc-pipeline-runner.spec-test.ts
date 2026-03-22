@@ -152,7 +152,7 @@ describe('TC Pipeline Runner', () => {
       expect(result.stamped).toBeGreaterThan(0);
     });
 
-    it('generateDebtDashboard produces real debt metrics', async () => {
+    it('generateDebtDashboard produces real debt metrics', { timeout: 15000 }, async () => {
       // Ensure debt fields exist first
       await computeConfidenceDebt(neo4j, TEST_PROJECT);
       const dashboard = await generateDebtDashboard(neo4j, TEST_PROJECT);

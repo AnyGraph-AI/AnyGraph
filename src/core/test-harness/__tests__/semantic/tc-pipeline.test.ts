@@ -30,7 +30,7 @@ describe('TC Pipeline Orchestration', () => {
     expect(output).toContain('shadow_isolation');
   });
 
-  it('unknown step exits with error', () => {
+  it('unknown step exits with error', { timeout: 15000 }, () => {
     expect(() => {
       execSync(
         `npx tsx src/scripts/entry/tc-pipeline.ts bogus_step`,

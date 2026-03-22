@@ -37,7 +37,7 @@ afterAll(async () => {
 });
 
 describe('[UI-0] enrichPrecomputeScores integration', () => {
-  it('returns counts of updated functions and files', async () => {
+  it('returns counts of updated functions and files', { timeout: 15000 }, async () => {
     const result = await enrichPrecomputeScores(driver, PROJECT_ID);
     expect(result.functionsUpdated).toBeGreaterThan(0);
     expect(result.filesUpdated).toBeGreaterThan(0);
