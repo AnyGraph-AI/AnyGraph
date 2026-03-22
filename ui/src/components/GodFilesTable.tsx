@@ -126,97 +126,85 @@ export function GodFilesTable({ data, onRowClick, containerHeight = 400 }: GodFi
   const totalSize = virtualizer.getTotalSize();
 
   return (
-    <div className="overflow-x-auto">
-      {/* Visual-only header — aria-hidden so screen readers use the sr-only thead in the body table */}
-      <table aria-hidden="true" className="w-full text-sm" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
-        <thead>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <tr key={headerGroup.id} className="text-zinc-400 border-b border-zinc-800">
-              {headerGroup.headers.map((header) => (
-                <th
-                  key={header.id}
-                  className={`py-2 px-2 cursor-pointer select-none hover:text-zinc-200 ${
-                    (header.column.columnDef.meta as { align?: string })?.align === 'right'
-                      ? 'text-right'
-                      : 'text-left'
-                  }`}
-                  onClick={header.column.getToggleSortingHandler()}
-                >
-                  {flexRender(header.column.columnDef.header, header.getContext())}
-                  {{ asc: ' ↑', desc: ' ↓' }[header.column.getIsSorted() as string] ?? ''}
-                </th>
-              ))}
-            </tr>
+    <div className="overflow-x-auto" role="table" aria-label="Top files ranking">
+      {/* Sticky grid header with sort controls */}
+      {table.getHeaderGroups().map((headerGroup) => (
+        <div
+          key={headerGroup.id}
+          role="row"
+          className="grid text-zinc-400 border-b border-zinc-800 text-sm py-2"
+          style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr' }}
+        >
+          {headerGroup.headers.map((header) => (
+            <div
+              key={header.id}
+              role="columnheader"
+              className={`px-2 cursor-pointer select-none hover:text-zinc-200 ${
+                (header.column.columnDef.meta as { align?: string })?.align === 'right'
+                  ? 'text-right'
+                  : 'text-left'
+              }`}
+              onClick={header.column.getToggleSortingHandler()}
+            >
+              {flexRender(header.column.columnDef.header, header.getContext())}
+              {{ asc: ' ↑', desc: ' ↓' }[header.column.getIsSorted() as string] ?? ''}
+            </div>
           ))}
-        </thead>
-      </table>
+        </div>
+      ))}
+      {/* Virtualized rows */}
       <div
         ref={parentRef}
         className="overflow-y-auto"
         style={{ height: `${containerHeight}px` }}
       >
         <div style={{ height: `${totalSize}px`, position: 'relative' }}>
-          <table className="w-full text-sm" aria-label="God files ranking">
-            {/* sr-only thead so screen readers can associate headers with data cells */}
-            <thead className="sr-only">
-              {table.getHeaderGroups().map((headerGroup) => (
-                <tr key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <th key={header.id} scope="col">
-                      {flexRender(header.column.columnDef.header, header.getContext())}
-                    </th>
-                  ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody>
-              {virtualItems.map((virtualRow) => {
-                const row = rows[virtualRow.index];
-                return (
-                  <tr
-                    key={row.id}
-                    data-index={virtualRow.index}
-                    ref={virtualizer.measureElement}
-                    className={`border-b border-zinc-800/50 hover:bg-zinc-800/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500 ${
-                      onRowClick ? 'cursor-pointer' : ''
+          {virtualItems.map((virtualRow) => {
+            const row = rows[virtualRow.index];
+            return (
+              <div
+                key={row.id}
+                data-index={virtualRow.index}
+                ref={virtualizer.measureElement}
+                role="row"
+                className={`grid items-center text-sm border-b border-zinc-800/50 hover:bg-zinc-800/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500 ${
+                  onRowClick ? 'cursor-pointer' : ''
+                }`}
+                style={{
+                  gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 1fr',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start}px)`,
+                  borderLeft: `3px solid ${confidenceColor(row.original.confidenceScore)}`,
+                }}
+                tabIndex={onRowClick ? 0 : undefined}
+                aria-label={onRowClick ? `View details for ${row.original.name}` : undefined}
+                onClick={() => onRowClick?.(row.original)}
+                onKeyDown={(e) => {
+                  if (onRowClick && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault();
+                    onRowClick(row.original);
+                  }
+                }}
+              >
+                {row.getVisibleCells().map((cell) => (
+                  <div
+                    key={cell.id}
+                    role="cell"
+                    className={`py-2 px-2 text-zinc-300 ${
+                      (cell.column.columnDef.meta as { align?: string })?.align === 'right'
+                        ? 'text-right'
+                        : ''
                     }`}
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      transform: `translateY(${virtualRow.start}px)`,
-                    }}
-                    tabIndex={onRowClick ? 0 : undefined}
-                    aria-label={onRowClick ? `View details for ${row.original.name}` : undefined}
-                    onClick={() => onRowClick?.(row.original)}
-                    onKeyDown={(e) => {
-                      if (onRowClick && (e.key === 'Enter' || e.key === ' ')) {
-                        e.preventDefault();
-                        onRowClick(row.original);
-                      }
-                    }}
                   >
-                    {row.getVisibleCells().map((cell, idx) => (
-                      <td
-                        key={cell.id}
-                        className={`py-2 px-2 text-zinc-300 ${
-                          (cell.column.columnDef.meta as { align?: string })?.align === 'right'
-                            ? 'text-right'
-                            : ''
-                        }`}
-                        style={idx === 0 ? {
-                          borderLeft: `3px solid ${confidenceColor(row.original.confidenceScore)}`,
-                        } : undefined}
-                      >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

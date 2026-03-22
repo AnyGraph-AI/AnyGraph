@@ -110,84 +110,73 @@ function FragilityTableInner({
           </span>
         )}
       </p>
-      <div className="overflow-x-auto">
-        {/* Visual-only header — aria-hidden so screen readers use the sr-only thead in the body table */}
-        <table aria-hidden="true" className="w-full text-sm" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
-          <thead>
-            <tr className="text-zinc-400 border-b border-zinc-800">
-              <th className="text-left py-2 pr-4">File</th>
-              <th className="text-right py-2 px-2">Fragility{dampened ? ' (dampened)' : ''}</th>
-              <th className="text-right py-2 px-2">Pain</th>
-              <th className="text-right py-2 px-2">Confidence</th>
-              <th className="text-right py-2 px-2">Centrality</th>
-            </tr>
-          </thead>
-        </table>
+      <div className="overflow-x-auto" role="table" aria-label="Fragility ranking">
+        {/* Sticky grid header */}
+        <div
+          role="row"
+          className="grid text-zinc-400 border-b border-zinc-800 text-sm py-2"
+          style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr' }}
+        >
+          <div role="columnheader" className="px-2 text-left">File</div>
+          <div role="columnheader" className="px-2 text-right">Fragility{dampened ? ' (dampened)' : ''}</div>
+          <div role="columnheader" className="px-2 text-right">Pain</div>
+          <div role="columnheader" className="px-2 text-right">Confidence</div>
+          <div role="columnheader" className="px-2 text-right">Centrality</div>
+        </div>
+        {/* Virtualized rows */}
         <div
           ref={parentRef}
           className="overflow-y-auto"
           style={{ height: `${containerHeight}px` }}
         >
           <div style={{ height: `${totalSize}px`, position: 'relative' }}>
-            <table className="w-full text-sm" aria-label="Fragility ranking">
-              {/* sr-only thead so screen readers can associate headers with data cells */}
-              <thead className="sr-only">
-                <tr>
-                  <th scope="col">File</th>
-                  <th scope="col">Fragility{dampened ? ' (dampened)' : ''}</th>
-                  <th scope="col">Pain</th>
-                  <th scope="col">Confidence</th>
-                  <th scope="col">Centrality</th>
-                </tr>
-              </thead>
-              <tbody>
-                {virtualItems.map((virtualRow) => {
-                  const row = rows[virtualRow.index];
-                  return (
-                    <tr
-                      key={row.name + virtualRow.index}
-                      data-index={virtualRow.index}
-                      ref={virtualizer.measureElement}
-                      className={`border-b border-zinc-800/50 hover:bg-zinc-800/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500 ${onRowClick ? 'cursor-pointer' : ''}`}
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        transform: `translateY(${virtualRow.start}px)`,
-                      }}
-                      tabIndex={onRowClick ? 0 : undefined}
-                      aria-label={onRowClick ? `View details for ${row.name}` : undefined}
-                      onClick={() => onRowClick?.(row)}
-                      onKeyDown={(e) => {
-                        if (onRowClick && (e.key === 'Enter' || e.key === ' ')) {
-                          e.preventDefault();
-                          onRowClick(row);
-                        }
-                      }}
-                    >
-                      <td className="py-2 pr-4 font-mono text-zinc-200 truncate max-w-[200px]">
-                        {row.name}
-                      </td>
-                      <td className={`text-right py-2 px-2 font-semibold ${getFragilityColor(row.displayFragility)}`}>
-                        {row.displayFragility.toFixed(2)}
-                      </td>
-                      <td className="text-right py-2 px-2 text-zinc-300">
-                        {row.adjustedPain.toFixed(2)}
-                      </td>
-                      <td className="text-right py-2 px-2">
-                        <span className={row.confidenceScore >= 0.5 ? 'text-emerald-400' : 'text-red-400'}>
-                          {(row.confidenceScore * 100).toFixed(0)}%
-                        </span>
-                      </td>
-                      <td className="text-right py-2 px-2 text-zinc-300">
-                        {row.centrality.toFixed(3)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            {virtualItems.map((virtualRow) => {
+              const row = rows[virtualRow.index];
+              return (
+                <div
+                  key={row.name + virtualRow.index}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  role="row"
+                  className={`grid items-center text-sm border-b border-zinc-800/50 hover:bg-zinc-800/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500 ${onRowClick ? 'cursor-pointer' : ''}`}
+                  style={{
+                    gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  aria-label={onRowClick ? `View details for ${row.name}` : undefined}
+                  onClick={() => onRowClick?.(row)}
+                  onKeyDown={(e) => {
+                    if (onRowClick && (e.key === 'Enter' || e.key === ' ')) {
+                      e.preventDefault();
+                      onRowClick(row);
+                    }
+                  }}
+                >
+                  <div role="cell" className="py-2 px-2 font-mono text-zinc-200 truncate">
+                    {row.name}
+                  </div>
+                  <div role="cell" className={`py-2 px-2 text-right font-semibold ${getFragilityColor(row.displayFragility)}`}>
+                    {row.displayFragility.toFixed(2)}
+                  </div>
+                  <div role="cell" className="py-2 px-2 text-right text-zinc-300">
+                    {row.adjustedPain.toFixed(2)}
+                  </div>
+                  <div role="cell" className="py-2 px-2 text-right">
+                    <span className={row.confidenceScore >= 0.5 ? 'text-emerald-400' : 'text-red-400'}>
+                      {(row.confidenceScore * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  <div role="cell" className="py-2 px-2 text-right text-zinc-300">
+                    {row.centrality.toFixed(3)}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
