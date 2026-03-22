@@ -125,7 +125,45 @@ export function extractCommanderRegistrations(project: Project): EntrypointData[
       if (args.length < 1) return;
 
       const handlerArg = args[0];
-      const handlerName = Node.isIdentifier(handlerArg) ? handlerArg.getText() : undefined;
+      let handlerName: string | undefined = Node.isIdentifier(handlerArg) ? handlerArg.getText() : undefined;
+      let handlerFilePath: string | undefined;
+
+      // When handler is an anonymous arrow function, inspect its body for:
+      // 1. Dynamic import: await import('../path/module.js') -> resolve to target file's exported fn
+      // 2. Direct function call: await runSomething(args) -> extract function name
+      if (!handlerName && Node.isArrowFunction(handlerArg)) {
+        const body = handlerArg.getBody();
+        const calls = body.getDescendantsOfKind(SyntaxKind.CallExpression);
+
+        for (const call of calls) {
+          const callExpr = call.getExpression();
+
+          // Pattern 1: dynamic import -> import('../path/to/module.js')
+          if (callExpr.getKind() === SyntaxKind.ImportKeyword) {
+            const importArgs = call.getArguments();
+            if (importArgs.length > 0) {
+              const specifier = importArgs[0].getText().replace(/['"]/g, '');
+              const resolvedPath = resolve(dirname(filePath), specifier).replace(/\.js$/, '.ts');
+              handlerFilePath = resolvedPath;
+
+              // Attempt to find the primary exported function in the target file
+              const targetFile = project.getSourceFile(resolvedPath);
+              if (targetFile) {
+                const exportedFns = targetFile.getFunctions().filter(f => f.isExported() && f.getName());
+                handlerName = exportedFns[0]?.getName() ?? 'main';
+              } else {
+                handlerName = 'main';
+              }
+            }
+            break; // dynamic import found, stop scanning
+          }
+
+          // Pattern 2: direct function call -> runRegisterProject(opts.id, opts.name)
+          if (Node.isIdentifier(callExpr) && !handlerName) {
+            handlerName = callExpr.getText();
+          }
+        }
+      }
 
       // Walk up the chain to find .command('name')
       let current: Node = expr.getExpression();
@@ -157,6 +195,7 @@ export function extractCommanderRegistrations(project: Project): EntrypointData[
           filePath,
           startLine: node.getStartLineNumber(),
           handlerName,
+          handlerFilePath,
         });
       }
     });
@@ -366,6 +405,7 @@ export async function enrichEntrypointEdges(driver: Driver): Promise<{
 
       // Step 3b: For entries with named handlers that weren't matched by line range,
       // try matching by handler name (Commander.js uses named references at module scope)
+      let namedCount = 0;
       if (ep.handlerName && dispatchedByLine === 0) {
         const namedResult = await session.run(
           `MATCH (e:Entrypoint {id: $epId})
@@ -392,7 +432,41 @@ export async function enrichEntrypointEdges(driver: Driver): Promise<{
             kind: ep.kind,
           },
         );
-        dispatchCount += toNum(namedResult.records[0]?.get('cnt'));
+        namedCount = toNum(namedResult.records[0]?.get('cnt'));
+        dispatchCount += namedCount;
+      }
+
+      // Step 3c: For dynamic-import handlers, fall back to matching by the resolved
+      // target file path when the handler name lookup (Step 3b) found nothing.
+      // Picks the first exported function in the target file by start line.
+      if (ep.handlerFilePath && dispatchedByLine === 0 && namedCount === 0) {
+        const filePathResult = await session.run(
+          `MATCH (e:Entrypoint {id: $epId})
+           MATCH (fn:CodeNode {projectId: $projectId, filePath: $handlerFilePath})
+           WHERE (fn:Function OR fn:Variable OR fn:Method)
+           WITH e, fn
+           ORDER BY fn.startLine ASC
+           LIMIT 1
+           MERGE (e)-[r:DISPATCHES_TO]->(fn)
+           ON CREATE SET
+             r.derived = true,
+             r.source = 'entrypoint-enrichment',
+             r.projectId = $projectId,
+             r.framework = $framework,
+             r.kind = $kind,
+             r.matchedBy = 'handlerFilePath'
+           ON MATCH SET
+             r.projectId = $projectId
+           RETURN count(r) AS cnt`,
+          {
+            epId,
+            projectId,
+            handlerFilePath: ep.handlerFilePath,
+            framework: ep.framework,
+            kind: ep.kind,
+          },
+        );
+        dispatchCount += toNum(filePathResult.records[0]?.get('cnt'));
       }
     }
 

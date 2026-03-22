@@ -9,7 +9,7 @@ import { Project } from 'ts-morph';
 import { createEphemeralGraph, type EphemeralGraphRuntime } from '../../ephemeral-graph.js';
 import { Neo4jService } from '../../../../storage/neo4j/neo4j.service.js';
 import neo4jDriver from 'neo4j-driver';
-import { enrichEntrypointEdges, extractWebFrameworkRegistrations } from '../../../../scripts/enrichment/create-entrypoint-edges.js';
+import { enrichEntrypointEdges, extractCommanderRegistrations, extractWebFrameworkRegistrations } from '../../../../scripts/enrichment/create-entrypoint-edges.js';
 
 describe('[GC-7] Entrypoint Dispatch Edges', () => {
   describe('Integration — live graph', () => {
@@ -223,6 +223,82 @@ describe('[GC-7] Entrypoint Dispatch Edges', () => {
       expect(names).toContain('route:GET /users/:id');
       expect(names).toContain('route:POST /users/');
       expect(rows.some(r => r.framework === 'nest')).toBe(true);
+    });
+  });
+
+  describe('[GC-7] Commander dynamic handler extraction', () => {
+    it('resolves dynamic import in action handler to exported function name', () => {
+      const project = new Project({ useInMemoryFileSystem: true });
+      // Target file with an exported function
+      project.createSourceFile('/src/scripts/entry/run-probes.ts', `
+        export async function runProbes() { return []; }
+      `);
+      // CLI file with dynamic import pattern
+      project.createSourceFile('/src/cli/cli.ts', `
+        program
+          .command('probe')
+          .description('Run probes')
+          .action(async () => {
+            await import('../scripts/entry/run-probes.js');
+          });
+      `);
+
+      const rows = extractCommanderRegistrations(project);
+      const probe = rows.find(r => r.name === 'command:probe');
+      expect(probe).toBeDefined();
+      expect(probe?.handlerName).toBe('runProbes');
+      expect(probe?.handlerFilePath).toContain('run-probes.ts');
+    });
+
+    it('falls back to "main" when dynamic import target file has no exported functions', () => {
+      const project = new Project({ useInMemoryFileSystem: true });
+      // CLI file with dynamic import to an unknown/unparsed module
+      project.createSourceFile('/src/cli/cli.ts', `
+        program
+          .command('diagnose')
+          .action(async () => {
+            await import('../scripts/entry/self-diagnosis.js');
+          });
+      `);
+
+      const rows = extractCommanderRegistrations(project);
+      const cmd = rows.find(r => r.name === 'command:diagnose');
+      expect(cmd).toBeDefined();
+      expect(cmd?.handlerName).toBe('main');
+      expect(cmd?.handlerFilePath).toContain('self-diagnosis.ts');
+    });
+
+    it('extracts direct function call name from anonymous action handler', () => {
+      const project = new Project({ useInMemoryFileSystem: true });
+      project.createSourceFile('/src/cli/cli.ts', `
+        program
+          .command('register-project')
+          .requiredOption('--id <id>', 'Project ID')
+          .requiredOption('--name <name>', 'Name')
+          .action(async (opts) => {
+            await runRegisterProject(opts.id, opts.name);
+          });
+      `);
+
+      const rows = extractCommanderRegistrations(project);
+      const cmd = rows.find(r => r.name === 'command:register-project');
+      expect(cmd).toBeDefined();
+      expect(cmd?.handlerName).toBe('runRegisterProject');
+    });
+
+    it('preserves named handler identifier unchanged', () => {
+      const project = new Project({ useInMemoryFileSystem: true });
+      project.createSourceFile('/src/cli/cli.ts', `
+        program
+          .command('serve')
+          .action(runServe);
+      `);
+
+      const rows = extractCommanderRegistrations(project);
+      const cmd = rows.find(r => r.name === 'command:serve');
+      expect(cmd).toBeDefined();
+      expect(cmd?.handlerName).toBe('runServe');
+      expect(cmd?.handlerFilePath).toBeUndefined();
     });
   });
 });
