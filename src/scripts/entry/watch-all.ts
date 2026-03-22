@@ -31,6 +31,66 @@ dotenv.config();
 const NEO4J_URI = process.env.NEO4J_URI || 'bolt://localhost:7687';
 const NEO4J_USER = process.env.NEO4J_USER || 'neo4j';
 const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD || 'codegraph';
+
+interface Neo4jConfig {
+  uri: string;
+  user: string;
+  password: string;
+}
+
+/**
+ * Re-link HAS_CODE_EVIDENCE edges for all plan projects after a code change.
+ *
+ * When code files change, the incremental parser updates the code graph but
+ * plan evidence links (HAS_CODE_EVIDENCE) are not refreshed. This function:
+ *   1. Guards: skips if no PlanProject nodes exist in the graph.
+ *   2. Re-parses plan markdown files (to get fresh unresolvedRefs).
+ *   3. Calls enrichCrossDomain() to re-resolve refs against the updated code graph.
+ *
+ * This is deliberately lightweight — it does NOT re-ingest plan nodes (those
+ * haven't changed), only re-resolves cross-domain evidence edges.
+ */
+export async function reEnrichPlanEvidence(
+  codeProjectId: string,
+  plansRoot: string,
+  neo4jConfig: Neo4jConfig = { uri: NEO4J_URI, user: NEO4J_USER, password: NEO4J_PASSWORD },
+): Promise<{ skipped: boolean; evidenceEdges: number }> {
+  // Guard: check whether any plan projects exist before re-parsing
+  const driver = neo4j.driver(neo4jConfig.uri, neo4j.auth.basic(neo4jConfig.user, neo4jConfig.password));
+  const session = driver.session();
+  let hasPlanProjects = false;
+  try {
+    const result = await session.run('MATCH (pp:PlanProject) RETURN count(pp) AS cnt LIMIT 1');
+    const cnt = result.records[0]?.get('cnt');
+    hasPlanProjects = (typeof cnt?.toNumber === 'function' ? cnt.toNumber() : Number(cnt)) > 0;
+  } finally {
+    await session.close();
+    await driver.close();
+  }
+
+  if (!hasPlanProjects) {
+    return { skipped: true, evidenceEdges: 0 };
+  }
+
+  if (!existsSync(plansRoot)) {
+    return { skipped: true, evidenceEdges: 0 };
+  }
+
+  const time = new Date().toLocaleTimeString();
+  console.log(`[${time}] 🔗 ${codeProjectId}: Re-linking plan evidence after code change...`);
+
+  const results = await parsePlanDirectory(plansRoot);
+  const enrichResult = await enrichCrossDomain(results, neo4jConfig.uri, neo4jConfig.user, neo4jConfig.password);
+
+  if (enrichResult.evidenceEdges > 0 || enrichResult.driftDetected.length > 0) {
+    console.log(
+      `[${time}] 🔗 ${codeProjectId}: Plan evidence re-linked: ${enrichResult.evidenceEdges} edges` +
+        (enrichResult.driftDetected.length > 0 ? `, ${enrichResult.driftDetected.length} drift items` : ''),
+    );
+  }
+
+  return { skipped: false, evidenceEdges: enrichResult.evidenceEdges };
+}
 const RESCAN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface ProjectInfo {
@@ -381,7 +441,13 @@ async function main() {
           `[${time}] ✅ ${pid}: Graph updated: ${data.data?.nodesUpdated} nodes, ${data.data?.edgesUpdated} edges (${data.data?.elapsedMs}ms)`,
         );
         // Structural enrichment: POSSIBLE_CALL, state edges, virtual dispatch, unresolved nodes
-        runPostParseEnrichment(pid).catch(err => {
+        runPostParseEnrichment(pid).then(() => {
+          // Re-link plan evidence: if any task backtick-refs a function that was just
+          // created/renamed, we need to rebuild HAS_CODE_EVIDENCE edges now.
+          reEnrichPlanEvidence(pid, PLANS_ROOT).catch(err => {
+            if (process.env.GTH_DEBUG) console.error(`[code-watcher] plan evidence re-link error: ${err}`);
+          });
+        }).catch(err => {
           if (process.env.GTH_DEBUG) console.error(`[code-watcher] enrichment error: ${err}`);
         });
         // TC-2: Scoped temporal recompute after code change
@@ -577,7 +643,12 @@ async function main() {
   await new Promise(() => {});
 }
 
-main().catch((err) => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+// Only run main() when executed directly (not when imported by tests or other modules)
+import { fileURLToPath } from 'url';
+const _isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (_isMain) {
+  main().catch((err) => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}
