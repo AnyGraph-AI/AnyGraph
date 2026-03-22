@@ -60,6 +60,7 @@ async function main() {
       reason: CASE
         WHEN imp.name CONTAINS '/dist/' THEN 'build-artifact-reference'
         WHEN imp.name STARTS WITH '.' AND imp.name ENDS WITH '.js' THEN 'local-js-specifier'
+        WHEN imp.name STARTS WITH '.' AND (imp.name ENDS WITH '.css' OR imp.name ENDS WITH '.scss' OR imp.name ENDS WITH '.sass' OR imp.name ENDS WITH '.less' OR imp.name ENDS WITH '.svg' OR imp.name ENDS WITH '.png' OR imp.name ENDS WITH '.jpg' OR imp.name ENDS WITH '.gif' OR imp.name ENDS WITH '.webp' OR imp.name ENDS WITH '.woff' OR imp.name ENDS WITH '.woff2' OR imp.name ENDS WITH '.json') THEN 'asset-import'
         WHEN imp.name STARTS WITH '.' THEN 'local-module-not-found'
         ELSE 'external-package'
       END,
