@@ -150,7 +150,12 @@ export function extractCommanderRegistrations(project: Project): EntrypointData[
               const targetFile = project.getSourceFile(resolvedPath);
               if (targetFile) {
                 const exportedFns = targetFile.getFunctions().filter(f => f.isExported() && f.getName());
-                handlerName = exportedFns[0]?.getName() ?? 'main';
+                // Prefer main(), then the largest exported function (primary entry, not helpers)
+                const mainFn = exportedFns.find(f => f.getName() === 'main');
+                const largestFn = exportedFns.sort((a, b) =>
+                  (b.getEndLineNumber() - b.getStartLineNumber()) - (a.getEndLineNumber() - a.getStartLineNumber())
+                )[0];
+                handlerName = mainFn?.getName() ?? largestFn?.getName() ?? 'main';
               } else {
                 handlerName = 'main';
               }
@@ -404,9 +409,11 @@ export async function enrichEntrypointEdges(driver: Driver): Promise<{
       dispatchCount += dispatchedByLine;
 
       // Step 3b: For entries with named handlers that weren't matched by line range,
-      // try matching by handler name (Commander.js uses named references at module scope)
+      // try matching by handler name (Commander.js uses named references at module scope).
+      // Skip if handlerFilePath is set — Step 3c handles file-scoped matching to avoid
+      // matching a common name like 'main' to the wrong file.
       let namedCount = 0;
-      if (ep.handlerName && dispatchedByLine === 0) {
+      if (ep.handlerName && !ep.handlerFilePath && dispatchedByLine === 0) {
         const namedResult = await session.run(
           `MATCH (e:Entrypoint {id: $epId})
            MATCH (fn:CodeNode {projectId: $projectId})
@@ -438,14 +445,16 @@ export async function enrichEntrypointEdges(driver: Driver): Promise<{
 
       // Step 3c: For dynamic-import handlers, fall back to matching by the resolved
       // target file path when the handler name lookup (Step 3b) found nothing.
-      // Picks the first exported function in the target file by start line.
+      // Picks the largest function in the target file (by line span) — the primary
+      // entry function, not a small utility helper. Falls back to main() if present.
       if (ep.handlerFilePath && dispatchedByLine === 0 && namedCount === 0) {
         const filePathResult = await session.run(
           `MATCH (e:Entrypoint {id: $epId})
            MATCH (fn:CodeNode {projectId: $projectId, filePath: $handlerFilePath})
            WHERE (fn:Function OR fn:Variable OR fn:Method)
            WITH e, fn
-           ORDER BY fn.startLine ASC
+           ORDER BY CASE WHEN fn.name = 'main' THEN 0 ELSE 1 END ASC,
+                    (fn.endLine - fn.startLine) DESC
            LIMIT 1
            MERGE (e)-[r:DISPATCHES_TO]->(fn)
            ON CREATE SET
