@@ -22,12 +22,19 @@ async function main(): Promise<void> {
     );
   }
 
-  const result = await enrichCrossDomain(
+  const ENRICHMENT_TIMEOUT_MS = parseInt(process.env.PLAN_ENRICH_TIMEOUT_MS ?? '600000', 10);
+  const enrichPromise = enrichCrossDomain(
     parsed,
     process.env.NEO4J_URI ?? 'bolt://localhost:7687',
     process.env.NEO4J_USER ?? 'neo4j',
     process.env.NEO4J_PASSWORD ?? 'codegraph',
   );
+
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`enrichCrossDomain timed out after ${ENRICHMENT_TIMEOUT_MS}ms`)), ENRICHMENT_TIMEOUT_MS),
+  );
+
+  const result = await Promise.race([enrichPromise, timeoutPromise]);
 
   console.log(
     JSON.stringify({
@@ -42,7 +49,9 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((error) => {
+main().then(() => {
+  process.exit(0);
+}).catch((error) => {
   console.error(
     JSON.stringify({
       ok: false,

@@ -875,7 +875,11 @@ export async function enrichCrossDomain(
   try {
     // Collect all unresolved refs
     const allRefs = parsedPlans.flatMap((p) => p.unresolvedRefs);
+    const refsByType: Record<string, number> = {};
+    for (const r of allRefs) { refsByType[r.refType] = (refsByType[r.refType] ?? 0) + 1; }
+    console.error(`[enrichCrossDomain] ${allRefs.length} refs to resolve: ${JSON.stringify(refsByType)}`);
 
+    console.error('[enrichCrossDomain] Phase 0: project mapping edges');
     // Phase 0: establish explicit plan↔code project mapping edges
     {
       const session = driver.session();
@@ -897,6 +901,7 @@ export async function enrichCrossDomain(
       }
     }
 
+    console.error('[enrichCrossDomain] Phase 1: resolve refs and create evidence edges');
     // Phase 1: Resolve refs and create evidence edges
     {
       const session = driver.session();
@@ -923,7 +928,10 @@ export async function enrichCrossDomain(
           );
         }
 
+        let refIdx = 0;
         for (const ref of allRefs) {
+          refIdx++;
+          if (refIdx % 500 === 0) console.error(`[enrichCrossDomain] Phase 1 progress: ${refIdx}/${allRefs.length} (type=${ref.refType})`);
           if (ref.refType === 'depends_on' || ref.refType === 'blocks') {
             const sourceProjectId = ref.taskId.split(':')[0];
             const relType = ref.refType === 'depends_on' ? PlanEdgeType.DEPENDS_ON : PlanEdgeType.BLOCKS;
@@ -1008,19 +1016,17 @@ export async function enrichCrossDomain(
             const sourcePlanProjectId = ref.taskId.split(':')[0];
             const targetCodeProjectId = planToCodeProjectMap[sourcePlanProjectId] ?? null;
             const result = await session.run(
-              `MATCH (sf)
-               WHERE (
-                 sf.filePath ENDS WITH $refValue
-                 OR sf.filePath ENDS WITH $filename
-                 OR sf.name ENDS WITH $filename
-               )
-               AND (
-                 sf:SourceFile
-                 OR sf:TestFile
-                 OR sf.coreType IN ['SourceFile', 'TestFile']
-                 OR sf.semanticType IN ['source-file', 'module', 'test-file']
-               )
-               AND ($targetCodeProjectId IS NULL OR sf.projectId = $targetCodeProjectId)
+              `CALL {
+                 MATCH (sf:SourceFile)
+                 WHERE (sf.filePath ENDS WITH $refValue OR sf.filePath ENDS WITH $filename OR sf.name ENDS WITH $filename)
+                   AND ($targetCodeProjectId IS NULL OR sf.projectId = $targetCodeProjectId)
+                 RETURN sf
+                 UNION
+                 MATCH (sf:TestFile)
+                 WHERE (sf.filePath ENDS WITH $refValue OR sf.filePath ENDS WITH $filename OR sf.name ENDS WITH $filename)
+                   AND ($targetCodeProjectId IS NULL OR sf.projectId = $targetCodeProjectId)
+                 RETURN sf
+               }
                RETURN sf.id AS id, sf.name AS name, sf.filePath AS filePath, sf.projectId AS projectId
                LIMIT 5`,
               { filename, refValue: ref.refValue, targetCodeProjectId },
@@ -1048,16 +1054,11 @@ export async function enrichCrossDomain(
 
               // Also link explicit TestFile nodes for the same path when present
               const testFileResult = await session.run(
-                `MATCH (tf)
+                `MATCH (tf:TestFile)
                  WHERE (
                    tf.filePath ENDS WITH $refValue
                    OR tf.filePath ENDS WITH $filename
                    OR tf.name ENDS WITH $filename
-                 )
-                 AND (
-                   tf:TestFile
-                   OR tf.coreType = 'TestFile'
-                   OR tf.semanticType = 'test-file'
                  )
                  AND ($targetCodeProjectId IS NULL OR tf.projectId = $targetCodeProjectId)
                  RETURN tf.filePath AS filePath, tf.name AS name, tf.projectId AS projectId
@@ -1070,14 +1071,13 @@ export async function enrichCrossDomain(
                 const tfName = record.get('name');
                 const tfProjectId = record.get('projectId');
                 await session.run(
-                  `MATCH (t {id: $taskId})
-                   MATCH (tf)
+                  `MATCH (t:CodeNode {id: $taskId})
+                   MATCH (tf:TestFile)
                    WHERE coalesce(tf.projectId, '') = coalesce($tfProjectId, '')
                      AND (
                        ($tfFilePath IS NOT NULL AND tf.filePath = $tfFilePath)
                        OR ($tfFilePath IS NULL AND tf.name = $tfName)
                      )
-                     AND (tf:TestFile OR tf.coreType = 'TestFile' OR tf.semanticType = 'test-file')
                    MERGE (t)-[r:HAS_CODE_EVIDENCE]->(tf)
                    SET r.refType = 'file_path',
                        r.refValue = $refValue,
@@ -1103,16 +1103,19 @@ export async function enrichCrossDomain(
             const sourcePlanProjectId = ref.taskId.split(':')[0];
             const targetCodeProjectId = planToCodeProjectMap[sourcePlanProjectId] ?? null;
             const result = await session.run(
-              `MATCH (fn)
-               WHERE fn.name = $funcName
-                 AND (
-                   fn:Function
-                   OR fn:Method
-                   OR fn:Variable
-                   OR fn.coreType IN ['FunctionDeclaration', 'MethodDeclaration', 'VariableDeclaration']
-                   OR fn.semanticType IN ['function', 'method', 'variable']
-                 )
-                 AND ($targetCodeProjectId IS NULL OR fn.projectId = $targetCodeProjectId)
+              `CALL {
+                 MATCH (fn:Function)
+                 WHERE fn.name = $funcName AND ($targetCodeProjectId IS NULL OR fn.projectId = $targetCodeProjectId)
+                 RETURN fn
+                 UNION
+                 MATCH (fn:Method)
+                 WHERE fn.name = $funcName AND ($targetCodeProjectId IS NULL OR fn.projectId = $targetCodeProjectId)
+                 RETURN fn
+                 UNION
+                 MATCH (fn:Variable)
+                 WHERE fn.name = $funcName AND ($targetCodeProjectId IS NULL OR fn.projectId = $targetCodeProjectId)
+                 RETURN fn
+               }
                RETURN fn.id AS id, fn.name AS name, fn.projectId AS projectId
                LIMIT 5`,
               { funcName, targetCodeProjectId },
@@ -1211,6 +1214,7 @@ export async function enrichCrossDomain(
       }
     }
 
+    console.error(`[enrichCrossDomain] Phase 1 done: resolved=${resolved}, notFound=${notFound}, evidenceEdges=${evidenceEdges}`);
     // Phase 1a.1: tighten evidence precision for VG-5 invariant tasks.
     // These tasks should link to IR pilot implementation/validation surfaces,
     // not broad incidental files from loose name matches.
@@ -1245,6 +1249,7 @@ export async function enrichCrossDomain(
       }
     }
 
+      console.error('[enrichCrossDomain] Phase 1b: documentation coverage');
       // Phase 1b: Check documentation coverage
     // For each project that has a SKILL.md, AGENTS.md, CLAUDE.md, or README.md,
     // verify the doc mentions key code graph elements
@@ -1360,6 +1365,7 @@ export async function enrichCrossDomain(
       }
     }
 
+    console.error('[enrichCrossDomain] Phase 1c: semantic matching cleanup');
     // Phase 1c: Embedding-based semantic matching (keyword matcher retired)
     // Semantic evidence is now produced by `plan:embedding:match` (refType = semantic_embedding).
     // Here we remove legacy semantic_keyword evidence so semantic rollups stay contract-consistent.
@@ -1381,6 +1387,7 @@ export async function enrichCrossDomain(
       }
     }
 
+    console.error('[enrichCrossDomain] Phase 1d: recompute evidence flags');
     // Phase 1d: Recompute task evidence flags (explicit vs semantic)
     // Only explicit refs (file_path/function) count as completion evidence.
     {
@@ -1405,6 +1412,7 @@ export async function enrichCrossDomain(
       }
     }
 
+    console.error('[enrichCrossDomain] Phase 2: drift detection');
     // Phase 2: Drift detection (separate session)
     {
       const session = driver.session();
