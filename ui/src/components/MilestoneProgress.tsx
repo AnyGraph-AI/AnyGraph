@@ -20,8 +20,8 @@ const PROJECT_COLORS: Record<string, string> = {
 };
 
 function shortName(milestone: string): string {
-  // "Milestone UI-3: Reality Gap..." → "UI-3"
-  const match = milestone.match(/Milestone\s+([A-Z0-9]+-?\d*)/i);
+  // "Milestone UI-3: Reality Gap..." → "UI-3", "Milestone AUD-TC-06: IR..." → "AUD-TC-06"
+  const match = milestone.match(/Milestone\s+([A-Z0-9]+(?:-[A-Z0-9]+)*):/i);
   return match ? match[1] : milestone.slice(0, 20);
 }
 
