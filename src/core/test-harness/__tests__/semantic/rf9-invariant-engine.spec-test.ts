@@ -148,11 +148,14 @@ describe('RF-9: Graph Invariant Engine (Formalized)', () => {
          RETURN fam, avgConf, cnt`,
         { pid: projectId },
       );
-      // done-check is expected to exceed cap (confidence=1.0 by design, project-level gate)
-      // The invariant correctly flags it — that's the point of the check
-      if (rows.length > 0) {
-        const families = rows.map(r => r.fam);
-        expect(families).toContain('done-check');
+      // Tools with confidence > 0.85 are expected violators (e.g., TypeScript=1.0, npm-audit=0.9).
+      // The invariant correctly flags them — that's the point of the check.
+      // Test is violator-agnostic: assert detection works, not which tools are flagged.
+      expect(rows.length).toBeGreaterThan(0);
+      for (const r of rows) {
+        expect(r.avgConf).toBeGreaterThan(0.85);
+        expect(typeof r.fam).toBe('string');
+        expect(r.fam.length).toBeGreaterThan(0);
       }
     });
   });
