@@ -243,7 +243,8 @@ describe('AUD-TC-03-L1b-45: integrity-snapshot-trends', () => {
 
     it('should default window to 10 when no config provided', () => {
       delete process.env.INTEGRITY_TREND_WINDOW;
-      const windowSize = Math.max(1, Number(undefined ?? process.env.INTEGRITY_TREND_WINDOW ?? 10));
+      const windowArg: string | undefined = undefined;
+      const windowSize = Math.max(1, Number(windowArg ?? process.env.INTEGRITY_TREND_WINDOW ?? 10));
       expect(windowSize).toBe(10);
     });
   });

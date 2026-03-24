@@ -84,9 +84,9 @@ describe('AUD-TC-03-L1b-21 | verify-hygiene-platform-parity.ts', () => {
     });
 
     it('present branch protection does not create violation', () => {
-      const branchProtection = true;
+      const branchProtection: boolean = true;
       const violations: Array<{ subtype: string; severity: string; name: string }> = [];
-      if (branchProtection === false) {
+      if ((branchProtection as boolean) === false) {
         violations.push({ subtype: 'missing_branch_protection', severity: 'high', name: 'Branch protection missing for main' });
       }
       expect(violations).toHaveLength(0);
@@ -108,8 +108,8 @@ describe('AUD-TC-03-L1b-21 | verify-hygiene-platform-parity.ts', () => {
     });
 
     it('unavailable API status is recorded but does not create violations', () => {
-      const bpStatus = 403;
-      const branchProtection = bpStatus === 404 ? false : `unavailable:${bpStatus}`;
+      const bpStatus: number = 403;
+      const branchProtection = (bpStatus as number) === 404 ? false : `unavailable:${bpStatus}`;
       const violations: Array<{ subtype: string; severity: string; name: string }> = [];
       if (branchProtection === false) {
         violations.push({ subtype: 'missing_branch_protection', severity: 'high', name: 'Branch protection missing' });
@@ -238,27 +238,34 @@ describe('AUD-TC-03-L1b-21 | verify-hygiene-platform-parity.ts', () => {
   // ─── Behavior 6: Accepts PROJECT_ID/REPO_ROOT from env ───
   describe('Behavior 6: PROJECT_ID, REPO_ROOT, DEFAULT_BRANCH from env', () => {
     it('PROJECT_ID defaults to proj_c0d3e9a1f200', () => {
-      expect(undefined ?? 'proj_c0d3e9a1f200').toBe('proj_c0d3e9a1f200');
+      const envVal: string | undefined = undefined;
+      expect(envVal ?? 'proj_c0d3e9a1f200').toBe('proj_c0d3e9a1f200');
     });
 
     it('REPO_ROOT defaults to /home/jonathan/.openclaw/workspace/codegraph', () => {
-      expect(undefined ?? '/home/jonathan/.openclaw/workspace/codegraph')
+      const envVal: string | undefined = undefined;
+      expect(envVal ?? '/home/jonathan/.openclaw/workspace/codegraph')
         .toBe('/home/jonathan/.openclaw/workspace/codegraph');
     });
 
     it('DEFAULT_BRANCH defaults to main', () => {
-      expect(undefined ?? 'main').toBe('main');
+      const envVal: string | undefined = undefined;
+      expect(envVal ?? 'main').toBe('main');
     });
 
     it('HYGIENE_PLATFORM_PARITY_ENFORCE defaults to false', () => {
-      const enforce = String(undefined ?? 'false').toLowerCase() === 'true';
+      const envVal: string | undefined = undefined;
+      const enforce = String(envVal ?? 'false').toLowerCase() === 'true';
       expect(enforce).toBe(false);
     });
 
     it('accepts custom values from env', () => {
-      expect('proj_custom' ?? 'proj_c0d3e9a1f200').toBe('proj_custom');
-      expect('/custom/repo' ?? '/home/jonathan/.openclaw/workspace/codegraph').toBe('/custom/repo');
-      expect('develop' ?? 'main').toBe('develop');
+      const custom1: string | undefined = 'proj_custom';
+      const custom2: string | undefined = '/custom/repo';
+      const custom3: string | undefined = 'develop';
+      expect(custom1 ?? 'proj_c0d3e9a1f200').toBe('proj_custom');
+      expect(custom2 ?? '/home/jonathan/.openclaw/workspace/codegraph').toBe('/custom/repo');
+      expect(custom3 ?? 'main').toBe('develop');
     });
 
     it('GITHUB_TOKEN required for API calls', () => {

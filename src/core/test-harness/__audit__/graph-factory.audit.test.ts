@@ -275,10 +275,12 @@ describe('graph-factory audit tests', () => {
         coreType: CoreNodeType.FUNCTION_DECLARATION,
         labels: ['CodeNode', 'Function'],
         properties: {
+          id: 'test-node-1',
           name: 'testFunc',
           coreType: CoreNodeType.FUNCTION_DECLARATION,
           projectId: 'proj_1',
           filePath: 'src/test.ts',
+          sourceCode: '',
           startLine: 1,
           endLine: 10,
           createdAt: '2026-01-01T00:00:00Z',

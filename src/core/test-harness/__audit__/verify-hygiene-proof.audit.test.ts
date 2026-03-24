@@ -65,7 +65,7 @@ describe('verify-hygiene-proof audit tests', () => {
       }
       // Main task query with evidence counts
       if (cypher.includes('evidenceEdgeCount')) {
-        const records = [];
+        const records: Array<{ get: (key: string) => unknown }> = [];
         for (let i = 0; i < doneWithEvidence; i++) {
           records.push({
             get: (key: string) => {
