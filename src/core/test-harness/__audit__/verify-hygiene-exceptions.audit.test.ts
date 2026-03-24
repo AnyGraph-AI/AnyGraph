@@ -182,7 +182,7 @@ describe('AUD-TC-03-L1b-19 | verify-hygiene-exceptions.ts', () => {
       setupMocks({ exceptions: [expiredRecord] });
 
       await import('../../../utils/verify-hygiene-exceptions');
-      await vi.waitFor(() => expect(logOutput.length).toBeGreaterThan(0) || expect(errorOutput.length).toBeGreaterThan(0), { timeout: 2000 });
+      await vi.waitFor(() => { expect(logOutput.length + errorOutput.length).toBeGreaterThan(0); }, { timeout: 2000 });
 
       const violationMerge = mockRun.mock.calls.find(
         ([c]: [string]) => typeof c === 'string' && c.includes('HygieneViolation') && c.includes('MERGE') && c.includes('expired_exception'),
@@ -201,7 +201,7 @@ describe('AUD-TC-03-L1b-19 | verify-hygiene-exceptions.ts', () => {
       setupMocks({ exceptions: [invalidRecord] });
 
       await import('../../../utils/verify-hygiene-exceptions');
-      await vi.waitFor(() => expect(logOutput.length).toBeGreaterThan(0) || expect(errorOutput.length).toBeGreaterThan(0), { timeout: 2000 });
+      await vi.waitFor(() => { expect(logOutput.length + errorOutput.length).toBeGreaterThan(0); }, { timeout: 2000 });
 
       const violationMerge = mockRun.mock.calls.find(
         ([c]: [string]) => typeof c === 'string' && c.includes('HygieneViolation') && c.includes('MERGE') && c.includes('invalid_exception_record'),
@@ -495,7 +495,7 @@ describe('AUD-TC-03-L1b-19 | verify-hygiene-exceptions.ts', () => {
       setupMocks({ exceptions: [record] });
 
       await import('../../../utils/verify-hygiene-exceptions');
-      await vi.waitFor(() => expect(logOutput.length).toBeGreaterThan(0) || expect(errorOutput.length).toBeGreaterThan(0), { timeout: 2000 });
+      await vi.waitFor(() => { expect(logOutput.length + errorOutput.length).toBeGreaterThan(0); }, { timeout: 2000 });
 
       const invalidMerge = mockRun.mock.calls.find(
         ([c]: [string]) => typeof c === 'string' && c.includes('invalid_exception_record'),
@@ -540,7 +540,7 @@ describe('AUD-TC-03-L1b-19 | verify-hygiene-exceptions.ts', () => {
       setupMocks({ exceptions: [record] });
 
       await import('../../../utils/verify-hygiene-exceptions');
-      await vi.waitFor(() => expect(logOutput.length).toBeGreaterThan(0) || expect(errorOutput.length).toBeGreaterThan(0), { timeout: 2000 });
+      await vi.waitFor(() => { expect(logOutput.length + errorOutput.length).toBeGreaterThan(0); }, { timeout: 2000 });
 
       const expiredMerge = mockRun.mock.calls.find(
         ([c]: [string]) => typeof c === 'string' && c.includes('expired_exception'),

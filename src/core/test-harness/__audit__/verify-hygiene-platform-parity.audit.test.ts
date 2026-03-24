@@ -181,7 +181,7 @@ describe('AUD-TC-03-L1b-21 | verify-hygiene-platform-parity.ts', () => {
       setupMocks({ codeownersExists: false });
 
       await import('../../../utils/verify-hygiene-platform-parity');
-      await vi.waitFor(() => expect(logOutput.length).toBeGreaterThan(0) || expect(errorOutput.length).toBeGreaterThan(0), { timeout: 2000 });
+      await vi.waitFor(() => { expect(logOutput.length + errorOutput.length).toBeGreaterThan(0); }, { timeout: 2000 });
 
       const violationMerge = mockRun.mock.calls.find(
         ([c, p]: [string, Record<string, unknown>]) =>
@@ -226,7 +226,7 @@ describe('AUD-TC-03-L1b-21 | verify-hygiene-platform-parity.ts', () => {
       });
 
       await import('../../../utils/verify-hygiene-platform-parity');
-      await vi.waitFor(() => expect(logOutput.length).toBeGreaterThan(0) || expect(errorOutput.length).toBeGreaterThan(0), { timeout: 2000 });
+      await vi.waitFor(() => { expect(logOutput.length + errorOutput.length).toBeGreaterThan(0); }, { timeout: 2000 });
 
       const violationMerge = mockRun.mock.calls.find(
         ([c, p]: [string, Record<string, unknown>]) =>
@@ -477,7 +477,7 @@ describe('AUD-TC-03-L1b-21 | verify-hygiene-platform-parity.ts', () => {
       setupMocks({ codeownersExists: false });
 
       await import('../../../utils/verify-hygiene-platform-parity');
-      await vi.waitFor(() => expect(logOutput.length).toBeGreaterThan(0) || expect(errorOutput.length).toBeGreaterThan(0), { timeout: 2000 });
+      await vi.waitFor(() => { expect(logOutput.length + errorOutput.length).toBeGreaterThan(0); }, { timeout: 2000 });
 
       const violationMerge = mockRun.mock.calls.find(
         ([c]: [string]) => typeof c === 'string' && c.includes('HygieneViolation') && c.includes('MERGE') && c.includes('TRIGGERED_BY'),

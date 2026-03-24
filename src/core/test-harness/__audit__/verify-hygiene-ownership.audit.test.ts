@@ -272,7 +272,7 @@ describe('AUD-TC-03-L1b-20 | verify-hygiene-ownership.ts', () => {
       setupMocks({ files: [unownedCriticalFile] });
 
       await import('../../../utils/verify-hygiene-ownership');
-      await vi.waitFor(() => expect(logOutput.length).toBeGreaterThan(0) || expect(errorOutput.length).toBeGreaterThan(0), { timeout: 2000 });
+      await vi.waitFor(() => { expect(logOutput.length + errorOutput.length).toBeGreaterThan(0); }, { timeout: 2000 });
 
       const violationMerge = mockRun.mock.calls.find(
         ([c]: [string]) => typeof c === 'string' && c.includes('HygieneViolation') && c.includes('MERGE') && c.includes('unowned_critical_path'),
