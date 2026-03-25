@@ -31,6 +31,12 @@ export class SoftwareGovernancePack implements GroundTruthPack {
 
   private neo4j: Neo4jService;
 
+  /**
+   * FIND-11c-03: Constructor currently instantiates Neo4jService when no
+   * dependency is supplied (`new Neo4jService()`), which couples this pack to
+   * concrete storage initialization. Kept for runtime simplicity; future DI
+   * refactor can make driver creation fully injectable for isolated testing.
+   */
   constructor(neo4j?: Neo4jService) {
     this.neo4j = neo4j ?? new Neo4jService();
   }

@@ -17,6 +17,13 @@ import { glob } from 'glob';
 import { validateProjectWrite } from '../guards/project-write-guard.js';
 import { generateDeterministicId } from '../utils/graph-factory.js';
 
+/**
+ * FIND-11a-06: `makePlanParserContractGraph` is intentionally internal to
+ * `src/core/parsers/meta/parser-contract-emitter.ts` and is not exported here.
+ * `plan-parser.ts` exposes parse/ingest entry points; contract-graph assembly
+ * stays in the meta emitter module to keep parser runtime surface minimal.
+ */
+
 // ============================================================================
 // PLAN GRAPH SCHEMA
 // ============================================================================

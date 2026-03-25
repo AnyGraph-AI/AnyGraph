@@ -282,21 +282,11 @@ describe('RF-2: Enforcement Gate — Risk Summary Computation', () => {
 });
 
 describe('RF-2: Enforcement Gate — Graph Integration', () => {
-  // These tests verify the gate queries the live graph correctly
+  // Live Neo4j integration is required to validate graph resolution and TESTED_BY semantics.
+  // These are intentionally skipped in unit/spec scope to avoid tautological placeholders.
+  it.skip('SPEC: gate resolves affected nodes from file paths via graph query (requires live Neo4j fixture)', () => {});
 
-  it('SPEC: gate resolves affected nodes from file paths via graph query', () => {
-    // Given: file paths from a git diff or MCP edit
-    // When: gate queries graph for CRITICAL functions in those files
-    // Then: returns accurate AffectedNode[] with riskTier from graph
-    // This test validates the Cypher query pattern, not the decision logic
-    expect(true).toBe(true); // Placeholder — will be integration test
-  });
-
-  it('SPEC: gate checks TESTED_BY edges for hasTests determination', () => {
-    // The gate must use TESTED_BY edges (from test-coverage enrichment)
-    // not just the existence of a .test.ts file
-    expect(true).toBe(true); // Placeholder — will be integration test
-  });
+  it.skip('SPEC: gate checks TESTED_BY edges for hasTests determination (requires live Neo4j fixture)', () => {});
 });
 
 // ─── Test Helpers ───

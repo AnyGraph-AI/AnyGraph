@@ -266,9 +266,41 @@ describe('RF-11: Structural Stability Drift Metrics', () => {
     });
 
     it('should produce a drift report with pass/fail and evidence', async () => {
-      const { evaluateStructuralDrift } = await import('../../../verification/structural-drift.js');
-      // evaluateStructuralDrift should query the graph and compare against baseline
-      expect(typeof evaluateStructuralDrift).toBe('function');
+      const { evaluateStructuralDrift, computeStructuralMetrics } = await import('../../../verification/structural-drift.js');
+
+      const baseline = computeStructuralMetrics([]);
+      const report = await evaluateStructuralDrift({
+        projectId: 'proj_rf11_nonexistent_for_spec_test',
+        baseline,
+      });
+
+      expect(report).toEqual(
+        expect.objectContaining({
+          drifted: expect.any(Boolean),
+          suppressed: expect.any(Boolean),
+          deltas: expect.objectContaining({
+            degreeMeanDelta: expect.any(Number),
+            degreeVarianceDelta: expect.any(Number),
+            clusteringDelta: expect.any(Number),
+            pathLengthDelta: expect.any(Number),
+          }),
+          thresholds: expect.objectContaining({
+            degreeMeanThreshold: expect.any(Number),
+            degreeVarianceThreshold: expect.any(Number),
+            clusteringThreshold: expect.any(Number),
+            pathLengthThreshold: expect.any(Number),
+          }),
+        }),
+      );
+
+      expect(report.drifted).toBe(false);
+      expect(report.suppressed).toBe(false);
+      expect(report.deltas).toMatchObject({
+        degreeMeanDelta: 0,
+        degreeVarianceDelta: 0,
+        clusteringDelta: 0,
+        pathLengthDelta: 0,
+      });
     });
   });
 });

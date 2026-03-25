@@ -34,6 +34,11 @@ export const EMBEDDING_BATCH_CONFIG = {
 
 export class EmbeddingsService {
   private readonly openai: OpenAI;
+  /**
+   * FIND-11c-02: Default embedding model is `text-embedding-3-large`.
+   * The field is intentionally private; behavioral verification is done via
+   * asserted OpenAI request arguments in tests (structural call verification).
+   */
   private readonly model: string;
 
   constructor(model: string = 'text-embedding-3-large') {

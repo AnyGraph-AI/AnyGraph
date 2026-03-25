@@ -1,3 +1,4 @@
+// NOTE: This file traces CLI handler coverage for evidence backfill (FIND-11b-06). It is not a spec-derived behavioral test. See COVERAGE_POLICY_EXCEPTION(evidence-backfill).
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import {

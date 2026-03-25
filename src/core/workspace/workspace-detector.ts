@@ -59,7 +59,13 @@ export class WorkspaceDetector {
   }
 
   /**
-   * Detect the type of workspace/monorepo
+   * Detect the type of workspace/monorepo.
+   *
+   * FIND-11c-01: Yarn and npm both use `package.json.workspaces`, so when
+   * `yarn.lock` is absent this heuristic uses structure-only precedence:
+   * turbo.json -> nx.json -> pnpm-workspace.yaml -> package.json.workspaces
+   * (array/object => yarn, fallback => npm). This is deterministic in code
+   * but remains a spec ambiguity because lockfile-free repos can be dual-valid.
    */
   private async detectWorkspaceType(rootPath: string): Promise<WorkspaceType> {
     // Check for Turborepo (has turbo.json)

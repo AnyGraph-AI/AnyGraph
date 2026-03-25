@@ -1834,6 +1834,11 @@ export class TypeScriptParser {
     );
   }
 
+  /**
+   * FIND-11a-04: `super()` calls are represented via `callContext.receiverExpression='super'`
+   * (and constructor `callsSuper` on nodes), not as a top-level `isSuper` property
+   * on CALLS edges. This preserves call semantics in nested edge context.
+   */
   private createCallsEdge(sourceNodeId: string, targetNodeId: string, callContext?: CallContext): ParsedEdge {
     return toParsedEdge(
       createCallsEdgeFactory({
@@ -2600,6 +2605,10 @@ export class TypeScriptParser {
    * Export parsed graph as an IR v1 document.
    * When irMode is active, applies enrichment plugins (Grammy, etc.) to create
    * framework-specific nodes/edges from handler annotations.
+   */
+  /**
+   * FIND-11a-05: Canonical API name is `exportToIrDocument`.
+   * Older spec text using `convertToIrDocument` refers to this method.
    */
   public exportToIrDocument(sourceRoot?: string): IrDocument {
     const { nodes, edges } = this.exportToJson();

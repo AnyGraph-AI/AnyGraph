@@ -326,22 +326,19 @@ describe('AUD: parsePlanProject multi-file', () => {
 // ============================================================================
 
 describe('AUD: SPEC GAP — Status: override (behavior 11)', () => {
-  it.skip('Status: line override not implemented — FIND-AUD-L2-01', () => {
-    // The spec mentions "status override parsing from Status: lines in milestone headers"
-    // but plan-parser.ts has NO code handling "Status:" lines.
-    // Milestone status is determined solely by emoji (✅/🔜) in the header line.
-    // This is a spec gap: either the spec should be updated or the feature implemented.
+  // SPEC GAP: Status: line override not implemented. See FIND-11a-07. Implementation deferred to AUD-TC-11d follow-up milestone.
+  it.skip('Status: line override not implemented — FIND-11a-07', () => {
+    // Verified against src/core/parsers/plan-parser.ts:
+    // - STATUS_LINE regex exists but is never consumed in parseFile().
+    // - milestone/task status is derived from checkbox state and header emoji only.
   });
 });
 
 describe('AUD: SPEC GAP — MODIFIES edges (behavior 12)', () => {
-  it.skip('MODIFIES edge creation not implemented in parseFile — FIND-AUD-L2-02', () => {
-    // The spec mentions "MODIFIES edges from explicit file references in task text"
-    // but parseFile creates no MODIFIES edges. The MODIFIES enum exists but is only
-    // referenced in ingestToNeo4j's cleanup query. File references in task text
-    // produce unresolvedRefs with refType 'file_path', which enrichCrossDomain
-    // resolves to HAS_CODE_EVIDENCE edges, not MODIFIES.
-    // Spec gap: either intended as HAS_CODE_EVIDENCE (update spec) or MODIFIES
-    // creation needs implementing.
+  // SPEC GAP: MODIFIES edge creation not implemented. See FIND-11a-08. Implementation deferred to AUD-TC-11d follow-up milestone.
+  it.skip('MODIFIES edge creation not implemented in parseFile — FIND-11a-08', () => {
+    // Verified against src/core/parsers/plan-parser.ts:
+    // - PlanEdgeType.MODIFIES exists but parseFile() never emits MODIFIES edges.
+    // - file_path refs become unresolvedRefs and are later enriched as HAS_CODE_EVIDENCE.
   });
 });

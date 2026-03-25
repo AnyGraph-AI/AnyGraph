@@ -69,16 +69,32 @@ describe('RF-17.1 live-path integration (guard not bypassed in test env)', () =>
     await registerProject(PID_REGISTERED);
 
     const service = new Neo4jService();
-    await expect(
-      service.run('CREATE (n:CodeNode {id: $id, projectId: $projectId}) RETURN n.id AS id', {
+    const rows = await service.run(
+      'CREATE (n:CodeNode {id: $id, projectId: $projectId, kind: $kind}) RETURN n.id AS id, n.projectId AS projectId, n.kind AS kind',
+      {
         id: `${PID_REGISTERED}:n1`,
         projectId: PID_REGISTERED,
-      }),
-    ).resolves.toBeDefined();
+        kind: 'guard-integration-test',
+      },
+    );
     await service.close();
 
-    const verify = await adminRun('MATCH (n {projectId: $projectId}) RETURN count(n) AS c', { projectId: PID_REGISTERED });
-    expect(Number(verify.records[0]?.get('c')?.toNumber?.() ?? 0)).toBeGreaterThan(0);
+    expect(Array.isArray(rows)).toBe(true);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: `${PID_REGISTERED}:n1`,
+      projectId: PID_REGISTERED,
+      kind: 'guard-integration-test',
+    });
+
+    const verify = await adminRun(
+      'MATCH (n {projectId: $projectId}) RETURN count(n) AS c, collect(n.id) AS ids',
+      { projectId: PID_REGISTERED },
+    );
+    const count = Number(verify.records[0]?.get('c')?.toNumber?.() ?? 0);
+    const ids = verify.records[0]?.get('ids') as string[];
+    expect(count).toBeGreaterThan(0);
+    expect(ids).toContain(`${PID_REGISTERED}:n1`);
   });
 
   it('blocks materializeIrDocument for unregistered projectId (critical path)', async () => {

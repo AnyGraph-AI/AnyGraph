@@ -361,6 +361,10 @@ print(json.dumps({'defs':defs,'calls':calls,'imports':imports,'engine':'python-a
       sourcePath: input.sourcePath,
       language: 'python',
       sourceRevision: this.sourceRevision,
+      /**
+       * FIND-11a-01: parserTier is numeric in implementation (0/1/2).
+       * Spec strings like "tier-0" are human-readable aliases only.
+       */
       parserTier: input.parserTier as 0 | 1 | 2,
       confidence: input.confidence,
       provenanceKind: 'parser',
@@ -383,6 +387,11 @@ print(json.dumps({'defs':defs,'calls':calls,'imports':imports,'engine':'python-a
     };
   }
 
+  /**
+   * FIND-11a-02: ID hash input is `${projectId}:${value}` where `value` is the
+   * caller-provided composite token (e.g., `relPath:kind:qualname:line`).
+   * The parser does not hash `filePath+name+kind` as separate fixed fields.
+   */
   private id(prefix: string, value: string): string {
     const h = createHash('sha256').update(`${this.projectId}:${value}`).digest('hex').slice(0, 16);
     return `${this.projectId}:${prefix}:${h}`;

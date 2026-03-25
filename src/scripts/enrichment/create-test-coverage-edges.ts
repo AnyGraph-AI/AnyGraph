@@ -47,6 +47,7 @@ interface TestFileInfo {
 
 const TEST_FILE_PATTERNS = [
   'src/**/*.test.ts',
+  'src/**/*.audit.test.ts',
   'src/**/*.spec.ts',
   'src/**/*.spec-test.ts', // compatibility with existing suite
   'ui/src/**/*.test.ts',   // UI dashboard tests

@@ -1,3 +1,4 @@
+// NOTE: This file covers 4 modules (printOutput, governance-metrics-snapshot, create-state-field-nodes, temporal-coupling) as a characterization test. No single TDD_ROADMAP milestone governs this scope. See FIND-11b-07.
 /**
  * Historical override debt backfill — characterization/spec tests
  *

@@ -1,5 +1,11 @@
 import type { Driver } from 'neo4j-driver';
 
+/**
+ * FIND-B6-01: This guard intentionally has no NODE_ENV=test bypass branch.
+ * Test-environment write bypass behavior is enforced at the Neo4jService layer
+ * (`src/storage/neo4j/neo4j.service.ts`), not in this module.
+ */
+
 export class ProjectWriteValidationError extends Error {
   constructor(message: string) {
     super(message);

@@ -102,4 +102,61 @@ describe('RF-15: parse runtime coverage JSON', () => {
       },
     ]);
   });
+
+  it('drops malformed statement ranges and falls back to object-key file path', () => {
+    const fixture = {
+      '/tmp/key-path.ts': {
+        statementMap: {
+          bad1: { start: { line: 0, column: 0 }, end: { line: 10, column: 0 } },
+          bad2: { start: { line: 12, column: 0 }, end: { line: 11, column: 0 } },
+          ok: { start: { line: 20, column: 0 }, end: { line: 21, column: 0 } },
+        },
+        s: { bad1: 3, bad2: 2, ok: 1 },
+      },
+    };
+
+    const parsed = parseCoverageJson(JSON.stringify(fixture));
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.filePath).toBe('/tmp/key-path.ts');
+    expect(parsed[0]?.lineRanges).toHaveLength(1);
+    expect(parsed[0]?.lineRanges[0]).toMatchObject({ statementId: 'ok', startLine: 20, endLine: 21, hits: 1 });
+  });
+
+  it('filters malformed fnMap entries and defaults missing names/hits', () => {
+    const fixture = {
+      '/tmp/fns.ts': {
+        path: '/tmp/fns.ts',
+        statementMap: {},
+        fnMap: {
+          bad: { name: 'bad', loc: { start: { line: 5, column: 0 }, end: { line: 4, column: 0 } } },
+          unnamed: { loc: { start: { line: 8, column: 0 }, end: { line: 9, column: 0 } } },
+        },
+        f: {},
+      },
+    };
+
+    const parsed = parseCoverageJson(JSON.stringify(fixture));
+    expect(parsed[0]?.functionHits).toHaveLength(1);
+    expect(parsed[0]?.functionHits[0]).toMatchObject({
+      functionId: 'unnamed',
+      name: 'fn_unnamed',
+      startLine: 8,
+      endLine: 9,
+      hits: 0,
+    });
+  });
+
+  it('handles missing coverage sections as empty arrays/objects', () => {
+    const fixture = {
+      '/tmp/minimal.ts': {
+        path: '/tmp/minimal.ts',
+      },
+    };
+
+    const parsed = parseCoverageJson(JSON.stringify(fixture));
+    const file = parsed[0] as ParsedCoverageFile;
+    expect(file.lineRanges).toEqual([]);
+    expect(file.branchCounts).toEqual([]);
+    expect(file.functionHits).toEqual([]);
+  });
 });

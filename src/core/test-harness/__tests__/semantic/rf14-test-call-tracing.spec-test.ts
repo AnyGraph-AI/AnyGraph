@@ -5,6 +5,7 @@
  * 1) Identify test files by naming convention and tag as isTestFile.
  * 2) Trace calls from test functions to imported source functions.
  */
+import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   isTestFileByConvention,
@@ -114,7 +115,7 @@ describe('RF-14: resolveImportMap (CRITICAL characterization)', () => {
     const bindings = new Map<string, ImportBinding>();
     bindings.set('foo', { imported: 'foo', sourceSpec: './create-test-coverage-edges' });
 
-    const dir = '/home/jonathan/.openclaw/workspace/codegraph/src/scripts/enrichment';
+    const dir = path.resolve(process.cwd(), 'src/scripts/enrichment');
     const resolved = resolveImportMap(bindings, dir);
 
     expect(resolved.has('foo')).toBe(true);
@@ -139,7 +140,7 @@ describe('RF-14: resolveImportMap (CRITICAL characterization)', () => {
     bindings.set('QUERIES', { imported: 'QUERIES', sourceSpec: '@/lib/queries' });
 
     // dir is the UI test directory; project root has tsconfig with @/ → ./src/
-    const dir = '/home/jonathan/.openclaw/workspace/codegraph/ui/src/__tests__';
+    const dir = path.resolve(process.cwd(), 'ui/src/__tests__');
     const resolved = resolveImportMap(bindings, dir);
 
     expect(resolved.has('QUERIES')).toBe(true);
