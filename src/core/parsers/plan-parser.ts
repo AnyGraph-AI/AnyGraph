@@ -1038,9 +1038,9 @@ export async function enrichCrossDomain(
                 const sfId = record.get('id');
                 const sfProjectId = record.get('projectId');
 
-                // Use label-agnostic match — code graph nodes may not have CodeNode label
+                // Task nodes always have Task label; SourceFile always has SourceFile label
                 await session.run(
-                  `MATCH (t {id: $taskId}), (sf {id: $sfId})
+                  `MATCH (t:Task {id: $taskId}), (sf:SourceFile {id: $sfId})
                    MERGE (t)-[r:HAS_CODE_EVIDENCE]->(sf)
                    SET r.refType = 'file_path',
                        r.refValue = $refValue,
@@ -1090,7 +1090,7 @@ export async function enrichCrossDomain(
               }
 
               await session.run(
-                `MATCH (t {id: $taskId})
+                `MATCH (t:Task {id: $taskId})
                  SET t.hasCodeEvidence = true,
                      t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + $count`,
                 { taskId: ref.taskId, count: result.records.length + testFileResult.records.length },
@@ -1127,9 +1127,9 @@ export async function enrichCrossDomain(
                 const fnId = record.get('id');
                 const fnProjectId = record.get('projectId');
 
-                // Use label-agnostic match — code graph nodes may not have CodeNode label
+                // Task + Function labels for label-constrained lookup
                 await session.run(
-                  `MATCH (t {id: $taskId}), (fn {id: $fnId})
+                  `MATCH (t:Task {id: $taskId}), (fn:Function {id: $fnId})
                    MERGE (t)-[r:HAS_CODE_EVIDENCE]->(fn)
                    SET r.refType = 'function',
                        r.refValue = $refValue,
@@ -1142,7 +1142,7 @@ export async function enrichCrossDomain(
               }
 
               await session.run(
-                `MATCH (t {id: $taskId})
+                `MATCH (t:Task {id: $taskId})
                  SET t.hasCodeEvidence = true,
                      t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + $count`,
                 { taskId: ref.taskId, count: result.records.length },
@@ -1273,9 +1273,11 @@ export async function enrichCrossDomain(
 
           // Count code graph elements
           const codeStats = await session.run(
-            `MATCH (n {projectId: $pid})
-             WHERE n.coreType IN ['FunctionDeclaration', 'SourceFile', 'ClassDeclaration', 'MethodDeclaration']
-             RETURN n.coreType AS type, count(n) AS count`,
+            `MATCH (n:Function {projectId: $pid}) WHERE n.coreType IN ['FunctionDeclaration', 'MethodDeclaration'] RETURN n.coreType AS type, count(n) AS count
+             UNION ALL
+             MATCH (n:SourceFile {projectId: $pid}) WHERE n.coreType = 'SourceFile' RETURN n.coreType AS type, count(n) AS count
+             UNION ALL
+             MATCH (n:Class {projectId: $pid}) WHERE n.coreType = 'ClassDeclaration' RETURN n.coreType AS type, count(n) AS count`,
             { pid: codeProjectId },
           );
 
