@@ -18,6 +18,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'node:path';
 import fs from 'fs/promises';
+import os from 'os';
 
 import { TypeScriptParser } from '../../parsers/typescript-parser.js';
 import { CoreNodeType, CoreEdgeType, Neo4jNode, Neo4jEdge } from '../../config/schema.js';
@@ -233,8 +234,11 @@ describe('AUD-TC-11a-L1-03 | typescript-parser.ts', () => {
     });
 
     it('parser does not create CALLS edges to built-in functions', async () => {
-      // Write a temp fixture that calls console.log, JSON.stringify, etc.
-      const tmpFile = path.join(FIXTURE_DIR, '_tmp_builtins.ts');
+      // Write temp fixture OUTSIDE shared FIXTURE_DIR to avoid ts-morph race with other tests
+      const tmpDir = path.join(os.tmpdir(), `ts-parser-builtins-${Date.now()}`);
+      await fs.mkdir(tmpDir, { recursive: true });
+      await fs.writeFile(path.join(tmpDir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2020', module: 'commonjs', skipLibCheck: true } }));
+      const tmpFile = path.join(tmpDir, 'builtins.ts');
       await fs.writeFile(tmpFile, `
 export function testBuiltins() {
   console.log('hello');
@@ -246,7 +250,8 @@ export function testBuiltins() {
 }
 `);
       try {
-        const parser = new TypeScriptParser(FIXTURE_DIR, TSCONFIG_PATH, undefined, []);
+        const tsconfigPath = path.join(tmpDir, 'tsconfig.json');
+        const parser = new TypeScriptParser(tmpDir, tsconfigPath, undefined, []);
         const { edges } = await parser.parseChunk([tmpFile]);
         const callsEdges = edges.filter(e => e.type === 'CALLS');
 
@@ -259,7 +264,7 @@ export function testBuiltins() {
           expect(BUILT_IN_FUNCTIONS.has((edge.properties as any).name as string)).toBeFalsy();
         }
       } finally {
-        await fs.unlink(tmpFile).catch(() => {});
+        await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
       }
     });
   });

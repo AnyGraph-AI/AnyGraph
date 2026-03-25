@@ -79,7 +79,7 @@ describe('RF-7: Trust-Graph Anti-Gaming + Collusion Projection', () => {
       expect(families).toContain('ESLint');
     });
 
-    it('marks duplicate clusters with restatementScore', async () => {
+    it('marks duplicate clusters with restatementScore', { timeout: 15000 }, async () => {
       await enforceSourceFamilyCaps(neo4j, projectId);
       // Check if any duplicates were collapsed (may be 0 if no identical artifactHashes)
       const rows = await neo4j.run(

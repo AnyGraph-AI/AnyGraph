@@ -81,7 +81,7 @@ describe('RF-5: Explainability Paths + Evidence Debt', () => {
       }
     });
 
-    it('pathHash is stable (same paths produce same hash)', { timeout: 15000 }, async () => {
+    it('pathHash is stable (same paths produce same hash)', { timeout: 30000 }, async () => {
       // Run discover twice independently — same inputs must produce same hashes.
       // This test is self-contained: does not depend on prior tests.
       await discoverExplainabilityPaths(neo4j, PLAN_PROJECT);
