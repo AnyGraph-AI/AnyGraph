@@ -685,7 +685,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
         [CoreNodeType.DECORATOR]: CoreEdgeType.DECORATED_WITH,
       },
       neo4j: {
-        labels: ['CodeNode', 'Method', 'TypeScript'],
+        labels: ['CodeNode', 'Method', 'Function', 'TypeScript'],
         primaryLabel: 'Method',
         indexed: ['name', 'visibility'],
       },
@@ -964,7 +964,7 @@ export const CORE_TYPESCRIPT_SCHEMA: CoreTypeScriptSchema = {
         [CoreNodeType.PARAMETER_DECLARATION]: CoreEdgeType.HAS_PARAMETER,
       },
       neo4j: {
-        labels: ['CodeNode', 'Constructor', 'TypeScript'],
+        labels: ['CodeNode', 'Constructor', 'Function', 'TypeScript'],
         primaryLabel: 'Constructor',
         indexed: ['name'],
         skipEmbedding: true,
