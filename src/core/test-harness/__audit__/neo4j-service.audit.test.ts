@@ -153,11 +153,11 @@ describe('AUD-TC-14-A1b | neo4j.service.ts', () => {
       const service = new Neo4jService();
       mockSessionRun.mockRejectedValueOnce({ code: 'Neo.TransientError.Transaction.Terminated' });
 
-      const thrown = await service.run('MATCH (n) RETURN n', {}).catch((err) => err as Error);
+      const thrown = await service.run('MATCH (n) RETURN n', {}).catch((err: unknown) => err);
 
       expect(thrown).toBeInstanceOf(Error);
-      expect(thrown.message).toMatch(/timed out/i);
-      expect(thrown.message).toMatch(/ms|timeout/i);
+      expect((thrown as Error).message).toMatch(/timed out/i);
+      expect((thrown as Error).message).toMatch(/ms|timeout/i);
     });
   });
 
@@ -243,7 +243,8 @@ describe('AUD-TC-14-A1b | neo4j.service.ts', () => {
 
       new Neo4jService();
 
-      const configArg = mockNeo4jDriver.mock.calls.at(-1)?.[2] as { connectionTimeout: number; maxTransactionRetryTime: number };
+      const calls = mockNeo4jDriver.mock.calls as unknown[][];
+      const configArg = calls.at(-1)?.[2] as { connectionTimeout: number; maxTransactionRetryTime: number };
       expect(configArg.connectionTimeout).toBe(9_999);
       expect(configArg.maxTransactionRetryTime).toBe(30_001);
     });
