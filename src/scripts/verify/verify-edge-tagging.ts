@@ -12,6 +12,9 @@ const EXPECTED_GLOBAL_EDGE_TYPES = new Set<string>([
   'SUPPORTED_BY',
   'CONTRADICTED_BY',
   'HAS_CODE_EVIDENCE',
+  // Task→SourceFile cross-domain by construction (plan-parser, AUD-TC-11e-02).
+  // Same structural pattern as HAS_CODE_EVIDENCE — inherently spans plan↔code project domains.
+  'MODIFIES',
   'BLOCKS',
   // GTH integrity pipeline edges (cross-project by design)
   'OBSERVED_AS',
