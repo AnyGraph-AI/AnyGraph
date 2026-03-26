@@ -123,6 +123,7 @@ const GENERIC_H2 = /^##\s+(.+)$/;
 
 // Status patterns
 const STATUS_LINE = /\*\*Status\*\*:\s*(.+)/i;
+const TASK_STATUS_OVERRIDES = new Set(['blocked', 'in-progress', 'deferred', 'planned', 'done']);
 
 // Decision table row
 const DECISION_ROW = /^\|\s*(.+?)\s*\|\s*(.+?)\s*\|(?:\s*(.+?)\s*\|)?$/;
@@ -168,6 +169,10 @@ const BLOCKS_PATTERN = /^\s*(?:[-*]\s*\[[ xX]\]\s*)?(?:\*\*\s*)?BLOCKS(?:\s*\*\*
  */
 function stableId(projectId: string, type: string, file: string, sectionKey: string, ordinal: number): string {
   return generateDeterministicId(projectId, type, file, `${sectionKey}#${ordinal}`);
+}
+
+function isModifiesFileRef(refValue: string): boolean {
+  return refValue.includes('/') && /\.(?:ts|js|tsx|jsx|py)$/i.test(refValue);
 }
 
 // ============================================================================
@@ -275,6 +280,28 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
   let inDecisionTable = false;
   let currentTaskId: string | null = null;
   let currentTaskName: string | null = null;
+
+  const addTaskUnresolvedRefs = (taskId: string, taskName: string, refs: CrossReference[]) => {
+    for (const ref of refs) {
+      if (ref.type === 'file_path' || ref.type === 'function' || ref.type === 'project_id' || ref.type === 'project_name') {
+        const hasBaseRef = unresolvedRefs.some(
+          (r) => r.taskId === taskId && r.refType === ref.type && r.refValue === ref.value,
+        );
+        if (!hasBaseRef) {
+          unresolvedRefs.push({ taskId, taskName, refType: ref.type, refValue: ref.value });
+        }
+
+        if (ref.type === 'file_path' && isModifiesFileRef(ref.value)) {
+          const hasModifiesRef = unresolvedRefs.some(
+            (r) => r.taskId === taskId && r.refType === PlanEdgeType.MODIFIES && r.refValue === ref.value,
+          );
+          if (!hasModifiesRef) {
+            unresolvedRefs.push({ taskId, taskName, refType: PlanEdgeType.MODIFIES, refValue: ref.value });
+          }
+        }
+      }
+    }
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -616,11 +643,7 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
         properties: { projectId: ctx.projectId },
       });
 
-      for (const ref of crossRefs) {
-        if (ref.type === 'file_path' || ref.type === 'function' || ref.type === 'project_id' || ref.type === 'project_name') {
-          unresolvedRefs.push({ taskId, taskName: taskText, refType: ref.type, refValue: ref.value });
-        }
-      }
+      addTaskUnresolvedRefs(taskId, taskText, crossRefs);
 
       currentTaskId = taskId;
       currentTaskName = taskText;
@@ -636,8 +659,43 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
     if (checkboxMatch) {
       const indent = checkboxMatch[1].length;
       const text = checkboxMatch[2].trim();
-      const status = doneMatch ? TaskStatus.DONE : TaskStatus.PLANNED;
+      const inferredStatus = doneMatch ? TaskStatus.DONE : TaskStatus.PLANNED;
+      let statusOverride: string | null = null;
       const isSubTask = indent >= 2;
+
+      // Check continuation lines in this task block for an explicit **Status**: override.
+      for (let j = i + 1; j < lines.length; j++) {
+        const nextLine = lines[j];
+        const nextTrimmed = nextLine.trim();
+
+        // End of this task block once a new structural element begins.
+        if (
+          nextLine.match(MILESTONE_HEADER) ||
+          nextLine.match(SPRINT_HEADER) ||
+          nextLine.match(GENERIC_H2) ||
+          nextLine.match(/^###\s+(.+)$/) ||
+          nextLine.match(CHECKBOX_DONE) ||
+          nextLine.match(CHECKBOX_PLANNED) ||
+          nextLine.match(TABLE_TASK_ROW) ||
+          FILES_TOUCHED.test(nextLine)
+        ) {
+          break;
+        }
+
+        const statusMatch = nextTrimmed.match(STATUS_LINE);
+        if (!statusMatch) continue;
+
+        const normalized = statusMatch[1].trim().toLowerCase();
+        if (TASK_STATUS_OVERRIDES.has(normalized)) {
+          statusOverride = normalized;
+        } else {
+          console.warn(
+            `[plan-parser] Ignoring invalid status override "${statusMatch[1].trim()}" in ${ctx.filePath}:${j + 1}`,
+          );
+        }
+      }
+
+      const status = statusOverride ?? inferredStatus;
 
       taskOrdinalInSection++;
       const taskId = stableId(ctx.projectId, PlanNodeType.TASK, ctx.filePath, currentSectionKey, taskOrdinalInSection);
@@ -688,16 +746,7 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
       });
 
       // Track unresolved refs for cross-domain enrichment
-      for (const ref of crossRefs) {
-        if (ref.type === 'file_path' || ref.type === 'function' || ref.type === 'project_id' || ref.type === 'project_name') {
-          unresolvedRefs.push({
-            taskId,
-            taskName: text,
-            refType: ref.type,
-            refValue: ref.value,
-          });
-        }
-      }
+      addTaskUnresolvedRefs(taskId, text, crossRefs);
 
       currentTaskId = taskId;
       currentTaskName = text;
@@ -734,22 +783,7 @@ function parseFile(file: PlanFile, ctx: FileContext): FileParseResult {
           }
 
           // Add to unresolved refs for enrichment
-          for (const ref of contRefs) {
-            if (ref.type === 'file_path' || ref.type === 'function' || ref.type === 'project_id' || ref.type === 'project_name') {
-              // Deduplicate against existing refs for this task
-              const isDup = unresolvedRefs.some(
-                (r) => r.taskId === currentTaskId && r.refType === ref.type && r.refValue === ref.value,
-              );
-              if (!isDup) {
-                unresolvedRefs.push({
-                  taskId: currentTaskId,
-                  taskName: currentTaskName ?? '',
-                  refType: ref.type,
-                  refValue: ref.value,
-                });
-              }
-            }
-          }
+          addTaskUnresolvedRefs(currentTaskId, currentTaskName ?? '', contRefs);
         }
         continue;
       }
@@ -1017,6 +1051,45 @@ export async function enrichCrossDomain(
               } else {
                 notFound++;
               }
+            }
+          } else if (ref.refType === PlanEdgeType.MODIFIES) {
+            const filename = path.basename(ref.refValue);
+            const sourcePlanProjectId = ref.taskId.split(':')[0];
+            const targetCodeProjectId = planToCodeProjectMap[sourcePlanProjectId] ?? null;
+            const result = await session.run(
+              `MATCH (sf:SourceFile)
+               WHERE (sf.filePath ENDS WITH $refValue OR sf.filePath ENDS WITH $filename OR sf.name ENDS WITH $filename)
+                 AND ($targetCodeProjectId IS NULL OR sf.projectId = $targetCodeProjectId)
+               RETURN sf.id AS id, sf.projectId AS projectId
+               LIMIT 5`,
+              { filename, refValue: ref.refValue, targetCodeProjectId },
+            );
+
+            if (result.records.length > 0) {
+              resolved++;
+              for (const record of result.records) {
+                const sfId = record.get('id');
+                const sfProjectId = record.get('projectId');
+
+                await session.run(
+                  `MATCH (t:Task {id: $taskId}), (sf:SourceFile {id: $sfId})
+                   MERGE (t)-[r:MODIFIES]->(sf)
+                   SET r.refType = $refType,
+                       r.refValue = $refValue,
+                       r.codeProjectId = $sfProjectId,
+                       r.resolvedAt = datetime(),
+                       r.sourceKind = 'plan-parser'`,
+                  {
+                    taskId: ref.taskId,
+                    sfId,
+                    refType: PlanEdgeType.MODIFIES,
+                    refValue: ref.refValue,
+                    sfProjectId,
+                  },
+                );
+              }
+            } else {
+              notFound++;
             }
           } else if (ref.refType === 'file_path') {
             const filename = path.basename(ref.refValue);

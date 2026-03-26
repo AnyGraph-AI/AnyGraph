@@ -19,12 +19,15 @@
  *   4. Decision lineage (who approved, when, why)
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { describe, it, expect, beforeEach, beforeAll, afterAll, afterEach } from 'vitest';
 import {
   evaluateEnforcementGate,
   type EnforcementGateConfig,
   type AffectedNode,
 } from '../../../enforcement/enforcement-gate.js';
+import { resolveAffectedNodes } from '../../../enforcement/graph-resolver.js';
+import { createEphemeralGraph, type EphemeralGraphRuntime } from '../../ephemeral-graph.js';
 
 // ─── Spec Tests ───
 
@@ -282,11 +285,116 @@ describe('RF-2: Enforcement Gate — Risk Summary Computation', () => {
 });
 
 describe('RF-2: Enforcement Gate — Graph Integration', () => {
-  // Live Neo4j integration is required to validate graph resolution and TESTED_BY semantics.
-  // These are intentionally skipped in unit/spec scope to avoid tautological placeholders.
-  it.skip('SPEC: gate resolves affected nodes from file paths via graph query (requires live Neo4j fixture)', () => {});
+  const enforcedConfig: EnforcementGateConfig = {
+    mode: 'enforced',
+    criticalBlocksWithoutApproval: false,
+    untestedCriticalAlwaysBlocks: true,
+    approvalTtlMs: 3600_000,
+  };
 
-  it.skip('SPEC: gate checks TESTED_BY edges for hasTests determination (requires live Neo4j fixture)', () => {});
+  let eph: EphemeralGraphRuntime;
+  let projectId: string;
+
+  const neo4jAdapter = {
+    run: async (query: string, params: Record<string, unknown> = {}) => {
+      const result = await eph.run(query, params);
+      return result.records.map(r => r.toObject());
+    },
+  } as any;
+
+  beforeAll(async () => {
+    eph = await createEphemeralGraph({ testId: `rf2-gate-${randomUUID().slice(0, 8)}` });
+    projectId = eph.projectId;
+  });
+
+  afterEach(async () => {
+    await eph.run(`MATCH (n {projectId: $projectId}) DETACH DELETE n`, { projectId });
+  });
+
+  afterAll(async () => {
+    await eph.teardown();
+  });
+
+  it('SPEC: gate resolves affected nodes from file paths via graph query (requires live Neo4j fixture)', async () => {
+    const filePath = '/integration/rf2/critical-untested.ts';
+
+    await eph.seed({
+      nodes: [
+        {
+          labels: ['SourceFile'],
+          ref: 'sf',
+          properties: { name: 'critical-untested.ts', filePath },
+        },
+        {
+          labels: ['Function'],
+          ref: 'fn',
+          properties: {
+            id: 'fn_gate_critical_untested',
+            name: 'criticalUntestedPath',
+            filePath,
+            riskTier: 'CRITICAL',
+            compositeRisk: 0.97,
+          },
+        },
+      ],
+      edges: [{ fromRef: 'sf', toRef: 'fn', type: 'CONTAINS' }],
+    });
+
+    const affectedNodes = await resolveAffectedNodes(neo4jAdapter, [filePath], projectId);
+    const result = evaluateEnforcementGate(enforcedConfig, affectedNodes);
+
+    expect(affectedNodes).toHaveLength(1);
+    expect(affectedNodes[0].riskTier).toBe('CRITICAL');
+    expect(affectedNodes[0].hasTests).toBe(false);
+    expect(result.decision).toBe('BLOCK');
+  });
+
+  it('SPEC: gate checks TESTED_BY edges for hasTests determination (requires live Neo4j fixture)', async () => {
+    const filePath = '/integration/rf2/critical-tested.ts';
+
+    await eph.seed({
+      nodes: [
+        {
+          labels: ['SourceFile'],
+          ref: 'sf',
+          properties: { name: 'critical-tested.ts', filePath },
+        },
+        {
+          labels: ['Function'],
+          ref: 'fn',
+          properties: {
+            id: 'fn_gate_critical_tested',
+            name: 'criticalTestedPath',
+            filePath,
+            riskTier: 'CRITICAL',
+            compositeRisk: 0.96,
+          },
+        },
+        {
+          labels: ['TestFile'],
+          ref: 'tf',
+          properties: {
+            id: 'test_file_gate_critical_tested',
+            name: 'critical-tested.spec.ts',
+            filePath: '/integration/rf2/critical-tested.spec.ts',
+          },
+        },
+      ],
+      edges: [
+        { fromRef: 'sf', toRef: 'fn', type: 'CONTAINS' },
+        { fromRef: 'sf', toRef: 'tf', type: 'TESTED_BY' },
+      ],
+    });
+
+    const affectedNodes = await resolveAffectedNodes(neo4jAdapter, [filePath], projectId);
+    const result = evaluateEnforcementGate(enforcedConfig, affectedNodes);
+
+    expect(affectedNodes).toHaveLength(1);
+    expect(affectedNodes[0].riskTier).toBe('CRITICAL');
+    expect(affectedNodes[0].hasTests).toBe(true);
+    expect(result.decision).toBe('ALLOW');
+    expect(result.approvalRequired).toBeUndefined();
+  });
 });
 
 // ─── Test Helpers ───

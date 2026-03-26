@@ -325,20 +325,141 @@ describe('AUD: parsePlanProject multi-file', () => {
 // SPEC GAP FINDINGS (behaviors 11, 12)
 // ============================================================================
 
-describe('AUD: SPEC GAP — Status: override (behavior 11)', () => {
-  // SPEC GAP: Status: line override not implemented. See FIND-11a-07. Implementation deferred to AUD-TC-11d follow-up milestone.
-  it.skip('Status: line override not implemented — FIND-11a-07', () => {
-    // Verified against src/core/parsers/plan-parser.ts:
-    // - STATUS_LINE regex exists but is never consumed in parseFile().
-    // - milestone/task status is derived from checkbox state and header emoji only.
+describe('AUD: Status line override (behavior 11)', () => {
+  it('Status: blocked overrides checkbox-inferred status — FIND-11a-07', () => {
+    const result = parse(`
+## Tasks
+- [ ] Task with explicit status
+  **Status**: blocked
+`);
+    const task = findNode(result, 'Task', 'Task with explicit status');
+    expect(task).toBeDefined();
+    expect(task!.properties.status).toBe('blocked');
+  });
+
+  it.each(['blocked', 'in-progress', 'deferred', 'planned', 'done'])(
+    'supports status override value: %s',
+    (statusValue) => {
+      const result = parse(`
+## Tasks
+- [ ] Task with status
+  **Status**: ${statusValue}
+`);
+      const task = findNode(result, 'Task', 'Task with status');
+      expect(task).toBeDefined();
+      expect(task!.properties.status).toBe(statusValue);
+    },
+  );
+
+  it('invalid status override falls back to checkbox inference', () => {
+    const result = parse(`
+## Tasks
+- [ ] Task with invalid status
+  **Status**: waiting-on-review
+`);
+    const task = findNode(result, 'Task', 'Task with invalid status');
+    expect(task).toBeDefined();
+    expect(task!.properties.status).toBe('planned');
+  });
+
+  it('status override wins over unchecked checkbox state', () => {
+    const result = parse(`
+## Tasks
+- [ ] Checkbox says planned
+  **Status**: done
+`);
+    const task = findNode(result, 'Task', 'Checkbox says planned');
+    expect(task).toBeDefined();
+    expect(task!.properties.status).toBe('done');
+  });
+
+  it('status override wins over checked checkbox state', () => {
+    const result = parse(`
+## Tasks
+- [x] Checkbox says done
+  **Status**: blocked
+`);
+    const task = findNode(result, 'Task', 'Checkbox says done');
+    expect(task).toBeDefined();
+    expect(task!.properties.status).toBe('blocked');
   });
 });
 
-describe('AUD: SPEC GAP — MODIFIES edges (behavior 12)', () => {
-  // SPEC GAP: MODIFIES edge creation not implemented. See FIND-11a-08. Implementation deferred to AUD-TC-11d follow-up milestone.
-  it.skip('MODIFIES edge creation not implemented in parseFile — FIND-11a-08', () => {
-    // Verified against src/core/parsers/plan-parser.ts:
-    // - PlanEdgeType.MODIFIES exists but parseFile() never emits MODIFIES edges.
-    // - file_path refs become unresolvedRefs and are later enriched as HAS_CODE_EVIDENCE.
+describe('AUD: MODIFIES refs from task backtick file paths (behavior 12)', () => {
+  it('creates MODIFIES unresolvedRef for qualifying backtick file path — FIND-11a-08', () => {
+    const result = parse(`
+## Tasks
+- [ ] Update parser internals in \`src/core/foo.ts\` and tidy \`forEach\`
+`);
+
+    const modifiesRefs = result.unresolvedRefs.filter((r) => r.refType === PlanEdgeType.MODIFIES);
+    expect(modifiesRefs.length).toBe(1);
+    expect(modifiesRefs[0].refValue).toBe('src/core/foo.ts');
+  });
+
+  it('records both file_path and MODIFIES refs for same task/file (semantic distinction)', () => {
+    const result = parse(`
+## Tasks
+- [x] Implement changes in \`src/core/parsers/plan-parser.ts\`
+`);
+
+    const fileRefs = result.unresolvedRefs.filter(
+      (r) => r.refType === 'file_path' && r.refValue === 'src/core/parsers/plan-parser.ts',
+    );
+    const modifiesRefs = result.unresolvedRefs.filter(
+      (r) => r.refType === PlanEdgeType.MODIFIES && r.refValue === 'src/core/parsers/plan-parser.ts',
+    );
+
+    expect(fileRefs.length).toBe(1);
+    expect(modifiesRefs.length).toBe(1);
+  });
+
+  it('creates MODIFIES refs regardless of task status', () => {
+    const result = parse(`
+## Tasks
+- [ ] Planned task updates \`src/a.ts\`
+- [x] Done task updates \`src/b.ts\`
+- [ ] Blocked task updates \`src/c.ts\`
+  **Status**: blocked
+`);
+
+    const modifiesRefs = result.unresolvedRefs.filter((r) => r.refType === PlanEdgeType.MODIFIES);
+    const values = modifiesRefs.map((r) => r.refValue).sort();
+    expect(values).toEqual(['src/a.ts', 'src/b.ts', 'src/c.ts']);
+  });
+
+  it('records MODIFIES unresolvedRefs for non-existent files (no dangling parsed edge)', () => {
+    const result = parse(`
+## Tasks
+- [ ] Intend to modify \`src/does/not/exist.ts\`
+`);
+
+    const modifiesRefs = result.unresolvedRefs.filter((r) => r.refType === PlanEdgeType.MODIFIES);
+    expect(modifiesRefs.length).toBe(1);
+    expect(result.edges.some((e) => e.type === PlanEdgeType.MODIFIES)).toBe(false);
+  });
+
+  it('creates multiple MODIFIES refs from multiple qualifying backtick paths in one task', () => {
+    const result = parse(`
+## Tasks
+- [ ] Touch \`src/a.ts\`, \`src/b.js\`, \`src/ui/c.tsx\`, and \`src/script.py\`
+`);
+
+    const modifiesValues = result.unresolvedRefs
+      .filter((r) => r.refType === PlanEdgeType.MODIFIES)
+      .map((r) => r.refValue)
+      .sort();
+
+    expect(modifiesValues).toEqual(['src/a.ts', 'src/b.js', 'src/script.py', 'src/ui/c.tsx']);
+  });
+
+  it('ignores non-path or non-code-extension backtick content for MODIFIES', () => {
+    const result = parse(`
+## Tasks
+- [ ] Mention \`forEach\`, \`projectId\`, \`riskTier\`, \`parseFile()\`, \`README.md\`, \`foo.ts\`
+`);
+
+    const modifiesRefs = result.unresolvedRefs.filter((r) => r.refType === PlanEdgeType.MODIFIES);
+    expect(modifiesRefs.length).toBe(0);
   });
 });
