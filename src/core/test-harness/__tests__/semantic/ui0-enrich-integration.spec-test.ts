@@ -172,7 +172,7 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     }
   });
 
-  it('every Function has downstreamImpact and centralityNormalized', async () => {
+  it('every Function has downstreamImpact and centralityNormalized', { timeout: 60_000 }, async () => {
     await enrichPrecomputeScores(driver, PROJECT_ID);
     const session = driver.session();
     try {

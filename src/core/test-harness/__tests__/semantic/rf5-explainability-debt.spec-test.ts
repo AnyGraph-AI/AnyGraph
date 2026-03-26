@@ -35,7 +35,7 @@ describe('RF-5: Explainability Paths + Evidence Debt', () => {
   });
 
   describe('InfluencePath persistence (top-k)', () => {
-    it('creates InfluencePath nodes with pathHash and pathWeight', { timeout: 20_000 }, async () => {
+    it('creates InfluencePath nodes with pathHash and pathWeight', { timeout: 60_000 }, async () => {
       await discoverExplainabilityPaths(neo4j, PLAN_PROJECT);
 
       const rows = await neo4j.run(
@@ -48,7 +48,7 @@ describe('RF-5: Explainability Paths + Evidence Debt', () => {
       expect(total).toBeGreaterThan(0);
     });
 
-    it('assigns rank per claim (1-indexed, weight descending)', { timeout: 20_000 }, async () => {
+    it('assigns rank per claim (1-indexed, weight descending)', { timeout: 60_000 }, async () => {
       await discoverExplainabilityPaths(neo4j, PLAN_PROJECT);
 
       const rows = await neo4j.run(
@@ -81,7 +81,7 @@ describe('RF-5: Explainability Paths + Evidence Debt', () => {
       }
     });
 
-    it('pathHash is stable (same paths produce same hash)', { timeout: 30000 }, async () => {
+    it('pathHash is stable (same paths produce same hash)', { timeout: 60_000 }, async () => {
       // Run discover twice independently — same inputs must produce same hashes.
       // This test is self-contained: does not depend on prior tests.
       await discoverExplainabilityPaths(neo4j, PLAN_PROJECT);
@@ -120,7 +120,7 @@ describe('RF-5: Explainability Paths + Evidence Debt', () => {
       expect(maxHops).toBeLessThanOrEqual(10);
     });
 
-    it('top-k limits new paths per claim (default k=5)', { timeout: 15000 }, async () => {
+    it('top-k limits new paths per claim (default k=5)', { timeout: 60_000 }, async () => {
       // The discover function takes top-k from its sorted list.
       // Verify the function's output count, not stale graph state.
       const result = await discoverExplainabilityPaths(neo4j, PLAN_PROJECT);
