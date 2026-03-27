@@ -77,7 +77,9 @@ describe('[AUD-TC-04-L1-05] run-integrity-daily-job.ts', () => {
     });
 
     it('(9) throws error when no JSON line found', () => {
-      expect(sourceCode).toMatch(/throw new Error.*No JSON output/);
+      // Now throws ParseError instead of generic Error (SPEC-GAP-02 fix)
+      expect(sourceCode).toMatch(/throw new ParseError/);
+      expect(sourceCode).toContain('No JSON output');
     });
   });
 
@@ -139,13 +141,67 @@ describe('[AUD-TC-04-L1-05] run-integrity-daily-job.ts', () => {
       expect(sourceCode).toContain('error:');
     });
 
-    it('(20) exits with code 1 on failure', () => {
+    it('(20) exits with code 1 on parse failure', () => {
       expect(sourceCode).toContain('process.exit(1)');
     });
 
     it('(21) error message extracted from Error instance', () => {
       expect(sourceCode).toMatch(/error\s*instanceof\s*Error/);
       expect(sourceCode).toContain('error.message');
+    });
+  });
+
+  describe('SPEC-GAP-02: explicit exit propagation', () => {
+    it('(23) defines SubScriptExitError class for non-zero exits', () => {
+      expect(sourceCode).toContain('class SubScriptExitError');
+      expect(sourceCode).toContain('exitCode');
+    });
+
+    it('(24) defines ParseError class for JSON parse failures', () => {
+      expect(sourceCode).toContain('class ParseError');
+      expect(sourceCode).toContain('No JSON output');
+    });
+
+    it('(25) runJsonScript catches execFileSync errors and throws SubScriptExitError', () => {
+      // Verify try/catch around execFileSync
+      expect(sourceCode).toMatch(/try\s*\{[^}]*execFileSync/);
+      expect(sourceCode).toContain('throw new SubScriptExitError');
+    });
+
+    it('(26) SubScriptExitError includes exit code from sub-script', () => {
+      expect(sourceCode).toMatch(/e\.status\s*\?\?\s*1/);
+      expect(sourceCode).toContain('this.exitCode = exitCode');
+    });
+
+    it('(27) error handler checks for SubScriptExitError and propagates exit code', () => {
+      expect(sourceCode).toContain('error instanceof SubScriptExitError');
+      expect(sourceCode).toContain('process.exit(error.exitCode)');
+    });
+
+    it('(28) error handler checks for ParseError and exits 1', () => {
+      expect(sourceCode).toContain('error instanceof ParseError');
+      // ParseError branch should exit 1
+      const parseErrorBranch = sourceCode.match(/instanceof ParseError[\s\S]*?process\.exit\(1\)/);
+      expect(parseErrorBranch).not.toBeNull();
+    });
+
+    it('(29) SubScriptExitError output includes errorType: exitCode', () => {
+      expect(sourceCode).toContain("errorType: 'exitCode'");
+    });
+
+    it('(30) ParseError output includes errorType: parseError', () => {
+      expect(sourceCode).toContain("errorType: 'parseError'");
+    });
+
+    it('(31) failure modes produce distinguishable error output', () => {
+      // exitCode errors include exitCode field
+      expect(sourceCode).toMatch(/errorType:\s*['"]exitCode['"][\s\S]*?exitCode:\s*error\.exitCode/);
+      // parseError errors have different errorType
+      expect(sourceCode).toMatch(/errorType:\s*['"]parseError['"]/);
+    });
+
+    it('(32) runJsonScript throws ParseError (not generic Error) for no JSON', () => {
+      expect(sourceCode).toContain('throw new ParseError(scriptPath)');
     });
   });
 

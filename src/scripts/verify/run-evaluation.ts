@@ -190,6 +190,7 @@ async function runEvaluation(projectId: string) {
       await session.run(`
         MATCH (run:EvaluationRun {runId: $runId})
         CREATE (run)-[:MEASURED {sourceKind: 'evaluation'}]->(m:MetricResult {
+          metricResultId: $metricResultId,
           metric: $metric,
           value: $value,
           baselineValue: $baseline,
@@ -199,6 +200,7 @@ async function runEvaluation(projectId: string) {
         })
       `, {
         runId,
+        metricResultId: `mr_${runId}_${metric.name}`,
         metric: metric.name,
         value,
         baseline: baseline ?? -1,
@@ -206,6 +208,36 @@ async function runEvaluation(projectId: string) {
         status,
         pid: projectId,
       });
+
+      // Create RegressionCase node when regression detected (SPEC-GAP-01)
+      if (status === 'regressed') {
+        const regressionCaseId = `rc_${runId}_${metric.name}`;
+        await session.run(`
+          MATCH (run:EvaluationRun {runId: $runId})
+          MATCH (m:MetricResult {metricResultId: $metricResultId})
+          CREATE (rc:RegressionCase {
+            regressionCaseId: $regressionCaseId,
+            metricName: $metricName,
+            metricValue: $metricValue,
+            baselineValue: $baselineValue,
+            delta: $delta,
+            detectedAt: datetime(),
+            runId: $runId,
+            projectId: $pid
+          })
+          CREATE (rc)-[:REGRESSION_OF {sourceKind: 'evaluation'}]->(m)
+          CREATE (rc)-[:DETECTED_IN {sourceKind: 'evaluation'}]->(run)
+        `, {
+          runId,
+          metricResultId: `mr_${runId}_${metric.name}`,
+          regressionCaseId,
+          metricName: metric.name,
+          metricValue: value,
+          baselineValue: baseline ?? -1,
+          delta: delta ?? 0,
+          pid: projectId,
+        });
+      }
       
       results.push({ metric: metric.name, value, baseline, delta, status });
     }

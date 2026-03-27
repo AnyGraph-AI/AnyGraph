@@ -188,4 +188,66 @@ describe('[AUD-TC-04-L1-04] run-evaluation.ts', () => {
       expect(sourceCode).toContain("!pid.includes('quran')");
     });
   });
+
+  describe('RegressionCase node creation (SPEC-GAP-01)', () => {
+    it('(20) creates RegressionCase when status is regressed', () => {
+      // Contract: SPEC-GAP-01 - RegressionCase nodes created on regression detection
+      expect(sourceCode).toContain("status === 'regressed'");
+      expect(sourceCode).toContain('CREATE (rc:RegressionCase');
+    });
+
+    it('(21) RegressionCase NOT created when no regression (status !== regressed)', () => {
+      // Contract: Only create RegressionCase for actual regressions
+      // Implementation uses conditional: if (status === 'regressed') { ... }
+      // Verify the CREATE is inside the conditional block
+      const conditionalMatch = sourceCode.match(/if\s*\(\s*status\s*===\s*'regressed'\s*\)\s*\{[\s\S]*?CREATE \(rc:RegressionCase/);
+      expect(conditionalMatch).not.toBeNull();
+    });
+
+    it('(22) RegressionCase has required properties per spec', () => {
+      // Contract: regressionCaseId, metricName, metricValue, baselineValue, delta, detectedAt, runId, projectId
+      expect(sourceCode).toContain('regressionCaseId:');
+      expect(sourceCode).toContain('metricName:');
+      expect(sourceCode).toContain('metricValue:');
+      expect(sourceCode).toContain('baselineValue:');
+      // delta already covered in MetricResult tests
+      expect(sourceCode).toContain('detectedAt:');
+      // runId and projectId in RegressionCase block
+      const rcBlock = sourceCode.match(/CREATE \(rc:RegressionCase \{[\s\S]*?\}\)/);
+      expect(rcBlock).not.toBeNull();
+      expect(rcBlock![0]).toContain('runId:');
+      expect(rcBlock![0]).toContain('projectId:');
+    });
+
+    it('(23) REGRESSION_OF edge links RegressionCase to MetricResult', () => {
+      // Contract: RegressionCase -[:REGRESSION_OF]-> MetricResult
+      expect(sourceCode).toMatch(/CREATE \(rc\)-\[:REGRESSION_OF.*\]->\(m\)/);
+    });
+
+    it('(24) DETECTED_IN edge links RegressionCase to EvaluationRun', () => {
+      // Contract: RegressionCase -[:DETECTED_IN]-> EvaluationRun
+      expect(sourceCode).toMatch(/CREATE \(rc\)-\[:DETECTED_IN.*\]->\(run\)/);
+    });
+
+    it('(25) regressionCaseId format is rc_{runId}_{metricName}', () => {
+      // Contract: unique identifier format
+      expect(sourceCode).toMatch(/regressionCaseId.*`rc_\$\{runId\}_\$\{metric\.name\}`/);
+    });
+
+    it('(26) MetricResult has metricResultId for edge linkage', () => {
+      // Contract: Need stable ID on MetricResult for RegressionCase to reference
+      expect(sourceCode).toContain('metricResultId:');
+      expect(sourceCode).toMatch(/metricResultId:.*`mr_\$\{runId\}_\$\{metric\.name\}`/);
+    });
+
+    it('(27) REGRESSION_OF edge has sourceKind property', () => {
+      // Contract: All derived edges have sourceKind
+      expect(sourceCode).toMatch(/:REGRESSION_OF\s*\{[^}]*sourceKind:/);
+    });
+
+    it('(28) DETECTED_IN edge has sourceKind property', () => {
+      // Contract: All derived edges have sourceKind
+      expect(sourceCode).toMatch(/:DETECTED_IN\s*\{[^}]*sourceKind:/);
+    });
+  });
 });
