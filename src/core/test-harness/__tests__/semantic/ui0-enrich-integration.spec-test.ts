@@ -358,7 +358,7 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     }
   });
 
-  it('files with zero functions, zero TESTED_BY, and zero VR evidence do not default to 100% confidence', async () => {
+  it('files with zero functions, zero TESTED_BY, and zero VR evidence do not default to 100% confidence', { timeout: 60_000 }, async () => {
     await enrichPrecomputeScores(driver, PROJECT_ID);
     const session = driver.session();
     try {

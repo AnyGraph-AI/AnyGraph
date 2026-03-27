@@ -1,0 +1,59 @@
+{
+  "generatedAt": "2026-03-27T03:33:00.000Z",
+  "chainLength": 78,
+  "steps": [
+    {
+      "index": 4,
+      "step": "enrich:temporal-coupling",
+      "writes": ["Function.temporalCoupling", "CO_CHANGES_WITH edges", "HIGH_TEMPORAL_COUPLING flag"],
+      "mustPrecede": ["enrich:composite-risk"],
+      "mustFollow": []
+    },
+    {
+      "index": 5,
+      "step": "enrich:author-ownership",
+      "writes": ["SourceFile.busFactor"],
+      "mustPrecede": ["enrich:composite-risk"],
+      "mustFollow": []
+    },
+    {
+      "index": 6,
+      "step": "enrich:git-frequency",
+      "writes": ["SourceFile.gitChangeFrequency"],
+      "mustPrecede": ["enrich:composite-risk"],
+      "mustFollow": []
+    },
+    {
+      "index": 7,
+      "step": "enrich:vr-scope",
+      "writes": ["ANALYZED edges (VerificationRun→SourceFile)"],
+      "mustPrecede": ["enrich:precompute-scores"],
+      "mustFollow": []
+    },
+    {
+      "index": 19,
+      "step": "enrich:composite-risk",
+      "reads": ["HIGH_TEMPORAL_COUPLING", "gitChangeFrequency", "busFactor"],
+      "writes": ["Function.riskTier", "Function.compositeRisk"],
+      "mustPrecede": ["enrich:precompute-scores"],
+      "mustFollow": ["enrich:temporal-coupling", "enrich:git-frequency", "enrich:author-ownership"]
+    },
+    {
+      "index": 76,
+      "step": "enrich:precompute-scores",
+      "reads": ["ANALYZED edges", "Function.riskTier", "Function.compositeRisk"],
+      "writes": ["SourceFile.confidenceScore", "SourceFile.painScore"],
+      "mustPrecede": [],
+      "mustFollow": ["enrich:vr-scope", "enrich:composite-risk"]
+    }
+  ],
+  "validatedPairs": [
+    { "A": "enrich:temporal-coupling", "B": "enrich:composite-risk", "indexA": 4, "indexB": 19, "satisfied": true },
+    { "A": "enrich:vr-scope", "B": "enrich:precompute-scores", "indexA": 7, "indexB": 76, "satisfied": true },
+    { "A": "enrich:composite-risk", "B": "enrich:precompute-scores", "indexA": 19, "indexB": 76, "satisfied": true },
+    { "A": "enrich:git-frequency", "B": "enrich:composite-risk", "indexA": 6, "indexB": 19, "satisfied": true },
+    { "A": "enrich:author-ownership", "B": "enrich:composite-risk", "indexA": 5, "indexB": 19, "satisfied": true }
+  ],
+  "violations": [],
+  "orderingVerified": true
+}

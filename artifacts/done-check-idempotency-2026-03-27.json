@@ -1,0 +1,8 @@
+{
+  "date": "2026-03-27T04:12:00Z",
+  "run1": { "avgConf": 0.458, "fileCount": 377, "analyzed": 445, "functions": 1385 },
+  "run2": { "avgConf": 0.458, "fileCount": 377, "analyzed": 445, "functions": 1385 },
+  "delta": { "avgConf": 0, "fileCount": 0, "analyzed": 0, "functions": 0 },
+  "idempotent": true,
+  "notes": "Both runs completed with verification:done-check:completeness probe passing (ok: true, failures: []). avgConf recovered from 0.197 → 0.458 on run 1, confirming pre-TC-16 state was due to incomplete recovery after AUD-TC-01a CORR-10 incident (verification:scan not re-run). Full pipeline produces stable, reproducible output."
+}

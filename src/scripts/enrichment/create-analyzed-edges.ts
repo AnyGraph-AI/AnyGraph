@@ -129,7 +129,15 @@ export async function enrichAnalyzedEdges(
   const session = driver.session();
 
   try {
-    // 0. Clean old ANALYZED edges (idempotent re-run)
+    // 0a. Pre-run snapshot: count existing ANALYZED edges before any mutation
+    const preRunResult = await session.run(`
+      MATCH (:VerificationRun {projectId: $projectId})-[r:ANALYZED]->(:SourceFile)
+      RETURN count(r) AS preRunCount
+    `, { projectId });
+    const preRunCount = preRunResult.records[0]?.get('preRunCount')?.toNumber?.() || 0;
+    console.log(`[create-analyzed-edges] Pre-run ANALYZED edge count: ${preRunCount}`);
+
+    // 0b. Clean old ANALYZED edges (idempotent re-run)
     const deleteResult = await session.run(`
       MATCH (:VerificationRun {projectId: $projectId})-[r:ANALYZED]->(:SourceFile)
       DELETE r RETURN count(r) AS deleted
@@ -241,6 +249,23 @@ export async function enrichAnalyzedEdges(
     const uniqueFiles = new Set([...familyFilePairs.values()].flatMap(s => [...s])).size;
 
     console.log(`Created ${totalCreated} ANALYZED edges (${familyFilePairs.size} families → ${uniqueFiles} files)`);
+
+    // Post-run verification: count ANALYZED edges after recreation
+    const postRunResult = await session.run(`
+      MATCH (:VerificationRun {projectId: $projectId})-[r:ANALYZED]->(:SourceFile)
+      RETURN count(r) AS postRunCount
+    `, { projectId });
+    const postRunCount = postRunResult.records[0]?.get('postRunCount')?.toNumber?.() || 0;
+    console.log(`[create-analyzed-edges] Post-run ANALYZED edge count: ${postRunCount} (was: ${preRunCount})`);
+
+    // DESTRUCTIVE FAILURE GUARD: If we deleted edges but created 0, graph is corrupted
+    if (postRunCount === 0 && preRunCount > 0) {
+      const errorMessage = `[create-analyzed-edges] DESTRUCTIVE FAILURE: deleted ${preRunCount} edges, recreated 0. ` +
+        `Graph state is corrupted. Run recovery: ` +
+        `enrich:vr-scope && enrich:composite-risk && enrich:precompute-scores`;
+      console.error(errorMessage);
+      throw new Error(errorMessage);
+    }
 
     return { edgesCreated: totalCreated, vrCount: familyFilePairs.size, fileCount: uniqueFiles };
 
