@@ -55,6 +55,12 @@ function createMockResult(records: ReturnType<typeof createMockRecord>[]) {
   };
 }
 
+type MockTransaction = {
+  run: ReturnType<typeof vi.fn>;
+  commit: ReturnType<typeof vi.fn>;
+  rollback: ReturnType<typeof vi.fn>;
+};
+
 type MockDriver = {
   session: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
@@ -62,51 +68,59 @@ type MockDriver = {
 
 type MockSession = {
   run: ReturnType<typeof vi.fn>;
+  beginTransaction: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
 };
 
 describe('[AUD-TC-16] destructive step guard', () => {
+  let mockTx: MockTransaction;
   let mockSession: MockSession;
   let mockDriver: MockDriver;
   let runResponses: Map<string, ReturnType<typeof createMockResult>>;
 
   beforeEach(() => {
     runResponses = new Map();
-    
-    mockSession = {
+
+    // tx.run handles DELETE + MERGE (inside transaction boundary)
+    mockTx = {
       run: vi.fn().mockImplementation((query: string) => {
-        // Match query patterns and return appropriate responses
-        if (query.includes('RETURN count(r) AS preRunCount')) {
-          return Promise.resolve(runResponses.get('preRunCount') || 
-            createMockResult([createMockRecord({ preRunCount: 0 })]));
-        }
         if (query.includes('DELETE r RETURN count(r) AS deleted')) {
-          return Promise.resolve(runResponses.get('deleted') || 
+          return Promise.resolve(runResponses.get('deleted') ||
             createMockResult([createMockRecord({ deleted: 0 })]));
         }
+        if (query.includes('MERGE (vr)-[r:ANALYZED]->(sf)')) {
+          return Promise.resolve(runResponses.get('created') ||
+            createMockResult([createMockRecord({ created: 0 })]));
+        }
+        return Promise.resolve(createMockResult([]));
+      }),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+    };
+
+    // session.run handles all read-only queries (pre/post count, sourceFiles, scopes)
+    mockSession = {
+      run: vi.fn().mockImplementation((query: string) => {
+        if (query.includes('RETURN count(r) AS preRunCount')) {
+          return Promise.resolve(runResponses.get('preRunCount') ||
+            createMockResult([createMockRecord({ preRunCount: 0 })]));
+        }
         if (query.includes('RETURN sf.filePath AS filePath')) {
-          return Promise.resolve(runResponses.get('sourceFiles') || 
+          return Promise.resolve(runResponses.get('sourceFiles') ||
             createMockResult([]));
         }
         if (query.includes('RETURN vr.id AS vrId')) {
-          return Promise.resolve(runResponses.get('scopes') || 
+          return Promise.resolve(runResponses.get('scopes') ||
             createMockResult([]));
         }
-        if (query.includes('WHERE NOT EXISTS')) {
-          return Promise.resolve(createMockResult([]));
-        }
-        if (query.includes('MERGE (vr)-[r:ANALYZED]->(sf)')) {
-          return Promise.resolve(runResponses.get('created') || 
-            createMockResult([createMockRecord({ created: 0 })]));
-        }
         if (query.includes('RETURN count(r) AS postRunCount')) {
-          return Promise.resolve(runResponses.get('postRunCount') || 
+          return Promise.resolve(runResponses.get('postRunCount') ||
             createMockResult([createMockRecord({ postRunCount: 0 })]));
         }
-        
-        // Default: empty result
+        // noScopeResult and any other read queries
         return Promise.resolve(createMockResult([]));
       }),
+      beginTransaction: vi.fn().mockReturnValue(mockTx),
       close: vi.fn().mockResolvedValue(undefined),
     };
 

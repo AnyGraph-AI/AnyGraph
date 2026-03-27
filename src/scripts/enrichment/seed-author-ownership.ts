@@ -83,7 +83,7 @@ async function main() {
   const session = driver.session();
 
   try {
-    // Get all source files from graph
+    // Get all source files from graph (READ-ONLY, outside transaction)
     const filesResult = await session.run(
       'MATCH (sf:SourceFile {projectId: $pid}) RETURN sf.filePath AS filePath',
       { pid: project.id }
@@ -92,17 +92,11 @@ async function main() {
     const files = filesResult.records.map(r => r.get('filePath') as string);
     console.log(`Found ${files.length} source files in graph`);
 
-    // Clear existing author data
-    await session.run(
-      'MATCH (a:Author {projectId: $pid}) DETACH DELETE a',
-      { pid: project.id }
-    );
-    console.log('Cleared existing Author nodes');
-
-    // Process each file
+    // Process each file to get blame data (READ-ONLY git operations, outside transaction)
     let processed = 0;
     let skipped = 0;
     const allAuthors = new Map<string, Set<string>>(); // author → files they own
+    const fileAuthorData = new Map<string, { entropy: number; author: string; pct: number }>();
 
     for (const filePath of files) {
       const blame = getBlameForFile(project.path, filePath);
@@ -130,66 +124,92 @@ async function main() {
       }
       allAuthors.get(primaryAuthor)!.add(filePath);
 
-      // Set authorEntropy on SourceFile
-      await session.run(`
-        MATCH (sf:SourceFile {filePath: $filePath, projectId: $pid})
-        SET sf.authorEntropy = $entropy, sf.primaryAuthor = $author, sf.ownershipPct = $pct
-      `, {
-        filePath,
-        pid: project.id,
-        entropy: neo4j.int(authorEntropy),
-        author: primaryAuthor,
-        pct: neo4j.int(ownershipPct),
-      });
-
+      // Store for later DB write
+      fileAuthorData.set(filePath, { entropy: authorEntropy, author: primaryAuthor, pct: ownershipPct });
       processed++;
     }
 
     console.log(`\nProcessed ${processed} files, skipped ${skipped}`);
 
-    // Create Author nodes and OWNED_BY edges
-    for (const [authorName, ownedFiles] of allAuthors) {
-      const authorId = `author_${project.id}_${authorName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    // === TRANSACTION BOUNDARY: DELETE + RECREATE must be atomic (SCAR-012 fix) ===
+    // If anything throws between delete and recreate, Neo4j rolls back both.
+    const tx = session.beginTransaction();
 
-      await session.run(`
-        MERGE (a:Author {id: $authorId})
-        SET a.name = $name, a.projectId = $pid, a.fileCount = $fileCount
-      `, {
-        authorId,
-        name: authorName,
-        pid: project.id,
-        fileCount: neo4j.int(ownedFiles.size),
-      });
+    try {
+      // Clear existing author data — INSIDE TRANSACTION
+      await tx.run(
+        'MATCH (a:Author {projectId: $pid}) DETACH DELETE a',
+        { pid: project.id }
+      );
+      console.log('Cleared existing Author nodes');
 
-      // Create OWNED_BY edges
-      for (const filePath of ownedFiles) {
-        await session.run(`
+      // Set authorEntropy on each SourceFile — INSIDE TRANSACTION
+      for (const [filePath, data] of fileAuthorData) {
+        await tx.run(`
           MATCH (sf:SourceFile {filePath: $filePath, projectId: $pid})
-          MATCH (a:Author {id: $authorId})
-          MERGE (sf)-[r:OWNED_BY]->(a)
-          ON CREATE SET r.projectId = $pid, r.derived = true, r.source = 'author-ownership'
-          ON MATCH SET r.projectId = $pid
-        `, { filePath, pid: project.id, authorId });
+          SET sf.authorEntropy = $entropy, sf.primaryAuthor = $author, sf.ownershipPct = $pct
+        `, {
+          filePath,
+          pid: project.id,
+          entropy: neo4j.int(data.entropy),
+          author: data.author,
+          pct: neo4j.int(data.pct),
+        });
       }
+
+      // Create Author nodes and OWNED_BY edges — INSIDE TRANSACTION
+      for (const [authorName, ownedFiles] of allAuthors) {
+        const authorId = `author_${project.id}_${authorName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+        await tx.run(`
+          MERGE (a:Author {id: $authorId})
+          SET a.name = $name, a.projectId = $pid, a.fileCount = $fileCount
+        `, {
+          authorId,
+          name: authorName,
+          pid: project.id,
+          fileCount: neo4j.int(ownedFiles.size),
+        });
+
+        // Create OWNED_BY edges
+        for (const filePath of ownedFiles) {
+          await tx.run(`
+            MATCH (sf:SourceFile {filePath: $filePath, projectId: $pid})
+            MATCH (a:Author {id: $authorId})
+            MERGE (sf)-[r:OWNED_BY]->(a)
+            ON CREATE SET r.projectId = $pid, r.derived = true, r.source = 'author-ownership'
+            ON MATCH SET r.projectId = $pid
+          `, { filePath, pid: project.id, authorId });
+        }
+      }
+
+      // Update risk scoring with author entropy — INSIDE TRANSACTION
+      const updateResult = await tx.run(`
+        MATCH (sf:SourceFile {projectId: $pid})
+        WHERE sf.authorEntropy IS NOT NULL AND sf.authorEntropy > 1
+        MATCH (sf)-[:CONTAINS]->(f)
+        WHERE (f:Function OR f:Method) AND f.riskLevel IS NOT NULL
+        SET f.riskLevelV2 = f.riskLevel * (1 + (sf.authorEntropy - 1) * 0.15)
+        RETURN count(f) AS updated
+      `, { pid: project.id });
+
+      const updated = updateResult.records[0]?.get('updated');
+      console.log(`\nUpdated riskLevelV2 on ${updated} functions (authorEntropy factor)`);
+
+      // Commit transaction — delete + all creates + risk update are atomic
+      await tx.commit();
+    } catch (err) {
+      // Rollback on any error — graph returns to pre-run state
+      await tx.rollback();
+      console.error('[seed-author-ownership] Transaction rolled back due to error:', err);
+      throw err;
     }
+    // === END TRANSACTION BOUNDARY ===
 
     console.log(`\nCreated ${allAuthors.size} Author nodes:`);
     for (const [author, files] of allAuthors) {
       console.log(`  ${author}: ${files.size} files`);
     }
-
-    // Update risk scoring with author entropy
-    const updateResult = await session.run(`
-      MATCH (sf:SourceFile {projectId: $pid})
-      WHERE sf.authorEntropy IS NOT NULL AND sf.authorEntropy > 1
-      MATCH (sf)-[:CONTAINS]->(f)
-      WHERE (f:Function OR f:Method) AND f.riskLevel IS NOT NULL
-      SET f.riskLevelV2 = f.riskLevel * (1 + (sf.authorEntropy - 1) * 0.15)
-      RETURN count(f) AS updated
-    `, { pid: project.id });
-
-    const updated = updateResult.records[0]?.get('updated');
-    console.log(`\nUpdated riskLevelV2 on ${updated} functions (authorEntropy factor)`);
 
     // Summary stats
     const statsResult = await session.run(`

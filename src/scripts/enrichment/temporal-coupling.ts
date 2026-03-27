@@ -125,60 +125,76 @@ export async function ingestCoChanges(pairs: CoChangePair[], projectId: string) 
   const session = driver.session();
 
   try {
-    // Clear existing CO_CHANGES_WITH edges for this project
-    const deleted = await session.run(`
-      MATCH (s1:SourceFile {projectId: $pid})-[r:CO_CHANGES_WITH]-(s2:SourceFile {projectId: $pid})
-      DELETE r
-      RETURN count(r) AS deleted
-    `, { pid: projectId });
-    const deletedCount = deleted.records[0]?.get('deleted')?.toNumber?.() ?? 0;
-    if (deletedCount > 0) {
-      console.log(`  Cleared ${deletedCount} existing CO_CHANGES_WITH edges`);
-    }
-
-    // Create edges in batches
+    // === TRANSACTION BOUNDARY: DELETE + RECREATE must be atomic (SCAR-012 fix) ===
+    // If anything throws between delete and recreate, Neo4j rolls back both.
+    const tx = session.beginTransaction();
     let created = 0;
-    const BATCH_SIZE = 100;
+    let updated = 0;
 
-    for (let i = 0; i < pairs.length; i += BATCH_SIZE) {
-      const batch = pairs.slice(i, i + BATCH_SIZE);
-      const result = await session.run(`
-        UNWIND $pairs AS pair
-        MATCH (s1:SourceFile {projectId: $pid})
-        WHERE s1.filePath ENDS WITH pair.file1 OR s1.name = pair.file1
-        MATCH (s2:SourceFile {projectId: $pid})
-        WHERE s2.filePath ENDS WITH pair.file2 OR s2.name = pair.file2
-        AND s1 <> s2
-        MERGE (s1)-[r:CO_CHANGES_WITH]-(s2)
-        SET r.projectId = $pid,
-            r.coChangeCount = pair.coChangeCount,
-            r.commits = pair.commits,
-            r.lastCoChange = pair.lastCoChange,
-            r.couplingStrength = CASE 
-              WHEN pair.coChangeCount >= 10 THEN 'STRONG'
-              WHEN pair.coChangeCount >= 5 THEN 'MODERATE'
-              ELSE 'WEAK'
-            END
-        RETURN count(r) AS created
-      `, { pairs: batch, pid: projectId });
-      created += result.records[0]?.get('created')?.toNumber?.() ?? 0;
+    try {
+      // Clear existing CO_CHANGES_WITH edges for this project — INSIDE TRANSACTION
+      const deleted = await tx.run(`
+        MATCH (s1:SourceFile {projectId: $pid})-[r:CO_CHANGES_WITH]-(s2:SourceFile {projectId: $pid})
+        DELETE r
+        RETURN count(r) AS deleted
+      `, { pid: projectId });
+      const deletedCount = deleted.records[0]?.get('deleted')?.toNumber?.() ?? 0;
+      if (deletedCount > 0) {
+        console.log(`  Cleared ${deletedCount} existing CO_CHANGES_WITH edges`);
+      }
+
+      // Create edges in batches — INSIDE TRANSACTION
+      const BATCH_SIZE = 100;
+
+      for (let i = 0; i < pairs.length; i += BATCH_SIZE) {
+        const batch = pairs.slice(i, i + BATCH_SIZE);
+        const result = await tx.run(`
+          UNWIND $pairs AS pair
+          MATCH (s1:SourceFile {projectId: $pid})
+          WHERE s1.filePath ENDS WITH pair.file1 OR s1.name = pair.file1
+          MATCH (s2:SourceFile {projectId: $pid})
+          WHERE s2.filePath ENDS WITH pair.file2 OR s2.name = pair.file2
+          AND s1 <> s2
+          MERGE (s1)-[r:CO_CHANGES_WITH]-(s2)
+          SET r.projectId = $pid,
+              r.coChangeCount = pair.coChangeCount,
+              r.commits = pair.commits,
+              r.lastCoChange = pair.lastCoChange,
+              r.couplingStrength = CASE 
+                WHEN pair.coChangeCount >= 10 THEN 'STRONG'
+                WHEN pair.coChangeCount >= 5 THEN 'MODERATE'
+                ELSE 'WEAK'
+              END
+          RETURN count(r) AS created
+        `, { pairs: batch, pid: projectId });
+        created += result.records[0]?.get('created')?.toNumber?.() ?? 0;
+      }
+
+      console.log(`  Created ${created} CO_CHANGES_WITH edges`);
+
+      // Update risk scoring to include temporal coupling — INSIDE TRANSACTION
+      const riskUpdate = await tx.run(`
+        MATCH (f:Function {projectId: $pid})
+        WHERE f.riskLevel IS NOT NULL
+        OPTIONAL MATCH (sf:SourceFile)-[:CONTAINS]->(f)
+        OPTIONAL MATCH (sf)-[cc:CO_CHANGES_WITH]-(other:SourceFile)
+        WITH f, sf, sum(cc.coChangeCount) AS totalCoupling
+        SET f.temporalCoupling = totalCoupling,
+            f.riskLevelV2 = f.riskLevel * (1.0 + toFloat(totalCoupling) * 0.1)
+        RETURN count(f) AS updated
+      `, { pid: projectId });
+      updated = riskUpdate.records[0]?.get('updated')?.toNumber?.() ?? 0;
+      console.log(`  Updated riskLevelV2 on ${updated} functions`);
+
+      // Commit transaction — delete + all creates + risk update are atomic
+      await tx.commit();
+    } catch (err) {
+      // Rollback on any error — graph returns to pre-run state
+      await tx.rollback();
+      console.error('[temporal-coupling] Transaction rolled back due to error:', err);
+      throw err;
     }
-
-    console.log(`  Created ${created} CO_CHANGES_WITH edges`);
-
-    // Update risk scoring to include temporal coupling
-    const riskUpdate = await session.run(`
-      MATCH (f:Function {projectId: $pid})
-      WHERE f.riskLevel IS NOT NULL
-      OPTIONAL MATCH (sf:SourceFile)-[:CONTAINS]->(f)
-      OPTIONAL MATCH (sf)-[cc:CO_CHANGES_WITH]-(other:SourceFile)
-      WITH f, sf, sum(cc.coChangeCount) AS totalCoupling
-      SET f.temporalCoupling = totalCoupling,
-          f.riskLevelV2 = f.riskLevel * (1.0 + toFloat(totalCoupling) * 0.1)
-      RETURN count(f) AS updated
-    `, { pid: projectId });
-    const updated = riskUpdate.records[0]?.get('updated')?.toNumber?.() ?? 0;
-    console.log(`  Updated riskLevelV2 on ${updated} functions`);
+    // === END TRANSACTION BOUNDARY ===
 
     // Show top coupled pairs
     console.log('\n=== TOP 15 TEMPORALLY COUPLED FILE PAIRS ===');

@@ -136,7 +136,7 @@ async function main() {
   const session = driver.session();
 
   try {
-    // Get all source files
+    // Get all source files (READ-ONLY, outside transaction)
     const filesResult = await session.run(
       'MATCH (sf:SourceFile {projectId: $pid}) RETURN sf.filePath AS filePath',
       { pid: project.id }
@@ -144,13 +144,7 @@ async function main() {
     const files = filesResult.records.map(r => r.get('filePath') as string);
     console.log(`Found ${files.length} source files\n`);
 
-    // Clear existing layer data
-    await session.run(
-      'MATCH (l:ArchitectureLayer {projectId: $pid}) DETACH DELETE l',
-      { pid: project.id }
-    );
-
-    // Classify all files
+    // Pre-classify all files before transaction (pure computation, no DB)
     const layerCounts = new Map<string, number>();
     const fileLayerMap = new Map<string, string>();
 
@@ -158,30 +152,53 @@ async function main() {
       const layer = classifyFile(filePath, project.path, rules);
       layerCounts.set(layer, (layerCounts.get(layer) || 0) + 1);
       fileLayerMap.set(filePath, layer);
-
-      // Set layer on SourceFile
-      await session.run(`
-        MATCH (sf:SourceFile {filePath: $filePath, projectId: $pid})
-        SET sf.architectureLayer = $layer
-      `, { filePath, pid: project.id, layer });
     }
 
-    // Create ArchitectureLayer nodes
-    for (const [layer, count] of layerCounts) {
-      const layerId = `layer_${project.id}_${layer.replace(/[^a-zA-Z0-9]/g, '_')}`;
-      await session.run(`
-        MERGE (l:ArchitectureLayer {id: $layerId})
-        SET l.name = $name, l.projectId = $pid, l.fileCount = $count
-      `, { layerId, name: layer, pid: project.id, count: neo4j.int(count) });
+    // === TRANSACTION BOUNDARY: DELETE + RECREATE must be atomic (SCAR-012 fix) ===
+    // If anything throws between delete and recreate, Neo4j rolls back both.
+    const tx = session.beginTransaction();
 
-      // Create BELONGS_TO_LAYER edges
-      await session.run(`
-        MATCH (sf:SourceFile {projectId: $pid})
-        WHERE sf.architectureLayer = $layer
-        MATCH (l:ArchitectureLayer {id: $layerId})
-        MERGE (sf)-[:BELONGS_TO_LAYER]->(l)
-      `, { pid: project.id, layer, layerId });
+    try {
+      // Clear existing layer data — INSIDE TRANSACTION
+      await tx.run(
+        'MATCH (l:ArchitectureLayer {projectId: $pid}) DETACH DELETE l',
+        { pid: project.id }
+      );
+
+      // Set layer on each SourceFile — INSIDE TRANSACTION
+      for (const [filePath, layer] of fileLayerMap) {
+        await tx.run(`
+          MATCH (sf:SourceFile {filePath: $filePath, projectId: $pid})
+          SET sf.architectureLayer = $layer
+        `, { filePath, pid: project.id, layer });
+      }
+
+      // Create ArchitectureLayer nodes — INSIDE TRANSACTION
+      for (const [layer, count] of layerCounts) {
+        const layerId = `layer_${project.id}_${layer.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        await tx.run(`
+          MERGE (l:ArchitectureLayer {id: $layerId})
+          SET l.name = $name, l.projectId = $pid, l.fileCount = $count
+        `, { layerId, name: layer, pid: project.id, count: neo4j.int(count) });
+
+        // Create BELONGS_TO_LAYER edges
+        await tx.run(`
+          MATCH (sf:SourceFile {projectId: $pid})
+          WHERE sf.architectureLayer = $layer
+          MATCH (l:ArchitectureLayer {id: $layerId})
+          MERGE (sf)-[:BELONGS_TO_LAYER]->(l)
+        `, { pid: project.id, layer, layerId });
+      }
+
+      // Commit transaction — delete + all creates are atomic
+      await tx.commit();
+    } catch (err) {
+      // Rollback on any error — graph returns to pre-run state
+      await tx.rollback();
+      console.error('[seed-architecture-layers] Transaction rolled back due to error:', err);
+      throw err;
     }
+    // === END TRANSACTION BOUNDARY ===
 
     console.log('Layer distribution:');
     for (const [layer, count] of [...layerCounts.entries()].sort((a, b) => b[1] - a[1])) {

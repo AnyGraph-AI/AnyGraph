@@ -129,7 +129,7 @@ export async function enrichAnalyzedEdges(
   const session = driver.session();
 
   try {
-    // 0a. Pre-run snapshot: count existing ANALYZED edges before any mutation
+    // 0a. Pre-run snapshot: count existing ANALYZED edges before any mutation (READ-ONLY, outside transaction)
     const preRunResult = await session.run(`
       MATCH (:VerificationRun {projectId: $projectId})-[r:ANALYZED]->(:SourceFile)
       RETURN count(r) AS preRunCount
@@ -137,15 +137,7 @@ export async function enrichAnalyzedEdges(
     const preRunCount = preRunResult.records[0]?.get('preRunCount')?.toNumber?.() || 0;
     console.log(`[create-analyzed-edges] Pre-run ANALYZED edge count: ${preRunCount}`);
 
-    // 0b. Clean old ANALYZED edges (idempotent re-run)
-    const deleteResult = await session.run(`
-      MATCH (:VerificationRun {projectId: $projectId})-[r:ANALYZED]->(:SourceFile)
-      DELETE r RETURN count(r) AS deleted
-    `, { projectId });
-    const deleted = deleteResult.records[0]?.get('deleted')?.toNumber?.() || 0;
-    if (deleted > 0) console.log(`Cleaned ${deleted} old ANALYZED edges`);
-
-    // 1. Get all SourceFile paths for this project
+    // 1. Get all SourceFile paths for this project (READ-ONLY, outside transaction)
     const sfResult = await session.run(`
       MATCH (sf:SourceFile {projectId: $projectId})
       WHERE sf.filePath IS NOT NULL
@@ -172,7 +164,7 @@ export async function enrichAnalyzedEdges(
     }
     console.log(`Derived repoRoot: ${repoRoot}`);
 
-    // 2. Get all VR→AnalysisScope data with sourceFamily
+    // 2. Get all VR→AnalysisScope data with sourceFamily (READ-ONLY, outside transaction)
     const scopeResult = await session.run(`
       MATCH (vr:VerificationRun {projectId: $projectId})-[:HAS_SCOPE]->(scope:AnalysisScope)
       WHERE scope.includedPaths IS NOT NULL
@@ -203,7 +195,7 @@ export async function enrichAnalyzedEdges(
       familyFilePairs.set(family, fileSet);
     }
 
-    // 4. Count VRs without scope data (done-check etc.)
+    // 4. Count VRs without scope data (READ-ONLY, outside transaction)
     const noScopeResult = await session.run(`
       MATCH (vr:VerificationRun {projectId: $projectId})
       WHERE NOT EXISTS { (vr)-[:HAS_SCOPE]->() }
@@ -213,44 +205,68 @@ export async function enrichAnalyzedEdges(
       console.log(`  ${record.get('family')}: ${record.get('cnt')} VRs without scope (skipped — no file-level data)`);
     }
 
-    // 5. Create ANALYZED edges — one per (tool family, SourceFile)
-    //    Uses an anchor VR per family as the edge source.
-    //    Edge carries sourceFamily so queries can filter by tool.
-    //    Future: per-finding FLAGS edges when importer stores location.
-    const BATCH_SIZE = 500;
+    // === TRANSACTION BOUNDARY: DELETE + RECREATE must be atomic (SCAR-012 fix) ===
+    // If anything throws between delete and recreate, Neo4j rolls back both.
+    const tx = session.beginTransaction();
     let totalCreated = 0;
     let totalFiles = 0;
+    let deleted = 0;
 
-    for (const [family, fileSet] of familyFilePairs) {
-      const anchorVrId = familyAnchorVr.get(family)!;
-      const filePaths = [...fileSet];
-      totalFiles += filePaths.length;
+    try {
+      // 0b. Clean old ANALYZED edges (idempotent re-run) — INSIDE TRANSACTION
+      const deleteResult = await tx.run(`
+        MATCH (:VerificationRun {projectId: $projectId})-[r:ANALYZED]->(:SourceFile)
+        DELETE r RETURN count(r) AS deleted
+      `, { projectId });
+      deleted = deleteResult.records[0]?.get('deleted')?.toNumber?.() || 0;
+      if (deleted > 0) console.log(`Cleaned ${deleted} old ANALYZED edges`);
 
-      for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
-        const batch = filePaths.slice(i, i + BATCH_SIZE);
-        const result = await session.run(`
-          UNWIND $filePaths AS fp
-          MATCH (vr:VerificationRun {id: $vrId, projectId: $projectId})
-          MATCH (sf:SourceFile {filePath: fp, projectId: $projectId})
-          MERGE (vr)-[r:ANALYZED]->(sf)
-          ON CREATE SET r.derived = true,
-                        r.source = 'vr-scope-enrichment',
-                        r.sourceFamily = $family,
-                        r.createdAt = datetime()
-          RETURN count(r) AS created
-        `, { filePaths: batch, vrId: anchorVrId, projectId, family });
+      // 5. Create ANALYZED edges — one per (tool family, SourceFile) — INSIDE TRANSACTION
+      //    Uses an anchor VR per family as the edge source.
+      //    Edge carries sourceFamily so queries can filter by tool.
+      //    Future: per-finding FLAGS edges when importer stores location.
+      const BATCH_SIZE = 500;
 
-        totalCreated += result.records[0]?.get('created')?.toNumber?.() || 0;
+      for (const [family, fileSet] of familyFilePairs) {
+        const anchorVrId = familyAnchorVr.get(family)!;
+        const filePaths = [...fileSet];
+        totalFiles += filePaths.length;
+
+        for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
+          const batch = filePaths.slice(i, i + BATCH_SIZE);
+          const result = await tx.run(`
+            UNWIND $filePaths AS fp
+            MATCH (vr:VerificationRun {id: $vrId, projectId: $projectId})
+            MATCH (sf:SourceFile {filePath: fp, projectId: $projectId})
+            MERGE (vr)-[r:ANALYZED]->(sf)
+            ON CREATE SET r.derived = true,
+                          r.source = 'vr-scope-enrichment',
+                          r.sourceFamily = $family,
+                          r.createdAt = datetime()
+            RETURN count(r) AS created
+          `, { filePaths: batch, vrId: anchorVrId, projectId, family });
+
+          totalCreated += result.records[0]?.get('created')?.toNumber?.() || 0;
+        }
+
+        console.log(`  ${family}: ${filePaths.length} files → anchor ${anchorVrId.slice(0, 40)}...`);
       }
 
-      console.log(`  ${family}: ${filePaths.length} files → anchor ${anchorVrId.slice(0, 40)}...`);
+      // Commit transaction — delete + all creates are atomic
+      await tx.commit();
+    } catch (err) {
+      // Rollback on any error — graph returns to pre-run state
+      await tx.rollback();
+      console.error('[create-analyzed-edges] Transaction rolled back due to error:', err);
+      throw err;
     }
+    // === END TRANSACTION BOUNDARY ===
 
     const uniqueFiles = new Set([...familyFilePairs.values()].flatMap(s => [...s])).size;
 
     console.log(`Created ${totalCreated} ANALYZED edges (${familyFilePairs.size} families → ${uniqueFiles} files)`);
 
-    // Post-run verification: count ANALYZED edges after recreation
+    // Post-run verification: count ANALYZED edges after recreation (READ-ONLY, outside transaction)
     const postRunResult = await session.run(`
       MATCH (:VerificationRun {projectId: $projectId})-[r:ANALYZED]->(:SourceFile)
       RETURN count(r) AS postRunCount
@@ -259,6 +275,8 @@ export async function enrichAnalyzedEdges(
     console.log(`[create-analyzed-edges] Post-run ANALYZED edge count: ${postRunCount} (was: ${preRunCount})`);
 
     // DESTRUCTIVE FAILURE GUARD: If we deleted edges but created 0, graph is corrupted
+    // With transaction wrapping, this should NEVER fire (rollback would restore pre-run state)
+    // Kept as sanity check for unexpected edge cases
     if (postRunCount === 0 && preRunCount > 0) {
       const errorMessage = `[create-analyzed-edges] DESTRUCTIVE FAILURE: deleted ${preRunCount} edges, recreated 0. ` +
         `Graph state is corrupted. Run recovery: ` +

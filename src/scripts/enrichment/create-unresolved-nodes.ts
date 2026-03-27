@@ -39,46 +39,70 @@ export async function createUnresolvedNodes(driver: Driver): Promise<{
 }> {
   console.log('\n🔍 Creating UnresolvedReference nodes\n');
 
-  // Clear existing unresolved nodes
-  const cleared = await runCypher(driver, 'Cleared old UnresolvedReference nodes', `
-    MATCH (u:UnresolvedReference) DETACH DELETE u
-    RETURN count(u) AS count
-  `);
-
-  // 1. Unresolved imports — Import nodes without RESOLVES_TO
-  console.log('\n1. Unresolved imports (Import → no RESOLVES_TO):');
-  const created = await runCypher(driver, 'Created UnresolvedReference nodes for imports', `
-    MATCH (imp:Import)
-    WHERE NOT (imp)-[:RESOLVES_TO]->()
-    OPTIONAL MATCH (sf:SourceFile)-[:CONTAINS]->(imp)
-    CREATE (u:UnresolvedReference:CodeNode {
-      kind: 'import',
-      rawText: imp.name,
-      reason: CASE
-        WHEN imp.name CONTAINS '/dist/' THEN 'build-artifact-reference'
-        WHEN imp.name STARTS WITH '.' AND imp.name ENDS WITH '.js' THEN 'local-js-specifier'
-        WHEN imp.name STARTS WITH '.' AND (imp.name ENDS WITH '.css' OR imp.name ENDS WITH '.scss' OR imp.name ENDS WITH '.sass' OR imp.name ENDS WITH '.less' OR imp.name ENDS WITH '.svg' OR imp.name ENDS WITH '.png' OR imp.name ENDS WITH '.jpg' OR imp.name ENDS WITH '.gif' OR imp.name ENDS WITH '.webp' OR imp.name ENDS WITH '.woff' OR imp.name ENDS WITH '.woff2' OR imp.name ENDS WITH '.json') THEN 'asset-import'
-        WHEN imp.name STARTS WITH '.' THEN 'local-module-not-found'
-        ELSE 'external-package'
-      END,
-      file: sf.filePath,
-      name: imp.name,
-      projectId: imp.projectId,
-      confidence: 0.0,
-      sourceKind: 'unresolved'
-    })
-    CREATE (u)-[:ORIGINATES_IN {
-      sourceKind: 'postIngest',
-      confidence: 0.8
-    }]->(sf)
-    RETURN count(u) AS count
-  `);
-
-  // 2. Classify: external packages vs local resolution failures  
   const session = driver.session();
+  let cleared = 0;
+  let created = 0;
   let localFailures = 0;
   let assetImports = 0;
+
   try {
+    // === TRANSACTION BOUNDARY: DELETE + RECREATE must be atomic (SCAR-012 fix) ===
+    // If anything throws between delete and recreate, Neo4j rolls back both.
+    const tx = session.beginTransaction();
+
+    try {
+      // Clear existing unresolved nodes — INSIDE TRANSACTION
+      const clearResult = await tx.run(`
+        MATCH (u:UnresolvedReference) DETACH DELETE u
+        RETURN count(u) AS count
+      `);
+      cleared = clearResult.records[0]?.get('count')?.toNumber?.() ?? 
+                clearResult.records[0]?.get('count') ?? 0;
+      console.log(`  ✓ Cleared old UnresolvedReference nodes: ${cleared}`);
+
+      // 1. Unresolved imports — Import nodes without RESOLVES_TO — INSIDE TRANSACTION
+      console.log('\n1. Unresolved imports (Import → no RESOLVES_TO):');
+      const createResult = await tx.run(`
+        MATCH (imp:Import)
+        WHERE NOT (imp)-[:RESOLVES_TO]->()
+        OPTIONAL MATCH (sf:SourceFile)-[:CONTAINS]->(imp)
+        CREATE (u:UnresolvedReference:CodeNode {
+          kind: 'import',
+          rawText: imp.name,
+          reason: CASE
+            WHEN imp.name CONTAINS '/dist/' THEN 'build-artifact-reference'
+            WHEN imp.name STARTS WITH '.' AND imp.name ENDS WITH '.js' THEN 'local-js-specifier'
+            WHEN imp.name STARTS WITH '.' AND (imp.name ENDS WITH '.css' OR imp.name ENDS WITH '.scss' OR imp.name ENDS WITH '.sass' OR imp.name ENDS WITH '.less' OR imp.name ENDS WITH '.svg' OR imp.name ENDS WITH '.png' OR imp.name ENDS WITH '.jpg' OR imp.name ENDS WITH '.gif' OR imp.name ENDS WITH '.webp' OR imp.name ENDS WITH '.woff' OR imp.name ENDS WITH '.woff2' OR imp.name ENDS WITH '.json') THEN 'asset-import'
+            WHEN imp.name STARTS WITH '.' THEN 'local-module-not-found'
+            ELSE 'external-package'
+          END,
+          file: sf.filePath,
+          name: imp.name,
+          projectId: imp.projectId,
+          confidence: 0.0,
+          sourceKind: 'unresolved'
+        })
+        CREATE (u)-[:ORIGINATES_IN {
+          sourceKind: 'postIngest',
+          confidence: 0.8
+        }]->(sf)
+        RETURN count(u) AS count
+      `);
+      created = createResult.records[0]?.get('count')?.toNumber?.() ?? 
+                createResult.records[0]?.get('count') ?? 0;
+      console.log(`  ✓ Created UnresolvedReference nodes for imports: ${created}`);
+
+      // Commit transaction — delete + create are atomic
+      await tx.commit();
+    } catch (err) {
+      // Rollback on any error — graph returns to pre-run state
+      await tx.rollback();
+      console.error('[create-unresolved-nodes] Transaction rolled back due to error:', err);
+      throw err;
+    }
+    // === END TRANSACTION BOUNDARY ===
+
+    // 2. Classify: external packages vs local resolution failures (READ-ONLY, reuses session)
     console.log('\n2. Classifying unresolved imports:');
     const classified = await session.run(`
       MATCH (u:UnresolvedReference {kind: 'import'})
