@@ -475,8 +475,14 @@ export async function enrichPrecomputeScores(
 
     // ── Step 4: Aggregate per SourceFile ───────────────────────
     // Get SourceFile -> contained functions with compositeRisk, fanOut, riskTier
+    // SPEC-GAP-04: Exclude files with productionRiskExcluded flag from confidenceScore population.
+    // Test files, example assets, and governance-critical config can never earn evidence
+    // (no VRs target them, no TESTED_BY edges point at them), so their score is structurally zero.
+    // Including them drags the production average down. The parser sets productionRiskExcluded=true
+    // at ingest for TEST_FILE, EXAMPLE_ASSET, and GOVERNANCE_CRITICAL_CONFIG classifications.
     const fileDataResult = await session.run(
       `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       WHERE NOT coalesce(sf.productionRiskExcluded, false)
        OPTIONAL MATCH (sf)-[:CONTAINS]->(f:CodeNode:Function {projectId: $projectId})
        WITH sf,
             collect(DISTINCT f.id) AS fnIds,
@@ -491,7 +497,8 @@ export async function enrichPrecomputeScores(
               riskTiers,
               coalesce(sf.gitChangeFrequency, 0) AS changeFrequency,
               coalesce(sf.churnTotal, 0) AS churnTotal,
-              size(fnIds) AS fnCount`,
+              size(fnIds) AS fnCount,
+              sf.productionRiskExcluded AS productionRiskExcluded`,
       { projectId },
     );
 
@@ -790,7 +797,10 @@ export async function enrichPrecomputeScores(
       const fnCentralities = fnIds.map((id) => centralityMap[id] ?? 0);
       const fnDepths = fnIds.map((id) => computeMaxCallDepth(id, adjacency));
       const configRiskClass = classifyConfigRisk(filePath);
-      const productionRiskExcluded = configRiskClass === 'EXAMPLE_ASSET';
+      // Parser owns TEST_FILE + GOVERNANCE_CRITICAL_CONFIG exclusion (set at ingest time).
+      // Enrichment adds EXAMPLE_ASSET as a safety net but never overwrites true → false.
+      const existingFlag = r.get('productionRiskExcluded') === true;  // parser-set value from graph
+      const productionRiskExcluded = configRiskClass === 'EXAMPLE_ASSET' || existingFlag;
       const canonicalTier = deriveFileRiskTier(riskTiers);
       const riskTierNum = productionRiskExcluded ? 0 : canonicalTier.riskTierNum;
       const riskTier: FileRiskTier = productionRiskExcluded ? 'UNKNOWN' : canonicalTier.riskTier;

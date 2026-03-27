@@ -47,9 +47,9 @@ describe('[aud-tc-01-gaps] store-runtime-coverage.ts — Integration', () => {
     it('(2) computeBranchCoverageForFunction returns correct ratio for overlapping branches', () => {
       const fn = { id: 'fn1', name: 'test', filePath: '/test.ts', startLine: 10, endLine: 20 };
       const branches = [
-        { line: 12, pathCount: 2, coveredPaths: 1 }, // inside function
-        { line: 15, pathCount: 4, coveredPaths: 4 }, // inside function
-        { line: 50, pathCount: 2, coveredPaths: 0 }, // outside function — ignored
+        { branchId: 'b1', branchType: 'if', line: 12, pathCount: 2, coveredPaths: 1, totalHits: 1 }, // inside function
+        { branchId: 'b2', branchType: 'if', line: 15, pathCount: 4, coveredPaths: 4, totalHits: 4 }, // inside function
+        { branchId: 'b3', branchType: 'if', line: 50, pathCount: 2, coveredPaths: 0, totalHits: 0 }, // outside function — ignored
       ];
 
       // Only lines 12 and 15 are within [10, 20]
@@ -61,8 +61,8 @@ describe('[aud-tc-01-gaps] store-runtime-coverage.ts — Integration', () => {
     it('(3) computeBranchCoverageForFunction returns 0 when no overlapping branches', () => {
       const fn = { id: 'fn2', name: 'test2', filePath: '/test.ts', startLine: 100, endLine: 110 };
       const branches = [
-        { line: 5, pathCount: 2, coveredPaths: 1 },
-        { line: 50, pathCount: 4, coveredPaths: 2 },
+        { branchId: 'b1', branchType: 'if', line: 5, pathCount: 2, coveredPaths: 1, totalHits: 1 },
+        { branchId: 'b2', branchType: 'if', line: 50, pathCount: 4, coveredPaths: 2, totalHits: 2 },
       ];
 
       // No branches overlap [100, 110]

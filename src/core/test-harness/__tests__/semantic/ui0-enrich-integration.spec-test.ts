@@ -49,7 +49,8 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     try {
       const r = await session.run(
         `MATCH (sf:SourceFile {projectId: $pid})
-         WHERE sf.painScore IS NULL
+         WHERE NOT coalesce(sf.productionRiskExcluded, false)
+           AND (sf.painScore IS NULL
             OR sf.adjustedPain IS NULL
             OR sf.basePain IS NULL
             OR sf.fragility IS NULL
@@ -75,7 +76,7 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
             OR sf.activeBlockedTaskCount IS NULL
             OR sf.activeBlockerCount IS NULL
             OR sf.activeCriticalFunctionCount IS NULL
-            OR sf.activeGateStatus IS NULL
+            OR sf.activeGateStatus IS NULL)
          RETURN sf.name AS name`,
         { pid: PROJECT_ID },
       );

@@ -1,5 +1,5 @@
 export type FileRiskLabelPolicyMode = 'included' | 'excluded';
-export type ConfigRiskClass = 'NONE' | 'GOVERNANCE_CRITICAL_CONFIG' | 'EXAMPLE_ASSET';
+export type ConfigRiskClass = 'NONE' | 'GOVERNANCE_CRITICAL_CONFIG' | 'EXAMPLE_ASSET' | 'TEST_FILE';
 
 export interface FileRiskLabelPolicyEntry {
   label: string;
@@ -69,6 +69,31 @@ export const CONFIG_RISK_PATTERN_POLICY: ConfigRiskPatternEntry[] = [
     pattern: /(^|\/)examples\//i,
     reason: 'Example/demo assets are excluded from production risk tiers by default but remain in coverage/drift inventory.',
   },
+  {
+    className: 'TEST_FILE',
+    pattern: /(^|\/)__tests__\//i,
+    reason: 'Test files cannot earn VR evidence or TESTED_BY edges (they ARE the test), so their confidenceScore is structurally zero and would dilute production averages.',
+  },
+  {
+    className: 'TEST_FILE',
+    pattern: /\.test\.[cm]?[jt]sx?$/i,
+    reason: 'Test files cannot earn VR evidence or TESTED_BY edges (they ARE the test), so their confidenceScore is structurally zero and would dilute production averages.',
+  },
+  {
+    className: 'TEST_FILE',
+    pattern: /\.spec\.[cm]?[jt]sx?$/i,
+    reason: 'Test files cannot earn VR evidence or TESTED_BY edges (they ARE the test), so their confidenceScore is structurally zero and would dilute production averages.',
+  },
+  {
+    className: 'TEST_FILE',
+    pattern: /\.spec-test\.[cm]?[jt]sx?$/i,
+    reason: 'Test files cannot earn VR evidence or TESTED_BY edges (they ARE the test), so their confidenceScore is structurally zero and would dilute production averages.',
+  },
+  {
+    className: 'TEST_FILE',
+    pattern: /\.audit\.test\.[cm]?[jt]sx?$/i,
+    reason: 'Audit test files are test infrastructure, excluded from production risk scoring.',
+  },
 ];
 
 export function classifyConfigRisk(filePath: string | null | undefined): ConfigRiskClass {
@@ -88,4 +113,18 @@ export function isGovernanceCriticalConfig(filePath: string | null | undefined):
 
 export function isExampleAssetPath(filePath: string | null | undefined): boolean {
   return classifyConfigRisk(filePath) === 'EXAMPLE_ASSET';
+}
+
+export function isTestFile(filePath: string | null | undefined): boolean {
+  return classifyConfigRisk(filePath) === 'TEST_FILE';
+}
+
+/**
+ * Determines if a file should be excluded from production risk scoring.
+ * Returns true for TEST_FILE, EXAMPLE_ASSET, and GOVERNANCE_CRITICAL_CONFIG.
+ * These files cannot earn VR evidence or TESTED_BY edges, so including them
+ * in production risk averages would dilute the score.
+ */
+export function shouldExcludeFromProductionRisk(filePath: string | null | undefined): boolean {
+  return classifyConfigRisk(filePath) !== 'NONE';
 }

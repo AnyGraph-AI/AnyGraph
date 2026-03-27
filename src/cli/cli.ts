@@ -221,7 +221,7 @@ export async function runParse(dir: string, options: { tsconfig?: string; projec
   // Dynamic import parser
   const { TypeScriptParser } = await import('../core/parsers/typescript-parser.js');
   const { CORE_TYPESCRIPT_SCHEMA } = await import('../core/config/schema.js');
-  const { Neo4jService } = await import('../../src/storage/neo4j/neo4j.service.js');
+  const { Neo4jService } = await import('../storage/neo4j/neo4j.service.js');
   
   // Flatten a Neo4jNode into a flat property map safe for Neo4j SET.
   // Neo4j rejects MAP-valued properties; this extracts .properties,

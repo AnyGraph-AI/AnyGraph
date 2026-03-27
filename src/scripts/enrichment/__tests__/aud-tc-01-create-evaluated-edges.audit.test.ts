@@ -54,6 +54,21 @@ describe('[aud-tc-01] create-evaluated-edges.ts', () => {
       expect(edgeProps.source).toBe('gc10-evaluated-enrichment');
     });
 
+    it('(2a) EVALUATED edge must have failedChecks array (may be empty)', () => {
+      // Contract: GC-10 spec requires failedChecks: string[] on EVALUATED edge
+      // Currently always [] until verification-done-check-capture.ts stores failure messages on VR nodes
+      const edgeProps = {
+        derived: true,
+        source: 'gc10-evaluated-enrichment',
+        passed: true,
+        failedChecks: [] as string[],
+        timestamp: new Date(),
+      };
+
+      expect(edgeProps.failedChecks).toBeDefined();
+      expect(Array.isArray(edgeProps.failedChecks)).toBe(true);
+    });
+
     it('(3) EVALUATED edge passed property reflects VR.ok', () => {
       // Contract: passed property comes from vr.ok
       const passingVR = { ok: true };

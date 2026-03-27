@@ -9,6 +9,7 @@ import { Project, SourceFile, Node } from 'ts-morph';
 import { EXCLUDE_PATTERNS_GLOB, BUILT_IN_FUNCTIONS, BUILT_IN_METHODS, BUILT_IN_CLASSES } from '../../constants.js';
 import { NESTJS_FRAMEWORK_SCHEMA } from '../config/nestjs-framework-schema.js';
 import { GRAMMY_REGISTRATION_MAP } from '../config/grammy-framework-schema.js';
+import { classifyConfigRisk } from '../config/file-risk-label-policy.js';
 import {
   CoreNodeType,
   Neo4jNodeProperties,
@@ -543,6 +544,10 @@ export class TypeScriptParser {
       size: Number(stats.size),
       mtime: Number(stats.mtimeMs),
       contentHash: await hashFile(filePath),
+      // SPEC-GAP-04b: Set productionRiskExcluded at ingest time for test files, example assets,
+      // and governance-critical configs. These files cannot earn VR evidence or TESTED_BY edges,
+      // so their confidenceScore is structurally zero and would dilute production averages.
+      productionRiskExcluded: classifyConfigRisk(filePath) !== 'NONE',
     };
 
     const sourceFileNode = this.createCoreNode(sourceFile, CoreNodeType.SOURCE_FILE, fileTrackingProperties);

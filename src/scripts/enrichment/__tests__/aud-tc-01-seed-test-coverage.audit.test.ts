@@ -309,7 +309,7 @@ describe('Risk Scoring', () => {
   describe('projectId scoping contract', () => {
     it('(17) PROJECT_ID derived from CLI arg or defaults to codegraph', () => {
       // Contract: project ID resolution
-      const projectDir = 'codegraph';
+      const projectDir: string = 'codegraph';
       const PROJECT_ID =
         projectDir === '.' || projectDir === 'codegraph' ? 'proj_c0d3e9a1f200' : 'proj_60d5feed0001';
 

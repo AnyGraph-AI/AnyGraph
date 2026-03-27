@@ -36,6 +36,7 @@ export async function enrichEvaluatedEdges(driver: Driver): Promise<{
     const scopeModelSet = toNum(scopeResult.records[0]?.get('updated'));
 
     // Step 2: Create EVALUATED edges from done-check VR → Project
+    // failedChecks: always [] until verification-done-check-capture.ts stores failure message text on VR nodes
     const evalResult = await session.run(
       `MATCH (vr:VerificationRun)
        WHERE vr.sourceFamily = 'done-check'
@@ -46,9 +47,11 @@ export async function enrichEvaluatedEdges(driver: Driver): Promise<{
          r.derived = true,
          r.source = 'gc10-evaluated-enrichment',
          r.passed = vr.ok,
+         r.failedChecks = [],
          r.timestamp = datetime()
        ON MATCH SET
          r.passed = vr.ok,
+         r.failedChecks = [],
          r.timestamp = datetime()
        RETURN count(r) AS edges`,
     );

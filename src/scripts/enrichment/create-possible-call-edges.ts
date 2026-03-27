@@ -8,6 +8,9 @@
  * 
  * Creates POSSIBLE_CALL edges with confidence scores.
  * 
+ * Detection strategy: Query sourceCode properties and AST-derived metadata
+ * from the graph — NOT hardcoded pattern lists.
+ * 
  * Usage: npx tsx create-possible-call-edges.ts
  */
 import neo4j from 'neo4j-driver';
@@ -23,18 +26,216 @@ const driver = neo4j.driver(
   )
 );
 
+/**
+ * Detect ternary function selection patterns in source code.
+ * Pattern: `cond ? fnA : fnB` where fnA and fnB are function identifiers
+ * Returns array of {trueTarget, falseTarget} pairs.
+ */
+function extractTernaryFunctionCandidates(sourceCode: string): Array<{trueFn: string, falseFn: string}> {
+  const results: Array<{trueFn: string, falseFn: string}> = [];
+  
+  // Pattern: identifier ? identifier : identifier (ternary with function identifiers)
+  // Matches: condition ? handleA : handleB  or  isX ? fnX : fnY
+  // Captures the two function alternatives
+  const ternaryPattern = /\?\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:\s*([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+  
+  let match;
+  while ((match = ternaryPattern.exec(sourceCode)) !== null) {
+    const trueFn = match[1];
+    const falseFn = match[2];
+    
+    // Filter out obvious non-function values (literals, common variable prefixes)
+    const nonFunctionPatterns = /^(true|false|null|undefined|NaN|Infinity|\d+|'.*'|".*")$/;
+    if (!nonFunctionPatterns.test(trueFn) && !nonFunctionPatterns.test(falseFn)) {
+      results.push({ trueFn, falseFn });
+    }
+  }
+  
+  return results;
+}
+
+/**
+ * Detect callback registration patterns in source code.
+ * Pattern: function names that suggest callback storage (setCallback, register*, on*, add*Listener, etc.)
+ * Returns true if the source indicates callback registration.
+ */
+function hasCallbackRegistrationPattern(sourceCode: string, fnName: string): boolean {
+  // Common callback registration naming patterns
+  const registrationPatterns = [
+    /^set[A-Z]\w*(?:Callback|Handler|Listener)/,  // setCallback, setHandler, setListener
+    /^register[A-Z]\w*/,                           // registerHandler, registerCallback
+    /^on[A-Z]\w*/,                                 // onEvent, onReady
+    /^add\w*(?:Listener|Handler|Callback)/,        // addListener, addHandler, addCallback
+    /^subscribe/,                                  // subscribe
+    /^attach/,                                     // attachHandler
+  ];
+  
+  // Check if function name matches registration pattern
+  for (const pattern of registrationPatterns) {
+    if (pattern.test(fnName)) {
+      return true;
+    }
+  }
+  
+  // Also check if sourceCode contains assignment to callback-like properties
+  const callbackAssignments = /this\.(callback|handler|listener|on\w+)\s*=/i;
+  return callbackAssignments.test(sourceCode);
+}
+
 async function main() {
   const session = driver.session();
   let totalCreated = 0;
+  let ternaryCount = 0;
+  let hofCount = 0;
+  let registrationCount = 0;
 
   try {
-    // Strategy 1: Functions that are called by name but have no direct CALLS edge
-    // These might be inner functions or dynamically dispatched
-    // Find functions that are referenced in sourceCode but not linked via CALLS
+    console.log('=== Strategy 1: Ternary function selection (auto-detected) ===');
     
-    // Strategy 2: Switch/ternary dispatch — functions called in conditional branches
-    // where the same caller dispatches to multiple targets based on a condition
-    // We detect this by finding callers with multiple conditional CALLS to similar functions
+    // Query functions with sourceCode containing ternary operators
+    const ternaryFunctions = await session.run(`
+      MATCH (fn:Function)
+      WHERE fn.sourceCode IS NOT NULL AND fn.sourceCode CONTAINS '?'
+      RETURN fn.id AS fnId, fn.name AS fnName, fn.filePath AS filePath, fn.sourceCode AS sourceCode
+    `);
+
+    for (const record of ternaryFunctions.records) {
+      const fnId = record.get('fnId');
+      const fnName = record.get('fnName');
+      const filePath = record.get('filePath') || '';
+      const sourceCode = record.get('sourceCode') || '';
+      
+      const candidates = extractTernaryFunctionCandidates(sourceCode);
+      
+      for (const { trueFn, falseFn } of candidates) {
+        // Create POSSIBLE_CALL edges to both ternary branches
+        for (const targetName of [trueFn, falseFn]) {
+          const result = await session.run(`
+            MATCH (caller:Function) WHERE caller.id = $callerId
+            MATCH (target:Function {name: $targetName})
+            WHERE NOT (caller)-[:POSSIBLE_CALL]->(target) AND caller.id <> target.id
+            CREATE (caller)-[:POSSIBLE_CALL {
+              confidence: 0.85,
+              reason: 'ternary-function-selection',
+              source: 'ast-pattern-detection',
+              derivedFrom: 'sourceCode-analysis',
+              ternaryGroup: $ternaryGroup,
+              createdAt: datetime()
+            }]->(target)
+            RETURN count(*) AS created
+          `, {
+            callerId: fnId,
+            targetName,
+            ternaryGroup: `${trueFn}|${falseFn}`,
+          });
+          const created = result.records[0]?.get('created')?.toNumber?.() ?? 0;
+          totalCreated += created;
+          ternaryCount += created;
+          if (created > 0) {
+            console.log(`  ${fnName} → ${targetName} (ternary: ${trueFn}|${falseFn})`);
+          }
+        }
+      }
+    }
+    console.log(`  Ternary dispatch edges: ${ternaryCount}`);
+
+    console.log('\n=== Strategy 2: Higher-order function callbacks ===');
+    
+    // Find functions with callback parameters and create POSSIBLE_CALL edges
+    // from the HOF to functions passed as arguments to it
+    const hofEdges = await session.run(`
+      MATCH (hof:Function)-[:HAS_PARAMETER]->(p:Parameter)
+      WHERE p.type IS NOT NULL 
+        AND (p.type CONTAINS '=>' OR p.type CONTAINS 'Function' OR p.type CONTAINS 'Callback')
+      WITH hof, p
+      // Find callers that pass a function reference to this HOF
+      MATCH (caller:Function)-[c:CALLS]->(hof)
+      WHERE c.context IS NOT NULL
+      // Find functions in the same file that could be passed as callbacks
+      MATCH (candidate:Function)
+      WHERE candidate.filePath = caller.filePath 
+        AND candidate.id <> hof.id 
+        AND candidate.id <> caller.id
+        AND NOT (hof)-[:POSSIBLE_CALL]->(candidate)
+      WITH hof, candidate, count(*) as cnt
+      WHERE cnt > 0
+      CREATE (hof)-[:POSSIBLE_CALL {
+        confidence: 0.65,
+        reason: 'higher-order-function',
+        source: 'ast-pattern-detection',
+        derivedFrom: 'parameter-type-analysis',
+        createdAt: datetime()
+      }]->(candidate)
+      RETURN hof.name AS hofName, candidate.name AS candidateName, count(*) AS created
+    `);
+
+    for (const record of hofEdges.records) {
+      const hofName = record.get('hofName');
+      const candidateName = record.get('candidateName');
+      const created = record.get('created')?.toNumber?.() ?? 1;
+      totalCreated += created;
+      hofCount += created;
+      console.log(`  ${hofName} →→ ${candidateName} (HOF callback)`);
+    }
+    console.log(`  Higher-order function edges: ${hofCount}`);
+
+    console.log('\n=== Strategy 3: Callback registration patterns ===');
+    
+    // Find functions that register callbacks (setCallback, addListener, etc.)
+    // and link them to potential callback implementations
+    const registrationFunctions = await session.run(`
+      MATCH (fn:Function)
+      WHERE fn.sourceCode IS NOT NULL
+        AND (fn.name =~ '(?i)^(set|register|add|attach|subscribe|on)[A-Z].*'
+             OR fn.sourceCode =~ '(?i)this\\.(callback|handler|listener)\\s*=')
+      RETURN fn.id AS fnId, fn.name AS fnName, fn.sourceCode AS sourceCode, fn.filePath AS filePath
+    `);
+
+    for (const record of registrationFunctions.records) {
+      const fnId = record.get('fnId');
+      const fnName = record.get('fnName');
+      const sourceCode = record.get('sourceCode') || '';
+      const filePath = record.get('filePath') || '';
+      
+      if (hasCallbackRegistrationPattern(sourceCode, fnName)) {
+        // Link to functions passed as parameters to this registration function
+        const result = await session.run(`
+          MATCH (registrar:Function) WHERE registrar.id = $registrarId
+          MATCH (caller:Function)-[c:CALLS]->(registrar)
+          // Find functions defined in same or calling file that could be callbacks
+          MATCH (callback:Function)
+          WHERE callback.filePath IN [registrar.filePath, caller.filePath]
+            AND callback.id <> registrar.id 
+            AND callback.id <> caller.id
+            AND NOT (registrar)-[:POSSIBLE_CALL]->(callback)
+            AND (callback.name =~ '(?i).*(handler|callback|listener|on[A-Z]).*'
+                 OR callback.name =~ '(?i)^handle[A-Z].*')
+          WITH registrar, callback, count(*) as relevance
+          ORDER BY relevance DESC
+          LIMIT 5
+          CREATE (registrar)-[:POSSIBLE_CALL {
+            confidence: 0.70,
+            reason: 'callback-registration',
+            source: 'ast-pattern-detection',
+            derivedFrom: 'naming-pattern-analysis',
+            createdAt: datetime()
+          }]->(callback)
+          RETURN callback.name AS callbackName
+        `, { registrarId: fnId });
+        
+        for (const cbRecord of result.records) {
+          const callbackName = cbRecord.get('callbackName');
+          totalCreated += 1;
+          registrationCount += 1;
+          console.log(`  ${fnName} → ${callbackName} (callback-registration)`);
+        }
+      }
+    }
+    console.log(`  Callback registration edges: ${registrationCount}`);
+
+    console.log('\n=== Strategy 4: Conditional dispatch hotspots (diagnostic) ===');
+    
+    // Log callers with multiple conditional CALLS — these might need manual POSSIBLE_CALL edges
     const conditionalDispatch = await session.run(`
       MATCH (caller:Function)-[r:CALLS]->(target:Function)
       WHERE r.conditional = true
@@ -42,72 +243,18 @@ async function main() {
       WHERE cnt >= 2
       RETURN caller.name AS caller, targets, cnt
       ORDER BY cnt DESC
-      LIMIT 20
+      LIMIT 10
     `);
 
-    console.log('=== Conditional dispatch hotspots ===');
     for (const record of conditionalDispatch.records) {
       const caller = record.get('caller');
-      const targets = record.get('targets');
+      const targets = record.get('targets') as string[];
       const cnt = record.get('cnt')?.toNumber?.() ?? record.get('cnt');
       console.log(`  ${caller}: ${cnt} conditional targets → [${targets.slice(0, 5).join(', ')}${targets.length > 5 ? '...' : ''}]`);
     }
 
-    // Strategy 3: Find functions with parameters that are function types
-    // These accept callbacks and should have POSSIBLE_CALL edges
-    const higherOrderFns = await session.run(`
-      MATCH (fn:Function)-[:HAS_PARAMETER]->(p:Parameter)
-      WHERE p.type IS NOT NULL 
-      AND (p.type CONTAINS '=>' OR p.type CONTAINS 'Function' OR p.type CONTAINS 'Callback')
-      RETURN fn.name AS fnName, fn.filePath AS file, p.name AS paramName, p.type AS paramType
-    `);
-
-    console.log('\n=== Higher-order functions (accept function params) ===');
-    for (const record of higherOrderFns.records) {
-      console.log(`  ${record.get('fnName')}(${record.get('paramName')}: ${record.get('paramType')?.substring(0, 60)})`);
-    }
-
-    // Strategy 4: Explicit POSSIBLE_CALL edges for known patterns
-    // webhook-handler.ts: handler = isTokenScanner ? handleTokenScannerEvent : handleWebhookEvent
-    const knownDispatches = [
-      {
-        source: 'webhook-handler.ts',
-        targets: ['handleTokenScannerEvent', 'handleWebhookEvent'],
-        confidence: 0.9,
-        reason: 'ternary-function-selection',
-      },
-    ];
-
-    for (const dispatch of knownDispatches) {
-      for (const targetName of dispatch.targets) {
-        const result = await session.run(`
-          MATCH (src:SourceFile)
-          WHERE src.name = $sourceFile
-          MATCH (tgt:Function {name: $targetName})
-          WHERE NOT (src)-[:POSSIBLE_CALL]->(tgt)
-          CREATE (src)-[:POSSIBLE_CALL {
-            confidence: $confidence,
-            reason: $reason,
-            source: 'pattern-detection',
-            createdAt: datetime()
-          }]->(tgt)
-          RETURN count(*) AS created
-        `, {
-          sourceFile: dispatch.source,
-          targetName,
-          confidence: dispatch.confidence,
-          reason: dispatch.reason,
-        });
-        const created = result.records[0]?.get('created')?.toNumber?.() ?? 0;
-        totalCreated += created;
-        if (created > 0) {
-          console.log(`  Created POSSIBLE_CALL: ${dispatch.source} → ${targetName} (${dispatch.reason})`);
-        }
-      }
-    }
-
     console.log(`\n✅ POSSIBLE_CALL edges created: ${totalCreated}`);
-    console.log('   Conditional dispatch hotspots and higher-order functions logged for manual review.');
+    console.log(`   Breakdown: ternary=${ternaryCount}, HOF=${hofCount}, registration=${registrationCount}`);
 
   } finally {
     await session.close();

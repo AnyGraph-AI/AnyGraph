@@ -160,6 +160,10 @@ export interface Neo4jNodeProperties {
   contentHash?: string;
   mtime?: number;
   size?: number;
+
+  // === PRODUCTION RISK EXCLUSION (SPEC-GAP-04b) ===
+  productionRiskExcluded?: boolean; // true for test files, example assets, governance-critical configs
+
   parentClassName?: string; // Parent class name for methods/properties/constructors
   typeAnnotation?: string; // Type annotation text for variable declarations
 
