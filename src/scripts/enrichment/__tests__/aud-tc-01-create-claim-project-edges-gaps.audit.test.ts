@@ -17,11 +17,11 @@ describe('[aud-tc-01-gaps] create-claim-project-edges.ts — Integration', () =>
 
   beforeAll(async () => {
     rt = await createEphemeralGraph({ setupSchema: false });
-  }, 30_000);
+  }, 60_000);
 
   afterAll(async () => {
     await rt.teardown();
-  }, 30_000);
+  }, 60_000);
 
   function toNum(val: unknown): number {
     const v = val as { toNumber?: () => number };
