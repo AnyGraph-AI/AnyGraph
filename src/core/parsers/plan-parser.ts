@@ -969,22 +969,241 @@ export async function enrichCrossDomain(
           );
         }
 
+        // =========================================================================
+        // Phase A: Pre-load all target nodes into TypeScript Maps
+        // =========================================================================
+        console.error('[enrichCrossDomain] Phase 1A: loading target nodes into memory');
+
+        // Type definitions for loaded nodes
+        interface SourceFileNode { id: string; filePath: string; name: string; projectId: string; }
+        interface TestFileNode { id: string; filePath: string; name: string; projectId: string; }
+        interface FunctionNode { id: string; name: string; projectId: string; label: string; }
+        interface ProjectNode { projectId: string; name: string; displayName: string | null; }
+        interface PlanTargetNode { id: string; name: string; projectId: string; coreType: string; number: number | null; }
+
+        // Load SourceFile nodes
+        const sourceFileResult = await session.run(
+          `MATCH (sf:SourceFile) RETURN sf.id AS id, sf.filePath AS filePath, sf.name AS name, sf.projectId AS projectId`,
+        );
+        const sourceFiles: SourceFileNode[] = sourceFileResult.records.map((r) => ({
+          id: r.get('id'),
+          filePath: r.get('filePath') ?? '',
+          name: r.get('name') ?? '',
+          projectId: r.get('projectId') ?? '',
+        }));
+        console.error(`[enrichCrossDomain] Loaded ${sourceFiles.length} SourceFile nodes`);
+
+        // Load TestFile nodes
+        const testFileResult = await session.run(
+          `MATCH (tf:TestFile) RETURN tf.nodeId AS id, tf.filePath AS filePath, tf.name AS name, tf.projectId AS projectId`,
+        );
+        const testFiles: TestFileNode[] = testFileResult.records.map((r) => ({
+          id: r.get('id'),
+          filePath: r.get('filePath') ?? '',
+          name: r.get('name') ?? '',
+          projectId: r.get('projectId') ?? '',
+        }));
+        console.error(`[enrichCrossDomain] Loaded ${testFiles.length} TestFile nodes`);
+
+        // Load Function|Method|Variable nodes
+        const functionResult = await session.run(
+          `MATCH (fn) WHERE fn:Function OR fn:Method OR fn:Variable
+           RETURN fn.id AS id, fn.name AS name, fn.projectId AS projectId,
+                  CASE WHEN fn:Function THEN 'Function' WHEN fn:Method THEN 'Method' ELSE 'Variable' END AS label`,
+        );
+        const functions: FunctionNode[] = functionResult.records.map((r) => ({
+          id: r.get('id'),
+          name: r.get('name') ?? '',
+          projectId: r.get('projectId') ?? '',
+          label: r.get('label'),
+        }));
+        console.error(`[enrichCrossDomain] Loaded ${functions.length} Function/Method/Variable nodes`);
+
+        // Load Project nodes
+        const projectResult = await session.run(
+          `MATCH (p:Project) RETURN p.projectId AS projectId, p.name AS name, coalesce(p.displayName, '') AS displayName`,
+        );
+        const projects: ProjectNode[] = projectResult.records.map((r) => ({
+          projectId: r.get('projectId') ?? '',
+          name: r.get('name') ?? '',
+          displayName: r.get('displayName') || null,
+        }));
+        console.error(`[enrichCrossDomain] Loaded ${projects.length} Project nodes`);
+
+        // Load CodeNode nodes with plan-related coreTypes
+        const planTargetResult = await session.run(
+          `MATCH (n:CodeNode)
+           WHERE n.coreType IN ['Task', 'Milestone', 'Section', 'Sprint', 'Decision', 'PlanProject']
+           RETURN n.id AS id, n.name AS name, n.projectId AS projectId, n.coreType AS coreType, n.number AS number`,
+        );
+        const planTargets: PlanTargetNode[] = planTargetResult.records.map((r) => ({
+          id: r.get('id') ?? '',
+          name: r.get('name') ?? '',
+          projectId: r.get('projectId') ?? '',
+          coreType: r.get('coreType') ?? '',
+          number: r.get('number')?.toNumber?.() ?? r.get('number') ?? null,
+        }));
+        console.error(`[enrichCrossDomain] Loaded ${planTargets.length} plan target nodes (Task/Milestone/etc)`);
+
+        // Build lookup indexes
+        const projectByProjectId = new Map<string, ProjectNode>();
+        const projectByNameLower = new Map<string, ProjectNode>();
+        for (const p of projects) {
+          projectByProjectId.set(p.projectId, p);
+          if (p.name) projectByNameLower.set(p.name.toLowerCase(), p);
+          if (p.displayName) projectByNameLower.set(p.displayName.toLowerCase(), p);
+        }
+
+        // Build function lookup by name (exact match, case-sensitive)
+        const functionsByName = new Map<string, FunctionNode[]>();
+        for (const fn of functions) {
+          const existing = functionsByName.get(fn.name) ?? [];
+          existing.push(fn);
+          functionsByName.set(fn.name, existing);
+        }
+
+        // =========================================================================
+        // Phase B: Resolve refs in TypeScript
+        // =========================================================================
+        console.error('[enrichCrossDomain] Phase 1B: resolving refs in TypeScript');
+
+        // Edge collection arrays
+        const dependsOnEdges: Array<{
+          srcId: string; dstId: string; projectId: string; refType: string;
+          refValue: string; rawRefValue: string; tokenCount: number; tokenIndex: number;
+        }> = [];
+        const blocksEdges: Array<{
+          srcId: string; dstId: string; projectId: string; refType: string;
+          refValue: string; rawRefValue: string; tokenCount: number; tokenIndex: number;
+        }> = [];
+        const sourceFileEvidenceEdges: Array<{
+          taskId: string; sfId: string; refValue: string; sfProjectId: string;
+        }> = [];
+        const testFileEvidenceEdges: Array<{
+          taskId: string; tfId: string; refValue: string; tfProjectId: string;
+        }> = [];
+        const functionEvidenceEdges: Array<{
+          taskId: string; fnId: string; refValue: string; fnProjectId: string;
+        }> = [];
+        const modifiesEdges: Array<{
+          taskId: string; sfId: string; refValue: string; sfProjectId: string;
+        }> = [];
+        const targetsEdges: Array<{
+          taskId: string; targetProjectId: string; sourceProjectId: string; refType: string; refValue: string;
+        }> = [];
+
+        // Per-task evidence counts for batch update
+        const taskEvidenceCounts = new Map<string, number>();
+
+        // Helper: resolve depends_on/blocks target using scoring logic
+        const resolveDependencyTarget = (
+          tokenNormalized: string,
+          sourceProjectId: string,
+          milestoneNum: number | null,
+          milestoneHint: string,
+        ): string | null => {
+          let bestMatch: PlanTargetNode | null = null;
+          let bestScore = 0;
+
+          for (const target of planTargets) {
+            // Filter: must match on id, name, or milestone number
+            const idMatch = target.id === tokenNormalized;
+            const nameMatch = target.name.toLowerCase() === tokenNormalized.toLowerCase();
+            const milestoneMatch = milestoneNum !== null && target.coreType === 'Milestone' && target.number === milestoneNum;
+
+            if (!idMatch && !nameMatch && !milestoneMatch) continue;
+
+            // Calculate score (EXACT same weights as Cypher)
+            let score = 0;
+            if (idMatch) score += 100;
+            if (target.projectId === sourceProjectId) score += 30;
+            if (target.name.toLowerCase() === tokenNormalized.toLowerCase()) score += 20;
+            if (milestoneNum !== null && target.coreType === 'Milestone' && target.number === milestoneNum) score += 15;
+            if (milestoneHint && target.name.toLowerCase().includes(milestoneHint.toLowerCase())) score += 10;
+
+            if (score > bestScore) {
+              bestScore = score;
+              bestMatch = target;
+            }
+          }
+
+          return bestMatch?.id ?? null;
+        };
+
+        // Helper: match SourceFile by suffix (filePath/name)
+        const matchSourceFiles = (
+          refValue: string,
+          filename: string,
+          targetCodeProjectId: string | null,
+          limit: number,
+        ): SourceFileNode[] => {
+          const matches: SourceFileNode[] = [];
+          for (const sf of sourceFiles) {
+            if (targetCodeProjectId !== null && sf.projectId !== targetCodeProjectId) continue;
+            if (
+              sf.filePath.endsWith(refValue) ||
+              sf.filePath.endsWith(filename) ||
+              sf.name.endsWith(filename)
+            ) {
+              matches.push(sf);
+              if (matches.length >= limit) break;
+            }
+          }
+          return matches;
+        };
+
+        // Helper: match TestFile by suffix (filePath/name)
+        const matchTestFiles = (
+          refValue: string,
+          filename: string,
+          targetCodeProjectId: string | null,
+          limit: number,
+        ): TestFileNode[] => {
+          const matches: TestFileNode[] = [];
+          for (const tf of testFiles) {
+            if (targetCodeProjectId !== null && tf.projectId !== targetCodeProjectId) continue;
+            if (
+              tf.filePath.endsWith(refValue) ||
+              tf.filePath.endsWith(filename) ||
+              tf.name.endsWith(filename)
+            ) {
+              matches.push(tf);
+              if (matches.length >= limit) break;
+            }
+          }
+          return matches;
+        };
+
+        // Helper: match Function/Method/Variable by name
+        const matchFunctions = (
+          funcName: string,
+          targetCodeProjectId: string | null,
+          limit: number,
+        ): FunctionNode[] => {
+          const candidates = functionsByName.get(funcName) ?? [];
+          if (targetCodeProjectId === null) {
+            return candidates.slice(0, limit);
+          }
+          const filtered = candidates.filter((fn) => fn.projectId === targetCodeProjectId);
+          return filtered.slice(0, limit);
+        };
+
+        // Process all refs
         let refIdx = 0;
         for (const ref of allRefs) {
           refIdx++;
-          if (refIdx % 500 === 0) console.error(`[enrichCrossDomain] Phase 1 progress: ${refIdx}/${allRefs.length} (type=${ref.refType})`);
+          if (refIdx % 1000 === 0) console.error(`[enrichCrossDomain] Phase 1B progress: ${refIdx}/${allRefs.length}`);
+
           if (ref.refType === 'depends_on' || ref.refType === 'blocks') {
             const sourceProjectId = ref.taskId.split(':')[0];
-            const relType = ref.refType === 'depends_on' ? PlanEdgeType.DEPENDS_ON : PlanEdgeType.BLOCKS;
 
-            // Support semicolon-separated dependency tokens.
-            // Do NOT split on commas — task names commonly contain commas
-            // (e.g., "Add exception enforcement pass (expiry, approval mode, ticket linkage)").
+            // Semicolon-split (NOT comma) per serial semantics
             const targets = ref.refValue
               .split(/;/)
               .map((t) => t.replace(/[\*]/g, '').trim())
               .filter(Boolean);
 
+            let anyResolved = false;
             for (let tokenIndex = 0; tokenIndex < targets.length; tokenIndex++) {
               const targetToken = targets[tokenIndex];
               const tokenNormalized = targetToken.replace(/[\*]/g, '').replace(/\s+/g, ' ').trim();
@@ -992,303 +1211,282 @@ export async function enrichCrossDomain(
               const milestoneNum = m ? parseInt(m[1], 10) : null;
               const milestoneHint = (tokenNormalized.match(/^M\d+[\-_: ]+(.+)$/i)?.[1] ?? '').trim();
 
-              const result = await session.run(
-                `MATCH (target:CodeNode)
-                 WHERE target.coreType IN ['Task', 'Milestone', 'Section', 'Sprint', 'Decision', 'PlanProject']
-                 AND (
-                   target.id = $token
-                   OR toLower(target.name) = toLower($tokenNormalized)
-                   OR ($milestoneNum IS NOT NULL AND target.coreType = 'Milestone' AND target.number = toInteger($milestoneNum))
-                 )
-                 WITH target,
-                      CASE WHEN target.id = $token THEN 100 ELSE 0 END +
-                      CASE WHEN target.projectId = $sourceProjectId THEN 30 ELSE 0 END +
-                      CASE WHEN toLower(target.name) = toLower($token) THEN 20 ELSE 0 END +
-                      CASE WHEN $milestoneNum IS NOT NULL AND target.coreType = 'Milestone' AND target.number = toInteger($milestoneNum) THEN 15 ELSE 0 END +
-                      CASE WHEN $milestoneHint <> '' AND toLower(target.name) CONTAINS toLower($milestoneHint) THEN 10 ELSE 0 END AS score
-                 WHERE score > 0
-                 RETURN target.id AS id
-                 ORDER BY score DESC
-                 LIMIT 1`,
-                {
-                  sourceProjectId,
-                  token: tokenNormalized,
-                  tokenNormalized,
-                  milestoneNum,
-                  milestoneHint,
-                },
-              );
-
-              if (result.records.length > 0) {
-                for (const record of result.records) {
-                  const targetId = record.get('id');
-                  if (targetId === ref.taskId) continue;
-
-                  await session.run(
-                    `MATCH (src:CodeNode {id: $srcId}), (dst:CodeNode {id: $dstId})
-                     MERGE (src)-[r:${relType}]->(dst)
-                     SET r.projectId = $projectId,
-                         r.refType = $refType,
-                         r.refValue = $refValue,
-                         r.rawRefValue = $rawRefValue,
-                         r.tokenCount = $tokenCount,
-                         r.tokenIndex = $tokenIndex,
-                         r.resolvedAt = datetime(),
-                         r.sourceKind = 'plan-parser'`,
-                    {
-                      srcId: ref.taskId,
-                      dstId: targetId,
-                      projectId: sourceProjectId,
-                      refType: ref.refType,
-                      refValue: tokenNormalized,
-                      rawRefValue: ref.refValue,
-                      tokenCount: targets.length,
-                      tokenIndex,
-                    },
-                  );
+              const targetId = resolveDependencyTarget(tokenNormalized, sourceProjectId, milestoneNum, milestoneHint);
+              if (targetId && targetId !== ref.taskId) {
+                anyResolved = true;
+                const edge = {
+                  srcId: ref.taskId,
+                  dstId: targetId,
+                  projectId: sourceProjectId,
+                  refType: ref.refType,
+                  refValue: tokenNormalized,
+                  rawRefValue: ref.refValue,
+                  tokenCount: targets.length,
+                  tokenIndex,
+                };
+                if (ref.refType === 'depends_on') {
+                  dependsOnEdges.push(edge);
+                } else {
+                  blocksEdges.push(edge);
                 }
-                resolved++;
-              } else {
-                notFound++;
               }
             }
+            if (anyResolved) resolved++; else notFound++;
+
           } else if (ref.refType === PlanEdgeType.MODIFIES) {
             const filename = path.basename(ref.refValue);
             const sourcePlanProjectId = ref.taskId.split(':')[0];
             const targetCodeProjectId = planToCodeProjectMap[sourcePlanProjectId] ?? null;
-            const result = await session.run(
-              `MATCH (sf:SourceFile)
-               WHERE (sf.filePath ENDS WITH $refValue OR sf.filePath ENDS WITH $filename OR sf.name ENDS WITH $filename)
-                 AND ($targetCodeProjectId IS NULL OR sf.projectId = $targetCodeProjectId)
-               RETURN sf.id AS id, sf.projectId AS projectId
-               LIMIT 5`,
-              { filename, refValue: ref.refValue, targetCodeProjectId },
-            );
 
-            if (result.records.length > 0) {
+            const matches = matchSourceFiles(ref.refValue, filename, targetCodeProjectId, 5);
+            if (matches.length > 0) {
               resolved++;
-              for (const record of result.records) {
-                const sfId = record.get('id');
-                const sfProjectId = record.get('projectId');
-
-                await session.run(
-                  `MATCH (t:Task {id: $taskId}), (sf:SourceFile {id: $sfId})
-                   MERGE (t)-[r:MODIFIES]->(sf)
-                   SET r.refType = $refType,
-                       r.refValue = $refValue,
-                       r.codeProjectId = $sfProjectId,
-                       r.resolvedAt = datetime(),
-                       r.sourceKind = 'plan-parser'`,
-                  {
-                    taskId: ref.taskId,
-                    sfId,
-                    refType: PlanEdgeType.MODIFIES,
-                    refValue: ref.refValue,
-                    sfProjectId,
-                  },
-                );
+              for (const sf of matches) {
+                modifiesEdges.push({
+                  taskId: ref.taskId,
+                  sfId: sf.id,
+                  refValue: ref.refValue,
+                  sfProjectId: sf.projectId,
+                });
               }
             } else {
               notFound++;
             }
+
           } else if (ref.refType === 'file_path') {
             const filename = path.basename(ref.refValue);
             const sourcePlanProjectId = ref.taskId.split(':')[0];
             const targetCodeProjectId = planToCodeProjectMap[sourcePlanProjectId] ?? null;
-            const result = await session.run(
-              `CALL {
-                 MATCH (sf:SourceFile)
-                 WHERE (sf.filePath ENDS WITH $refValue OR sf.filePath ENDS WITH $filename OR sf.name ENDS WITH $filename)
-                   AND ($targetCodeProjectId IS NULL OR sf.projectId = $targetCodeProjectId)
-                 RETURN sf
-                 UNION
-                 MATCH (sf:TestFile)
-                 WHERE (sf.filePath ENDS WITH $refValue OR sf.filePath ENDS WITH $filename OR sf.name ENDS WITH $filename)
-                   AND ($targetCodeProjectId IS NULL OR sf.projectId = $targetCodeProjectId)
-                 RETURN sf
-               }
-               RETURN sf.id AS id, sf.name AS name, sf.filePath AS filePath, sf.projectId AS projectId
-               LIMIT 5`,
-              { filename, refValue: ref.refValue, targetCodeProjectId },
-            );
 
-            if (result.records.length > 0) {
+            // Match SourceFiles (LIMIT 5)
+            const sfMatches = matchSourceFiles(ref.refValue, filename, targetCodeProjectId, 5);
+            // Match TestFiles separately (LIMIT 5) - preserving two-step semantics
+            const tfMatches = matchTestFiles(ref.refValue, filename, targetCodeProjectId, 5);
+
+            if (sfMatches.length > 0 || tfMatches.length > 0) {
               resolved++;
-              for (const record of result.records) {
-                const sfId = record.get('id');
-                const sfProjectId = record.get('projectId');
 
-                // Task nodes always have Task label; SourceFile always has SourceFile label
-                await session.run(
-                  `MATCH (t:Task {id: $taskId}), (sf:SourceFile {id: $sfId})
-                   MERGE (t)-[r:HAS_CODE_EVIDENCE]->(sf)
-                   SET r.refType = 'file_path',
-                       r.refValue = $refValue,
-                       r.codeProjectId = $sfProjectId,
-                       r.resolvedAt = datetime(),
-                       r.sourceKind = 'plan-parser'`,
-                  { taskId: ref.taskId, sfId, refValue: ref.refValue, sfProjectId },
-                );
+              for (const sf of sfMatches) {
+                sourceFileEvidenceEdges.push({
+                  taskId: ref.taskId,
+                  sfId: sf.id,
+                  refValue: ref.refValue,
+                  sfProjectId: sf.projectId,
+                });
                 evidenceEdges++;
               }
 
-              // Also link explicit TestFile nodes for the same path when present
-              const testFileResult = await session.run(
-                `MATCH (tf:TestFile)
-                 WHERE (
-                   tf.filePath ENDS WITH $refValue
-                   OR tf.filePath ENDS WITH $filename
-                   OR tf.name ENDS WITH $filename
-                 )
-                 AND ($targetCodeProjectId IS NULL OR tf.projectId = $targetCodeProjectId)
-                 RETURN tf.filePath AS filePath, tf.name AS name, tf.projectId AS projectId
-                 LIMIT 5`,
-                { filename, refValue: ref.refValue, targetCodeProjectId },
-              );
-
-              for (const record of testFileResult.records) {
-                const tfFilePath = record.get('filePath');
-                const tfName = record.get('name');
-                const tfProjectId = record.get('projectId');
-                await session.run(
-                  `MATCH (t:CodeNode {id: $taskId})
-                   MATCH (tf:TestFile)
-                   WHERE coalesce(tf.projectId, '') = coalesce($tfProjectId, '')
-                     AND (
-                       ($tfFilePath IS NOT NULL AND tf.filePath = $tfFilePath)
-                       OR ($tfFilePath IS NULL AND tf.name = $tfName)
-                     )
-                   MERGE (t)-[r:HAS_CODE_EVIDENCE]->(tf)
-                   SET r.refType = 'file_path',
-                       r.refValue = $refValue,
-                       r.codeProjectId = $tfProjectId,
-                       r.resolvedAt = datetime(),
-                       r.sourceKind = 'plan-parser'`,
-                  { taskId: ref.taskId, tfFilePath, tfName, refValue: ref.refValue, tfProjectId },
-                );
+              for (const tf of tfMatches) {
+                testFileEvidenceEdges.push({
+                  taskId: ref.taskId,
+                  tfId: tf.id,
+                  refValue: ref.refValue,
+                  tfProjectId: tf.projectId,
+                });
                 evidenceEdges++;
               }
 
-              await session.run(
-                `MATCH (t:Task {id: $taskId})
-                 SET t.hasCodeEvidence = true,
-                     t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + $count`,
-                { taskId: ref.taskId, count: result.records.length + testFileResult.records.length },
-              );
+              // Track per-task evidence count
+              const totalCount = sfMatches.length + tfMatches.length;
+              taskEvidenceCounts.set(ref.taskId, (taskEvidenceCounts.get(ref.taskId) ?? 0) + totalCount);
             } else {
               notFound++;
             }
+
           } else if (ref.refType === 'function') {
             const funcName = ref.refValue.split('.').pop() || ref.refValue;
             const sourcePlanProjectId = ref.taskId.split(':')[0];
             const targetCodeProjectId = planToCodeProjectMap[sourcePlanProjectId] ?? null;
-            const result = await session.run(
-              `CALL {
-                 MATCH (fn:Function)
-                 WHERE fn.name = $funcName AND ($targetCodeProjectId IS NULL OR fn.projectId = $targetCodeProjectId)
-                 RETURN fn
-                 UNION
-                 MATCH (fn:Method)
-                 WHERE fn.name = $funcName AND ($targetCodeProjectId IS NULL OR fn.projectId = $targetCodeProjectId)
-                 RETURN fn
-                 UNION
-                 MATCH (fn:Variable)
-                 WHERE fn.name = $funcName AND ($targetCodeProjectId IS NULL OR fn.projectId = $targetCodeProjectId)
-                 RETURN fn
-               }
-               RETURN fn.id AS id, fn.name AS name, fn.projectId AS projectId
-               LIMIT 5`,
-              { funcName, targetCodeProjectId },
-            );
 
-            if (result.records.length > 0) {
+            const matches = matchFunctions(funcName, targetCodeProjectId, 5);
+            if (matches.length > 0) {
               resolved++;
-              for (const record of result.records) {
-                const fnId = record.get('id');
-                const fnProjectId = record.get('projectId');
-
-                // Task + Function labels for label-constrained lookup
-                await session.run(
-                  `MATCH (t:Task {id: $taskId}), (fn:Function {id: $fnId})
-                   MERGE (t)-[r:HAS_CODE_EVIDENCE]->(fn)
-                   SET r.refType = 'function',
-                       r.refValue = $refValue,
-                       r.codeProjectId = $fnProjectId,
-                       r.resolvedAt = datetime(),
-                       r.sourceKind = 'plan-parser'`,
-                  { taskId: ref.taskId, fnId, refValue: ref.refValue, fnProjectId },
-                );
+              for (const fn of matches) {
+                functionEvidenceEdges.push({
+                  taskId: ref.taskId,
+                  fnId: fn.id,
+                  refValue: ref.refValue,
+                  fnProjectId: fn.projectId,
+                });
                 evidenceEdges++;
               }
-
-              await session.run(
-                `MATCH (t:Task {id: $taskId})
-                 SET t.hasCodeEvidence = true,
-                     t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + $count`,
-                { taskId: ref.taskId, count: result.records.length },
-              );
+              // Track per-task evidence count
+              taskEvidenceCounts.set(ref.taskId, (taskEvidenceCounts.get(ref.taskId) ?? 0) + matches.length);
             } else {
               notFound++;
             }
+
           } else if (ref.refType === 'project_id') {
-            const result = await session.run(
-              `MATCH (p:Project {projectId: $projectIdRef})
-               RETURN p.projectId AS projectId
-               LIMIT 1`,
-              { projectIdRef: ref.refValue },
-            );
-
-            if (result.records.length > 0) {
+            const proj = projectByProjectId.get(ref.refValue);
+            if (proj) {
               resolved++;
-              await session.run(
-                `MATCH (t:CodeNode {id: $taskId}), (p:Project {projectId: $projectIdRef})
-                 MERGE (t)-[r:TARGETS]->(p)
-                 SET r.projectId = $sourceProjectId,
-                     r.refType = 'project_id',
-                     r.refValue = $refValue,
-                     r.resolvedAt = datetime()`,
-                {
-                  taskId: ref.taskId,
-                  projectIdRef: ref.refValue,
-                  sourceProjectId: ref.taskId.split(':')[0],
-                  refValue: ref.refValue,
-                },
-              );
+              targetsEdges.push({
+                taskId: ref.taskId,
+                targetProjectId: proj.projectId,
+                sourceProjectId: ref.taskId.split(':')[0],
+                refType: 'project_id',
+                refValue: ref.refValue,
+              });
             } else {
               notFound++;
             }
-          } else if (ref.refType === 'project_name') {
-            const result = await session.run(
-              `MATCH (p:Project)
-               WHERE toLower(p.name) = toLower($projectName)
-                  OR toLower(coalesce(p.displayName, '')) = toLower($projectName)
-               RETURN p.projectId AS projectId
-               LIMIT 1`,
-              { projectName: ref.refValue },
-            );
 
-            if (result.records.length > 0) {
+          } else if (ref.refType === 'project_name') {
+            const proj = projectByNameLower.get(ref.refValue.toLowerCase());
+            if (proj) {
               resolved++;
-              const targetProjectId = result.records[0].get('projectId');
-              await session.run(
-                `MATCH (t:CodeNode {id: $taskId}), (p:Project {projectId: $targetProjectId})
-                 MERGE (t)-[r:TARGETS]->(p)
-                 SET r.projectId = $sourceProjectId,
-                     r.refType = 'project_name',
-                     r.refValue = $refValue,
-                     r.resolvedAt = datetime()`,
-                {
-                  taskId: ref.taskId,
-                  targetProjectId,
-                  sourceProjectId: ref.taskId.split(':')[0],
-                  refValue: ref.refValue,
-                },
-              );
+              targetsEdges.push({
+                taskId: ref.taskId,
+                targetProjectId: proj.projectId,
+                sourceProjectId: ref.taskId.split(':')[0],
+                refType: 'project_name',
+                refValue: ref.refValue,
+              });
             } else {
               notFound++;
             }
           }
         }
+
+        console.error(`[enrichCrossDomain] Phase 1B done: resolved=${resolved}, notFound=${notFound}, evidenceEdges=${evidenceEdges}`);
+        console.error(`[enrichCrossDomain] Edge counts: DEPENDS_ON=${dependsOnEdges.length}, BLOCKS=${blocksEdges.length}, SF_EVIDENCE=${sourceFileEvidenceEdges.length}, TF_EVIDENCE=${testFileEvidenceEdges.length}, FN_EVIDENCE=${functionEvidenceEdges.length}, MODIFIES=${modifiesEdges.length}, TARGETS=${targetsEdges.length}`);
+
+        // =========================================================================
+        // Phase C: Batch MERGE edges
+        // =========================================================================
+        console.error('[enrichCrossDomain] Phase 1C: batch writing edges');
+
+        // 1. DEPENDS_ON edges
+        if (dependsOnEdges.length > 0) {
+          await session.run(
+            `UNWIND $edges AS e
+             MATCH (src:CodeNode {id: e.srcId}), (dst:CodeNode {id: e.dstId})
+             MERGE (src)-[r:DEPENDS_ON]->(dst)
+             SET r.projectId = e.projectId,
+                 r.refType = e.refType,
+                 r.refValue = e.refValue,
+                 r.rawRefValue = e.rawRefValue,
+                 r.tokenCount = e.tokenCount,
+                 r.tokenIndex = e.tokenIndex,
+                 r.resolvedAt = datetime(),
+                 r.sourceKind = 'plan-parser'`,
+            { edges: dependsOnEdges },
+          );
+          console.error(`[enrichCrossDomain] Wrote ${dependsOnEdges.length} DEPENDS_ON edges`);
+        }
+
+        // 2. BLOCKS edges (separate — can't parameterize relationship type)
+        if (blocksEdges.length > 0) {
+          await session.run(
+            `UNWIND $edges AS e
+             MATCH (src:CodeNode {id: e.srcId}), (dst:CodeNode {id: e.dstId})
+             MERGE (src)-[r:BLOCKS]->(dst)
+             SET r.projectId = e.projectId,
+                 r.refType = e.refType,
+                 r.refValue = e.refValue,
+                 r.rawRefValue = e.rawRefValue,
+                 r.tokenCount = e.tokenCount,
+                 r.tokenIndex = e.tokenIndex,
+                 r.resolvedAt = datetime(),
+                 r.sourceKind = 'plan-parser'`,
+            { edges: blocksEdges },
+          );
+          console.error(`[enrichCrossDomain] Wrote ${blocksEdges.length} BLOCKS edges`);
+        }
+
+        // 3. HAS_CODE_EVIDENCE → SourceFile
+        if (sourceFileEvidenceEdges.length > 0) {
+          await session.run(
+            `UNWIND $edges AS e
+             MATCH (t:Task {id: e.taskId}), (sf:SourceFile {id: e.sfId})
+             MERGE (t)-[r:HAS_CODE_EVIDENCE]->(sf)
+             SET r.refType = 'file_path',
+                 r.refValue = e.refValue,
+                 r.codeProjectId = e.sfProjectId,
+                 r.resolvedAt = datetime(),
+                 r.sourceKind = 'plan-parser'`,
+            { edges: sourceFileEvidenceEdges },
+          );
+          console.error(`[enrichCrossDomain] Wrote ${sourceFileEvidenceEdges.length} HAS_CODE_EVIDENCE→SourceFile edges`);
+        }
+
+        // 4. HAS_CODE_EVIDENCE → TestFile
+        if (testFileEvidenceEdges.length > 0) {
+          await session.run(
+            `UNWIND $edges AS e
+             MATCH (t:CodeNode {id: e.taskId}), (tf:TestFile {nodeId: e.tfId})
+             MERGE (t)-[r:HAS_CODE_EVIDENCE]->(tf)
+             SET r.refType = 'file_path',
+                 r.refValue = e.refValue,
+                 r.codeProjectId = e.tfProjectId,
+                 r.resolvedAt = datetime(),
+                 r.sourceKind = 'plan-parser'`,
+            { edges: testFileEvidenceEdges },
+          );
+          console.error(`[enrichCrossDomain] Wrote ${testFileEvidenceEdges.length} HAS_CODE_EVIDENCE→TestFile edges`);
+        }
+
+        // 5. HAS_CODE_EVIDENCE → Function
+        if (functionEvidenceEdges.length > 0) {
+          await session.run(
+            `UNWIND $edges AS e
+             MATCH (t:Task {id: e.taskId}), (fn:Function {id: e.fnId})
+             MERGE (t)-[r:HAS_CODE_EVIDENCE]->(fn)
+             SET r.refType = 'function',
+                 r.refValue = e.refValue,
+                 r.codeProjectId = e.fnProjectId,
+                 r.resolvedAt = datetime(),
+                 r.sourceKind = 'plan-parser'`,
+            { edges: functionEvidenceEdges },
+          );
+          console.error(`[enrichCrossDomain] Wrote ${functionEvidenceEdges.length} HAS_CODE_EVIDENCE→Function edges`);
+        }
+
+        // 6. MODIFIES
+        if (modifiesEdges.length > 0) {
+          await session.run(
+            `UNWIND $edges AS e
+             MATCH (t:Task {id: e.taskId}), (sf:SourceFile {id: e.sfId})
+             MERGE (t)-[r:MODIFIES]->(sf)
+             SET r.refType = 'MODIFIES',
+                 r.refValue = e.refValue,
+                 r.codeProjectId = e.sfProjectId,
+                 r.resolvedAt = datetime(),
+                 r.sourceKind = 'plan-parser'`,
+            { edges: modifiesEdges },
+          );
+          console.error(`[enrichCrossDomain] Wrote ${modifiesEdges.length} MODIFIES edges`);
+        }
+
+        // 7. TARGETS
+        if (targetsEdges.length > 0) {
+          await session.run(
+            `UNWIND $edges AS e
+             MATCH (t:CodeNode {id: e.taskId}), (p:Project {projectId: e.targetProjectId})
+             MERGE (t)-[r:TARGETS]->(p)
+             SET r.projectId = e.sourceProjectId,
+                 r.refType = e.refType,
+                 r.refValue = e.refValue,
+                 r.resolvedAt = datetime()`,
+            { edges: targetsEdges },
+          );
+          console.error(`[enrichCrossDomain] Wrote ${targetsEdges.length} TARGETS edges`);
+        }
+
+        // 8. Task evidence count updates
+        if (taskEvidenceCounts.size > 0) {
+          const updates = Array.from(taskEvidenceCounts.entries()).map(([taskId, count]) => ({ taskId, count }));
+          await session.run(
+            `UNWIND $updates AS u
+             MATCH (t:Task {id: u.taskId})
+             SET t.hasCodeEvidence = true,
+                 t.codeEvidenceCount = coalesce(t.codeEvidenceCount, 0) + u.count`,
+            { updates },
+          );
+          console.error(`[enrichCrossDomain] Updated evidence counts for ${taskEvidenceCounts.size} tasks`);
+        }
+
+        console.error('[enrichCrossDomain] Phase 1C done');
       } finally {
         await session.close();
       }
