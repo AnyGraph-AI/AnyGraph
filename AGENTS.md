@@ -299,7 +299,12 @@ MATCH (f:Function {name: 'run', projectId: 'proj_c0d3e9a1f200'}) RETURN f
 
 **Playbooks:**
 - **Claim refresh:** `claim_generate` → `claims:cross:synthesize` → `claim_chain_path`
-- **Plan refresh:** `plan:refresh` → `edges:normalize` → `plan:evidence:recompute`
+- **Plan refresh:** `plan:refresh` takes ~3 min (enrichCrossDomain processes 5600+ nodes). Shell sessions time out and SIGTERM the process if run directly. **Always use nohup:**
+  ```bash
+  nohup npm run plan:refresh > /tmp/plan-refresh.log 2>&1 &
+  while kill -0 $! 2>/dev/null; do sleep 10; done && tail -3 /tmp/plan-refresh.log
+  ```
+  Then run `npm run plan:evidence:recompute` after. Confirmed pattern: 2026-03-27.
 - **Embedding tuning:** `plan:embedding:match --threshold=0.75 --limit=3` → `embedding:fp:verify` → target FP < 5%
 - **Failure recovery:** `PLAN_FRESHNESS_GUARD_FAILED` → run `plan:refresh`. `invariant_proof_completeness` fail → run `verification:proof:record`. Neo4j auth issues → check `.env`.
 
