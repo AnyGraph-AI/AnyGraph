@@ -408,6 +408,21 @@ export async function enrichPrecomputeScores(
 ): Promise<{ functionsUpdated: number; filesUpdated: number }> {
   const session = driver.session();
   try {
+    // ── Step 0: Mark test files with productionRiskExcluded ────
+    // Test files can never earn evidence (no VRs target them, no TESTED_BY edges point at them),
+    // so their score is structurally zero and drags the production average down.
+    // Mark them productionRiskExcluded=true same as example assets and governance-critical config.
+    const testFileMarking = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       WHERE sf.filePath =~ '.*(__tests__|test|spec)/.*'
+          OR sf.filePath =~ '.*\\.(test|spec)\\.(ts|tsx|js|jsx)$'
+       SET sf.productionRiskExcluded = true
+       RETURN count(sf) AS marked`,
+      { projectId },
+    );
+    const testFilesMarked = toNum(testFileMarking.records[0]?.get('marked'));
+    console.log(`[UI-0] Test files marked productionRiskExcluded: ${testFilesMarked}`);
+
     // ── Step 1: Build CALLS adjacency for downstream impact ────
     const callsResult = await session.run(
       `MATCH (caller:CodeNode:Function {projectId: $projectId})-[:CALLS]->(callee:CodeNode:Function {projectId: $projectId})

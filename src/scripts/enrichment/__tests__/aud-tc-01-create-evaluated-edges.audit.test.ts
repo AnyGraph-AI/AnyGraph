@@ -78,13 +78,13 @@ describe('[aud-tc-01] create-evaluated-edges.ts', () => {
       expect(failingVR.ok).toBe(false);
     });
 
-    it('(4) done-check VRs identified by sourceFamily property', () => {
-      // Contract: done-check VRs have sourceFamily='done-check'
-      const doneCheckVR = { sourceFamily: 'done-check' };
-      const eslintVR = { sourceFamily: 'eslint' };
-      const semgrepVR = { sourceFamily: 'semgrep' };
+    it('(4) done-check VRs identified by tool property', () => {
+      // Contract: done-check VRs have tool='done-check' (stored by verification-done-check-capture.ts)
+      const doneCheckVR = { tool: 'done-check' };
+      const eslintVR = { tool: 'eslint' };
+      const semgrepVR = { tool: 'semgrep' };
 
-      const isDoneCheck = (vr: { sourceFamily: string }) => vr.sourceFamily === 'done-check';
+      const isDoneCheck = (vr: { tool: string }) => vr.tool === 'done-check';
 
       expect(isDoneCheck(doneCheckVR)).toBe(true);
       expect(isDoneCheck(eslintVR)).toBe(false);
@@ -178,13 +178,13 @@ describe('[aud-tc-01] create-evaluated-edges.ts', () => {
 
   describe('VR scope filtering', () => {
     it('(10) only done-check VRs get EVALUATED edges', () => {
-      // The Cypher WHERE clause filters: vr.sourceFamily = 'done-check'
+      // The Cypher WHERE clause filters: vr.tool = 'done-check'
       const query = `
         MATCH (vr:VerificationRun)
-        WHERE vr.sourceFamily = 'done-check'
+        WHERE vr.tool = 'done-check'
       `;
 
-      expect(query).toContain("sourceFamily = 'done-check'");
+      expect(query).toContain("tool = 'done-check'");
     });
 
     it('(11) EVALUATED edges target Project nodes, not SourceFile', () => {

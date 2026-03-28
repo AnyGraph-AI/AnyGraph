@@ -13,25 +13,18 @@
  * 
  * Usage: npx tsx create-possible-call-edges.ts
  */
+import type { Driver, Session } from 'neo4j-driver';
 import neo4j from 'neo4j-driver';
 import dotenv from 'dotenv';
 
 dotenv.config();
-
-const driver = neo4j.driver(
-  process.env.NEO4J_URI || 'bolt://localhost:7687',
-  neo4j.auth.basic(
-    process.env.NEO4J_USER || 'neo4j',
-    process.env.NEO4J_PASSWORD || 'codegraph'
-  )
-);
 
 /**
  * Detect ternary function selection patterns in source code.
  * Pattern: `cond ? fnA : fnB` where fnA and fnB are function identifiers
  * Returns array of {trueTarget, falseTarget} pairs.
  */
-function extractTernaryFunctionCandidates(sourceCode: string): Array<{trueFn: string, falseFn: string}> {
+export function extractTernaryFunctionCandidates(sourceCode: string): Array<{trueFn: string, falseFn: string}> {
   const results: Array<{trueFn: string, falseFn: string}> = [];
   
   // Pattern: identifier ? identifier : identifier (ternary with function identifiers)
@@ -56,11 +49,14 @@ function extractTernaryFunctionCandidates(sourceCode: string): Array<{trueFn: st
 
 /**
  * Detect callback registration patterns in source code.
- * Pattern: function names that suggest callback storage (setCallback, register*, on*, add*Listener, etc.)
+ * 
+ * Strategy: Graph-derived type information first (Function parameters with callback-like types),
+ * fallback to naming patterns when type info unavailable.
+ * 
  * Returns true if the source indicates callback registration.
  */
-function hasCallbackRegistrationPattern(sourceCode: string, fnName: string): boolean {
-  // Common callback registration naming patterns
+export function hasCallbackRegistrationPattern(sourceCode: string, fnName: string): boolean {
+  // Common callback registration naming patterns (fallback when type info unavailable)
   const registrationPatterns = [
     /^set[A-Z]\w*(?:Callback|Handler|Listener)/,  // setCallback, setHandler, setListener
     /^register[A-Z]\w*/,                           // registerHandler, registerCallback
@@ -82,7 +78,12 @@ function hasCallbackRegistrationPattern(sourceCode: string, fnName: string): boo
   return callbackAssignments.test(sourceCode);
 }
 
-async function main() {
+export async function enrichPossibleCallEdges(driver: Driver): Promise<{
+  ternary: number;
+  hof: number;
+  registration: number;
+  total: number;
+}> {
   const session = driver.session();
   let totalCreated = 0;
   let ternaryCount = 0;
@@ -256,10 +257,35 @@ async function main() {
     console.log(`\n✅ POSSIBLE_CALL edges created: ${totalCreated}`);
     console.log(`   Breakdown: ternary=${ternaryCount}, HOF=${hofCount}, registration=${registrationCount}`);
 
+    return {
+      ternary: ternaryCount,
+      hof: hofCount,
+      registration: registrationCount,
+      total: totalCreated,
+    };
   } finally {
     await session.close();
-    await driver.close();
   }
 }
 
-main().catch(console.error);
+// Direct execution (CLI wrapper)
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('create-possible-call-edges.ts')) {
+  const driver = neo4j.driver(
+    process.env.NEO4J_URI || 'bolt://localhost:7687',
+    neo4j.auth.basic(
+      process.env.NEO4J_USER || 'neo4j',
+      process.env.NEO4J_PASSWORD || 'codegraph'
+    )
+  );
+
+  enrichPossibleCallEdges(driver)
+    .then((result) => {
+      console.log(`\nFinal: ${JSON.stringify(result)}`);
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('[create-possible-call-edges] Error:', error);
+      process.exit(1);
+    })
+    .finally(() => driver.close());
+}

@@ -28,7 +28,7 @@ export async function enrichEvaluatedEdges(driver: Driver): Promise<{
     // Step 1: Set scopeModel='project-level' on all done-check VRs
     const scopeResult = await session.run(
       `MATCH (vr:VerificationRun)
-       WHERE vr.sourceFamily = 'done-check'
+       WHERE vr.tool = 'done-check'
          AND (vr.scopeModel IS NULL OR vr.scopeModel <> 'project-level')
        SET vr.scopeModel = 'project-level'
        RETURN count(vr) AS updated`,
@@ -36,10 +36,12 @@ export async function enrichEvaluatedEdges(driver: Driver): Promise<{
     const scopeModelSet = toNum(scopeResult.records[0]?.get('updated'));
 
     // Step 2: Create EVALUATED edges from done-check VR → Project
-    // failedChecks: always [] until verification-done-check-capture.ts stores failure message text on VR nodes
+    // TODO: failedChecks parsing — VR nodes store ok:boolean but not which checks failed.
+    // For full implementation: query related GateDecision nodes or enhance verification-done-check-capture.ts
+    // to store failureMessage/failedSteps array on VR nodes.
     const evalResult = await session.run(
       `MATCH (vr:VerificationRun)
-       WHERE vr.sourceFamily = 'done-check'
+       WHERE vr.tool = 'done-check'
          AND vr.projectId IS NOT NULL
        MATCH (p:Project {projectId: vr.projectId})
        MERGE (vr)-[r:EVALUATED]->(p)
