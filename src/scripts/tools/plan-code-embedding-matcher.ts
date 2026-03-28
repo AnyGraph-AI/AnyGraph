@@ -29,7 +29,7 @@ function argValue(flag: string): string | undefined {
   return p?.split('=').slice(1).join('=');
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const threshold = Number(argValue('--threshold') ?? process.env.PLAN_CODE_EMBEDDING_THRESHOLD ?? 0.75);
   const limit = Math.max(1, Math.floor(Number(argValue('--limit') ?? process.env.PLAN_CODE_EMBEDDING_LIMIT ?? 5)));
   const apply = process.argv.includes('--apply');
@@ -184,12 +184,16 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error(
-    JSON.stringify({
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    }),
-  );
-  process.exit(1);
-});
+// Guard: only run when executed directly (not imported by tests)
+import { fileURLToPath } from 'node:url';
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(
+      JSON.stringify({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    process.exit(1);
+  });
+}

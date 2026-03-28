@@ -1,83 +1,202 @@
 /**
- * [AUD-TC-13-L1-02] edit-simulation.ts — Contract Tests
+ * [AUD-TC-13-L1-02] edit-simulation.ts — Behavioral Tests
  *
- * Self-executing CLI with exported `simulateEdit` function.
- * Cannot import due to module-level main() triggering real Neo4j/parser calls.
- * Tests verify behavioral contracts via source analysis.
+ * Now importable (main() guarded). Tests mock neo4j-driver, TypeScriptParser,
+ * and fs to verify simulateEdit behavior: graph state comparison, diff computation,
+ * risk assessment, and caller impact analysis.
  */
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const SOURCE = readFileSync(
-  resolve(import.meta.dirname, '../../tools/edit-simulation.ts'),
-  'utf-8',
-);
+// Mock fs
+const mockReadFileSync = vi.fn();
+const mockWriteFileSync = vi.fn();
+const mockUnlinkSync = vi.fn();
+vi.mock('fs', () => ({
+  readFileSync: (...args: any[]) => mockReadFileSync(...args),
+  writeFileSync: (...args: any[]) => mockWriteFileSync(...args),
+  unlinkSync: (...args: any[]) => mockUnlinkSync(...args),
+}));
+
+// Mock dotenv
+vi.mock('dotenv', () => ({
+  default: { config: vi.fn() },
+}));
+
+// Mock TypeScriptParser (uses parseChunk internally)
+const mockParseChunk = vi.fn();
+vi.mock('../../../core/parsers/typescript-parser.js', () => ({
+  TypeScriptParser: vi.fn(function (this: any) {
+    this.parseChunk = mockParseChunk;
+  }),
+}));
+
+// Mock schema
+vi.mock('../../../core/config/schema.js', () => ({
+  CORE_TYPESCRIPT_SCHEMA: {},
+}));
+
+// Mock neo4j-driver
+const mockSessionRun = vi.fn();
+const mockSessionClose = vi.fn().mockResolvedValue(undefined);
+const mockDriverClose = vi.fn().mockResolvedValue(undefined);
+const mockSession = {
+  run: mockSessionRun,
+  close: mockSessionClose,
+};
+
+vi.mock('neo4j-driver', () => ({
+  default: {
+    driver: vi.fn(() => ({
+      session: vi.fn(() => mockSession),
+      close: mockDriverClose,
+    })),
+    auth: {
+      basic: vi.fn((u: string, p: string) => ({ u, p })),
+    },
+  },
+}));
+
+import { simulateEdit } from '../edit-simulation.js';
 
 describe('[aud-tc-13] edit-simulation.ts', () => {
-  it('(1) exports simulateEdit accepting filePath, newContent, and optional projectId', () => {
-    expect(SOURCE).toContain('export async function simulateEdit(');
-    expect(SOURCE).toContain('filePath');
-    expect(SOURCE).toContain('newContent');
-    expect(SOURCE).toContain('projectId');
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: file reads for parser temp file
+    mockReadFileSync.mockReturnValue('// original content');
   });
 
-  it('(2) parses current graph state for the file via Neo4j query', () => {
-    expect(SOURCE).toContain('neo4j.driver');
-    expect(SOURCE).toMatch(/session\.run|MATCH.*SourceFile|MATCH.*Function/);
+  function setupGraphState(opts: {
+    existingNodes?: Array<{ name: string; labels: string[]; isExported: boolean; id: string }>;
+    existingCalls?: Array<{ caller: string; callee: string; callerFile: string }>;
+    affectedCallers?: Array<{ caller: string; callerFile: string }>;
+  } = {}) {
+    const { existingNodes = [], existingCalls = [], affectedCallers = [] } = opts;
+    // nodesResult
+    mockSessionRun.mockResolvedValueOnce({
+      records: existingNodes.map((n) => ({
+        get: (key: string) => {
+          const map: Record<string, any> = { name: n.name, labels: n.labels, isExported: n.isExported, id: n.id, startLine: 1, endLine: 10 };
+          return map[key];
+        },
+      })),
+    });
+    // callsResult
+    mockSessionRun.mockResolvedValueOnce({
+      records: existingCalls.map((c) => ({
+        get: (key: string) => {
+          const map: Record<string, any> = { caller: c.caller, callee: c.callee, callerFile: c.callerFile };
+          return map[key];
+        },
+      })),
+    });
+    // affectedCallers
+    mockSessionRun.mockResolvedValueOnce({
+      records: affectedCallers.map((c) => ({
+        get: (key: string) => {
+          const map: Record<string, any> = { callerName: c.caller, callerFile: c.callerFile };
+          return map[key];
+        },
+      })),
+    });
+  }
+
+  it('(1) connects to Neo4j with env vars or defaults', async () => {
+    setupGraphState();
+    mockParseChunk.mockReturnValue({ nodes: [], edges: [] });
+    await simulateEdit('/tmp/test.ts', 'const x = 1;', 'proj_test', '/tmp/');
+    // neo4j.driver was called (via mock)
+    const neo4jMod = await import('neo4j-driver');
+    expect(neo4jMod.default.driver).toHaveBeenCalled();
   });
 
-  it('(3) parses proposed content via TypeScriptParser', () => {
-    expect(SOURCE).toContain('TypeScriptParser');
-    expect(SOURCE).toContain('CORE_TYPESCRIPT_SCHEMA');
+  it('(2) queries current graph state for the file', async () => {
+    setupGraphState();
+    mockParseChunk.mockReturnValue({ nodes: [], edges: [] });
+    await simulateEdit('/tmp/test.ts', 'const x = 1;', 'proj_test', '/tmp/');
+    // First session.run = node query
+    const nodeQuery = mockSessionRun.mock.calls[0][0] as string;
+    expect(nodeQuery).toContain('MATCH (sf:SourceFile');
+    expect(nodeQuery).toContain('CONTAINS');
   });
 
-  it('(4) computes diff: nodesAdded, nodesRemoved, nodesModified', () => {
-    expect(SOURCE).toMatch(/nodesAdded|nodes.*added/i);
-    expect(SOURCE).toMatch(/nodesRemoved|nodes.*removed/i);
-    expect(SOURCE).toMatch(/nodesModified|nodes.*modified/i);
+  it('(3) parses proposed content via TypeScriptParser', async () => {
+    setupGraphState();
+    mockParseChunk.mockReturnValue({ nodes: [], edges: [] });
+    await simulateEdit('/tmp/test.ts', 'export function newFn() {}', 'proj_test', '/tmp/');
+    expect(mockParseChunk).toHaveBeenCalled();
   });
 
-  it('(5) computes diff: identifies new and removed edges (CALLS)', () => {
-    // Source uses newCalls/removedCalls rather than generic edgesAdded/edgesRemoved
-    expect(SOURCE).toMatch(/newCalls|removedCalls|new.*calls|removed.*calls/i);
+  it('(4) detects added nodes when new function appears', async () => {
+    setupGraphState({ existingNodes: [] });
+    mockParseChunk.mockReturnValue({
+      nodes: [{
+        labels: ['Function', 'CodeNode'],
+        properties: { name: 'newFunc', filePath: '/tmp/test.ts', isExported: true },
+      }],
+      edges: [],
+    });
+    const result = await simulateEdit('/tmp/test.ts', 'export function newFunc() {}', 'proj_test', '/tmp/');
+    expect(result.nodesAdded.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('(6) identifies affectedCallers: functions that call modified/removed functions', () => {
-    expect(SOURCE).toMatch(/affectedCallers|affected.*caller/i);
+  it('(5) detects removed nodes when existing function disappears', async () => {
+    setupGraphState({
+      existingNodes: [{ name: 'oldFunc', labels: ['Function'], isExported: true, id: 'fn_1' }],
+    });
+    mockParseChunk.mockReturnValue({ nodes: [], edges: [] });
+    const result = await simulateEdit('/tmp/test.ts', '// empty', 'proj_test', '/tmp/');
+    expect(result.nodesRemoved.length).toBeGreaterThanOrEqual(1);
+    expect(result.nodesRemoved[0].name).toBe('oldFunc');
   });
 
-  it('(7) includes riskAssessment with changeScope', () => {
-    expect(SOURCE).toContain('riskAssessment');
-    expect(SOURCE).toContain('changeScope');
+  it('(6) returns risk assessment with changeScope', async () => {
+    setupGraphState();
+    mockParseChunk.mockReturnValue({ nodes: [], edges: [] });
+    const result = await simulateEdit('/tmp/test.ts', 'const x = 1;', 'proj_test', '/tmp/');
+    expect(result.riskAssessment).toBeDefined();
+    expect(result.riskAssessment.changeScope).toBeDefined();
+    expect(['SAFE', 'CAUTION', 'DANGEROUS', 'CRITICAL']).toContain(result.riskAssessment.changeScope);
   });
 
-  it('(8) CLI mode: reads filePath from argv[2] and modified content from argv[3]', () => {
-    expect(SOURCE).toContain('process.argv[2]');
-    expect(SOURCE).toContain('process.argv[3]');
+  it('(7) identifies broken callers when exported function is removed', async () => {
+    setupGraphState({
+      existingNodes: [{ name: 'exportedFn', labels: ['Function'], isExported: true, id: 'fn_1' }],
+      affectedCallers: [{ caller: 'consumer', callerFile: 'other.ts' }],
+    });
+    mockParseChunk.mockReturnValue({ nodes: [], edges: [] });
+    const result = await simulateEdit('/tmp/test.ts', '// empty', 'proj_test', '/tmp/');
+    expect(result.exportsRemoved).toContain('exportedFn');
   });
 
-  it('(9) outputs SimulationResult as structured data', () => {
-    expect(SOURCE).toMatch(/SimulationResult|simulation.*result/i);
+  it('(8) restores original file content after parsing', async () => {
+    setupGraphState();
+    mockParseChunk.mockReturnValue({ nodes: [], edges: [] });
+    await simulateEdit('/tmp/test.ts', 'const x = 1;', 'proj_test', '/tmp/');
+    // Code writes modified content, then restores original via writeFileSync
+    // At least 2 writeFileSync calls: replace + restore
+    expect(mockWriteFileSync.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('(10) uses direct neo4j-driver for graph queries', () => {
-    expect(SOURCE).toContain("import neo4j from 'neo4j-driver'");
+  it('(9) closes Neo4j session in finally block', async () => {
+    setupGraphState();
+    mockParseChunk.mockReturnValue({ nodes: [], edges: [] });
+    await simulateEdit('/tmp/test.ts', 'const x = 1;', 'proj_test', '/tmp/');
+    expect(mockSessionClose).toHaveBeenCalled();
   });
 
-  it('(11) does NOT apply changes — simulation only', () => {
-    // Source should not contain MERGE/CREATE/DELETE operations for the simulation itself
-    // It reads graph state and computes diffs
-    expect(SOURCE).toContain('simulateEdit');
-    // Verify no direct graph mutations in simulateEdit
-    const simulateFn = SOURCE.split('export async function simulateEdit')[1]?.split(/^async function |^function /m)[0] ?? '';
-    expect(simulateFn).not.toMatch(/\bMERGE\b/);
-    expect(simulateFn).not.toMatch(/\bCREATE\b/);
-    expect(simulateFn).not.toMatch(/\bDELETE\b/);
-  });
-
-  it('(12) handles errors via main().catch with Fatal log', () => {
-    expect(SOURCE).toMatch(/main\(\)\.catch/);
-    expect(SOURCE).toContain('Fatal');
+  it('(10) returns complete SimulationResult structure', async () => {
+    setupGraphState();
+    mockParseChunk.mockReturnValue({ nodes: [], edges: [] });
+    const result = await simulateEdit('/tmp/test.ts', 'const x = 1;', 'proj_test', '/tmp/');
+    expect(result).toHaveProperty('file');
+    expect(result).toHaveProperty('nodesAdded');
+    expect(result).toHaveProperty('nodesRemoved');
+    expect(result).toHaveProperty('nodesModified');
+    expect(result).toHaveProperty('callsAdded');
+    expect(result).toHaveProperty('callsRemoved');
+    expect(result).toHaveProperty('exportsAdded');
+    expect(result).toHaveProperty('exportsRemoved');
+    expect(result).toHaveProperty('brokenCallers');
+    expect(result).toHaveProperty('riskAssessment');
   });
 });

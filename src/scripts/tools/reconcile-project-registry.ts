@@ -15,7 +15,7 @@ interface ExistingProjectRow {
   status?: string;
 }
 
-function inferProjectType(projectId: string, current?: string): string {
+export function inferProjectType(projectId: string, current?: string): string {
   const normalized = (current ?? '').trim();
   if (normalized) return normalized;
   if (projectId.startsWith('plan_')) return 'plan';
@@ -31,7 +31,7 @@ function inferProjectType(projectId: string, current?: string): string {
   return 'code';
 }
 
-function inferSourceKind(projectId: string, current?: string): string {
+export function inferSourceKind(projectId: string, current?: string): string {
   const normalized = (current ?? '').trim();
   if (normalized) return normalized;
   if (projectId.startsWith('plan_')) return 'plan-ingest';
@@ -47,7 +47,7 @@ function inferSourceKind(projectId: string, current?: string): string {
   return 'parser';
 }
 
-function inferStatus(current?: string): string {
+export function inferStatus(current?: string): string {
   const normalized = (current ?? '').trim().toLowerCase();
   if (!normalized) return 'active';
   if (normalized === 'complete') return 'active';
@@ -57,7 +57,7 @@ function inferStatus(current?: string): string {
   return 'active';
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const neo4j = new Neo4jService();
 
   try {
@@ -136,7 +136,11 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+// Guard: only run when executed directly (not imported by tests)
+import { fileURLToPath } from 'node:url';
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

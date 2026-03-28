@@ -362,7 +362,7 @@ function printResult(result: SimulationResult) {
 }
 
 // CLI mode
-async function main() {
+export async function main() {
   if (process.argv.length < 4) {
     console.log('Usage: npx tsx edit-simulation.ts <filePath> <modifiedContentFile>');
     console.log('');
@@ -409,7 +409,11 @@ async function main() {
   printResult(result);
 }
 
-main().catch(err => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+// Guard: only run when executed directly (not imported by tests)
+import { fileURLToPath } from 'node:url';
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch(err => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}

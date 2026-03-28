@@ -16,7 +16,7 @@ function toNum(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const neo4j = new Neo4jService();
 
   try {
@@ -66,12 +66,16 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error(
-    JSON.stringify({
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    }),
-  );
-  process.exit(1);
-});
+// Guard: only run when executed directly (not imported by tests)
+import { fileURLToPath } from 'node:url';
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(
+      JSON.stringify({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    process.exit(1);
+  });
+}

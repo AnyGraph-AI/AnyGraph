@@ -1,6 +1,6 @@
 import { Neo4jService } from '../../../src/storage/neo4j/neo4j.service.js';
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const neo4j = new Neo4jService();
 
   try {
@@ -28,7 +28,11 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+// Guard: only run when executed directly (not imported by tests)
+import { fileURLToPath } from 'node:url';
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
