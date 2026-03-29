@@ -316,189 +316,204 @@ export async function enrichTestCoverage(projectRoot = process.cwd()): Promise<v
     const projectId = pidResult.records[0]?.get('pid') || 'proj_c0d3e9a1f200';
     console.log(`  Project: ${projectId}\n`);
 
-    // Reset previous test artifacts for this project
-    await session.run(
-      `MATCH (tf:TestFile {projectId: $pid}) DETACH DELETE tf`,
-      { pid: projectId },
-    );
-    await session.run(
-      `MATCH (tf:TestFunction {projectId: $pid}) DETACH DELETE tf`,
-      { pid: projectId },
-    );
-    await session.run(
-      `MATCH ()-[r:TESTED_BY]->() DELETE r`,
-    );
-
-    // Clear stale SourceFile test tag (for files that may be in graph)
-    await session.run(
-      `MATCH (sf:SourceFile {projectId: $pid})
-       WHERE sf.isTestFile = true
-       SET sf.isTestFile = false`,
-      { pid: projectId },
-    );
+    // === TRANSACTION BOUNDARY: DELETE + RECREATE must be atomic (TODO-7-6 / SCAR-012 pattern) ===
+    // If anything throws between delete and recreate, Neo4j rolls back both.
+    // This prevents partial state from OOM kills mid-operation.
+    const tx = session.beginTransaction();
 
     let testFileNodes = 0;
     let testedByEdges = 0;
     let tracedCalls = 0;
+    let testedByFunctionEdges = 0;
+    let hasTestCallerCount = 0;
     const sourceFilesCovered = new Set<string>();
 
-    for (const analysis of analyses) {
-      const testFileNodeId = stableTestNodeId('testfile', analysis.filePath);
-
-      // Create TestFile node tagged with isTestFile
-      await session.run(
-        `CREATE (tf:TestFile:CodeNode {
-          filePath: $filePath,
-          name: $name,
-          projectId: $pid,
-          testCount: $testCount,
-          describeBlocks: $describeBlocks,
-          isTestFile: true,
-          namingConvention: true,
-          nodeId: $nodeId
-        })`,
-        {
-          filePath: analysis.filePath,
-          name: analysis.name,
-          pid: projectId,
-          testCount: analysis.testCount,
-          describeBlocks: analysis.describeBlocks,
-          nodeId: testFileNodeId,
-        },
+    try {
+      // Reset previous test artifacts for this project
+      await tx.run(
+        `MATCH (tf:TestFile {projectId: $pid}) DETACH DELETE tf`,
+        { pid: projectId },
       );
-      testFileNodes++;
-
-      // If parser includes this file as SourceFile, tag it too
-      await session.run(
-        `MATCH (sf:SourceFile {projectId: $pid, filePath: $filePath})
-         SET sf.isTestFile = true`,
-        { pid: projectId, filePath: analysis.filePath },
+      await tx.run(
+        `MATCH (tf:TestFunction {projectId: $pid}) DETACH DELETE tf`,
+        { pid: projectId },
+      );
+      await tx.run(
+        `MATCH ()-[r:TESTED_BY]->() DELETE r`,
       );
 
-      // File-level TESTED_BY edges
-      for (const importPath of analysis.imports) {
-        const result = await session.run(
-          `MATCH (sf:SourceFile {projectId: $pid})
-           WHERE sf.filePath = $importPath
-           MATCH (tf:TestFile {projectId: $pid, filePath: $testPath})
-           MERGE (sf)-[r:TESTED_BY]->(tf)
-           SET r.derived = true,
-               r.projectId = $pid
-           RETURN sf.filePath AS matched`,
+      // Clear stale SourceFile test tag (for files that may be in graph)
+      await tx.run(
+        `MATCH (sf:SourceFile {projectId: $pid})
+         WHERE sf.isTestFile = true
+         SET sf.isTestFile = false`,
+        { pid: projectId },
+      );
+
+      for (const analysis of analyses) {
+        const testFileNodeId = stableTestNodeId('testfile', analysis.filePath);
+
+        // Create TestFile node tagged with isTestFile
+        await tx.run(
+          `CREATE (tf:TestFile:CodeNode {
+            filePath: $filePath,
+            name: $name,
+            projectId: $pid,
+            testCount: $testCount,
+            describeBlocks: $describeBlocks,
+            isTestFile: true,
+            namingConvention: true,
+            nodeId: $nodeId
+          })`,
           {
-            pid: projectId,
-            importPath,
-            testPath: analysis.filePath,
-          },
-        );
-
-        if (result.records.length > 0) {
-          testedByEdges++;
-          sourceFilesCovered.add(importPath);
-        }
-      }
-
-      // RF-14 phase 1: trace CALLS from test functions to source functions
-      const content = fs.readFileSync(analysis.filePath, 'utf-8');
-      const resolvedBindings = resolveImportMap(extractImportBindings(content), path.dirname(analysis.filePath));
-
-      for (let idx = 0; idx < analysis.traces.length; idx++) {
-        const trace = analysis.traces[idx];
-        const testFnNodeId = stableTestNodeId('testfn', `${analysis.filePath}#${idx}#${trace.functionName}`);
-
-        await session.run(
-          `MERGE (tf:TestFunction:CodeNode {projectId: $pid, nodeId: $nodeId})
-           ON CREATE SET
-            tf.name = $name,
-            tf.filePath = $filePath,
-            tf.isTestFunction = true,
-            tf.isTestFile = true,
-            tf.testFilePath = $filePath,
-            tf.source = 'rf14-trace'
-           ON MATCH SET
-            tf.name = $name,
-            tf.filePath = $filePath,
-            tf.source = 'rf14-trace'`,
-          {
-            pid: projectId,
-            nodeId: testFnNodeId,
-            name: trace.functionName,
             filePath: analysis.filePath,
-          },
-        );
-
-        // Link TestFile -> TestFunction for traceability
-        await session.run(
-          `MATCH (testFile:TestFile {projectId: $pid, filePath: $filePath})
-           MATCH (testFn:TestFunction {projectId: $pid, nodeId: $testFnNodeId})
-           MERGE (testFile)-[r:CONTAINS]->(testFn)
-           SET r.derived = true,
-               r.projectId = $pid`,
-          {
+            name: analysis.name,
             pid: projectId,
-            filePath: analysis.filePath,
-            testFnNodeId,
+            testCount: analysis.testCount,
+            describeBlocks: analysis.describeBlocks,
+            nodeId: testFileNodeId,
           },
         );
+        testFileNodes++;
 
-        for (const call of trace.calls) {
-          const binding = resolvedBindings.get(call.alias);
-          if (!binding) continue;
+        // If parser includes this file as SourceFile, tag it too
+        await tx.run(
+          `MATCH (sf:SourceFile {projectId: $pid, filePath: $filePath})
+           SET sf.isTestFile = true`,
+          { pid: projectId, filePath: analysis.filePath },
+        );
 
-          const targetName = call.member
-            ? (binding.namespace ? call.member : binding.imported)
-            : binding.imported;
-
-          if (!targetName || targetName === '*' || targetName === 'default') continue;
-
-          const callResult = await session.run(
-            `MATCH (testFn:TestFunction {projectId: $pid, nodeId: $testFnNodeId})
-             MATCH (fn:Function {projectId: $pid, filePath: $targetPath, name: $targetName})
-             MERGE (testFn)-[r:CALLS]->(fn)
+        // File-level TESTED_BY edges
+        for (const importPath of analysis.imports) {
+          const result = await tx.run(
+            `MATCH (sf:SourceFile {projectId: $pid})
+             WHERE sf.filePath = $importPath
+             MATCH (tf:TestFile {projectId: $pid, filePath: $testPath})
+             MERGE (sf)-[r:TESTED_BY]->(tf)
              SET r.derived = true,
-                 r.projectId = $pid,
-                 r.fromTestTrace = true,
-                 r.traceVersion = 'rf14-v1'
-             RETURN count(fn) AS matched`,
+                 r.projectId = $pid
+             RETURN sf.filePath AS matched`,
             {
               pid: projectId,
-              testFnNodeId,
-              targetPath: binding.targetPath,
-              targetName,
+              importPath,
+              testPath: analysis.filePath,
             },
           );
 
-          tracedCalls += toNumber(callResult.records[0]?.get('matched'));
+          if (result.records.length > 0) {
+            testedByEdges++;
+            sourceFilesCovered.add(importPath);
+          }
+        }
+
+        // RF-14 phase 1: trace CALLS from test functions to source functions
+        const content = fs.readFileSync(analysis.filePath, 'utf-8');
+        const resolvedBindings = resolveImportMap(extractImportBindings(content), path.dirname(analysis.filePath));
+
+        for (let idx = 0; idx < analysis.traces.length; idx++) {
+          const trace = analysis.traces[idx];
+          const testFnNodeId = stableTestNodeId('testfn', `${analysis.filePath}#${idx}#${trace.functionName}`);
+
+          await tx.run(
+            `MERGE (tf:TestFunction:CodeNode {projectId: $pid, nodeId: $nodeId})
+             ON CREATE SET
+              tf.name = $name,
+              tf.filePath = $filePath,
+              tf.isTestFunction = true,
+              tf.isTestFile = true,
+              tf.testFilePath = $filePath,
+              tf.source = 'rf14-trace'
+             ON MATCH SET
+              tf.name = $name,
+              tf.filePath = $filePath,
+              tf.source = 'rf14-trace'`,
+            {
+              pid: projectId,
+              nodeId: testFnNodeId,
+              name: trace.functionName,
+              filePath: analysis.filePath,
+            },
+          );
+
+          // Link TestFile -> TestFunction for traceability
+          await tx.run(
+            `MATCH (testFile:TestFile {projectId: $pid, filePath: $filePath})
+             MATCH (testFn:TestFunction {projectId: $pid, nodeId: $testFnNodeId})
+             MERGE (testFile)-[r:CONTAINS]->(testFn)
+             SET r.derived = true,
+                 r.projectId = $pid`,
+            {
+              pid: projectId,
+              filePath: analysis.filePath,
+              testFnNodeId,
+            },
+          );
+
+          for (const call of trace.calls) {
+            const binding = resolvedBindings.get(call.alias);
+            if (!binding) continue;
+
+            const targetName = call.member
+              ? (binding.namespace ? call.member : binding.imported)
+              : binding.imported;
+
+            if (!targetName || targetName === '*' || targetName === 'default') continue;
+
+            const callResult = await tx.run(
+              `MATCH (testFn:TestFunction {projectId: $pid, nodeId: $testFnNodeId})
+               MATCH (fn:Function {projectId: $pid, filePath: $targetPath, name: $targetName})
+               MERGE (testFn)-[r:CALLS]->(fn)
+               SET r.derived = true,
+                   r.projectId = $pid,
+                   r.fromTestTrace = true,
+                   r.traceVersion = 'rf14-v1'
+               RETURN count(fn) AS matched`,
+              {
+                pid: projectId,
+                testFnNodeId,
+                targetPath: binding.targetPath,
+                targetName,
+              },
+            );
+
+            tracedCalls += toNumber(callResult.records[0]?.get('matched'));
+          }
         }
       }
+
+      // RF-14 phase 2: materialize TESTED_BY_FUNCTION edges from traced CALLS
+      const testedByFunctionResult = await tx.run(
+        `MATCH (tf:TestFunction {projectId: $pid})-[:CALLS]->(f:Function {projectId: $pid})
+         MERGE (tf)-[r:TESTED_BY_FUNCTION]->(f)
+         SET r.derived = true,
+             r.projectId = $pid,
+             r.fromTestTrace = true,
+             r.traceVersion = 'rf14-v1'
+         RETURN count(r) AS cnt`,
+        { pid: projectId },
+      );
+      testedByFunctionEdges = toNumber(testedByFunctionResult.records[0]?.get('cnt'));
+
+      // RF-14 phase 2: set hasTestCaller on Function nodes
+      await tx.run(
+        `MATCH (f:Function {projectId: $pid})
+         SET f.hasTestCaller = false`,
+        { pid: projectId },
+      );
+      const hasCallerResult = await tx.run(
+        `MATCH (f:Function {projectId: $pid})<-[:TESTED_BY_FUNCTION]-(:TestFunction {projectId: $pid})
+         SET f.hasTestCaller = true
+         RETURN count(DISTINCT f) AS cnt`,
+        { pid: projectId },
+      );
+      hasTestCallerCount = toNumber(hasCallerResult.records[0]?.get('cnt'));
+
+      await tx.commit();
+    } catch (err) {
+      console.error('[test-coverage] Transaction failed, rolling back:', err);
+      await tx.rollback();
+      throw err;
     }
-
-    // RF-14 phase 2: materialize TESTED_BY_FUNCTION edges from traced CALLS
-    const testedByFunctionResult = await session.run(
-      `MATCH (tf:TestFunction {projectId: $pid})-[:CALLS]->(f:Function {projectId: $pid})
-       MERGE (tf)-[r:TESTED_BY_FUNCTION]->(f)
-       SET r.derived = true,
-           r.projectId = $pid,
-           r.fromTestTrace = true,
-           r.traceVersion = 'rf14-v1'
-       RETURN count(r) AS cnt`,
-      { pid: projectId },
-    );
-    const testedByFunctionEdges = toNumber(testedByFunctionResult.records[0]?.get('cnt'));
-
-    // RF-14 phase 2: set hasTestCaller on Function nodes
-    await session.run(
-      `MATCH (f:Function {projectId: $pid})
-       SET f.hasTestCaller = false`,
-      { pid: projectId },
-    );
-    const hasCallerResult = await session.run(
-      `MATCH (f:Function {projectId: $pid})<-[:TESTED_BY_FUNCTION]-(:TestFunction {projectId: $pid})
-       SET f.hasTestCaller = true
-       RETURN count(DISTINCT f) AS cnt`,
-      { pid: projectId },
-    );
-    const hasTestCallerCount = toNumber(hasCallerResult.records[0]?.get('cnt'));
 
     console.log(`  Created ${testFileNodes} TestFile nodes`);
     console.log(`  Created ${testedByEdges} TESTED_BY edges`);
