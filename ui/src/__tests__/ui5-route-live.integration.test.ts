@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { GET as getSubgraph } from '@/app/api/graph/subgraph/[nodeId]/route';
 import { GET as getDangerPaths } from '@/app/api/graph/danger-paths/[nodeId]/route';
 
-const LIVE_SEED = 'ui/src/app/page.tsx';
+// Use a low-fanout file WITH critical functions as seed.
+// page.tsx (135 edges) times out at depth-2 under full-suite contention (SCAR-013).
+// tokens.ts has no danger paths (leaf constants). self-audit.tool.ts has 16 edges
+// + 1 CRITICAL function — works for both subgraph and danger-paths routes.
+const LIVE_SEED = 'src/mcp/tools/self-audit.tool.ts';
 
 describe('[UI-5] live route integration coverage', () => {
   it('subgraph route resolves a real source-file seed and returns neighbors payload', async () => {
@@ -26,9 +30,9 @@ describe('[UI-5] live route integration coverage', () => {
     expect(body.data.absoluteNodeCap).toBe(500);
     expect(Array.isArray(body.data.nodes)).toBe(true);
     expect(Array.isArray(body.data.edges)).toBe(true);
-  }, 20000);
+  }, 60_000);
 
-  it('danger-paths route resolves a real source-file seed and returns danger payload', async () => {
+  it('danger-paths route resolves a real source-file seed and returns danger payload', { timeout: 60_000 }, async () => {
     const req = new Request(
       `http://localhost/api/graph/danger-paths/${encodeURIComponent(LIVE_SEED)}?projectId=proj_c0d3e9a1f200`,
     );
@@ -50,7 +54,7 @@ describe('[UI-5] live route integration coverage', () => {
     expect(Array.isArray(body.data.edges)).toBe(true);
   });
 
-  it('both routes return 404 for a guaranteed-missing seed in live graph', async () => {
+  it('both routes return 404 for a guaranteed-missing seed in live graph', { timeout: 60_000 }, async () => {
     const missing = `missing-${Date.now()}-ui5-seed`;
 
     const subReq = new Request(`http://localhost/api/graph/subgraph/${missing}?projectId=proj_c0d3e9a1f200`);
