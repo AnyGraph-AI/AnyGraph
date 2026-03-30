@@ -1001,6 +1001,32 @@ export async function enrichPrecomputeScores(
 
     console.log(`[UI-0] SourceFiles updated: ${filesUpdated}`);
 
+    // ── Step 5b: Classify excluded files that precompute skipped ──
+    // Files with productionRiskExcluded=true are filtered out of Step 4/5
+    // (no risk math needed), but they still need configRiskClass for the
+    // verify:file-risk-label-policy gate. Classify them by path pattern.
+    const excludedUnclassified = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       WHERE sf.configRiskClass IS NULL
+       RETURN sf.id AS sfId, sf.filePath AS filePath`,
+      { projectId },
+    );
+    if (excludedUnclassified.records.length > 0) {
+      const classUpdates = excludedUnclassified.records.map((r) => ({
+        id: r.get('sfId') as string,
+        configRiskClass: classifyConfigRisk(r.get('filePath') as string),
+      }));
+      const classResult = await session.run(
+        `UNWIND $updates AS u
+         MATCH (sf:CodeNode {id: u.id})
+         SET sf.configRiskClass = u.configRiskClass
+         RETURN count(sf) AS updated`,
+        { updates: classUpdates },
+      );
+      const classifiedCount = toNum(classResult.records[0]?.get('updated'));
+      console.log(`[UI-0] Excluded files classified (configRiskClass): ${classifiedCount}`);
+    }
+
     // ── Step 6: Create indexes ─────────────────────────────────
     const indexes = [
       'CREATE INDEX IF NOT EXISTS FOR (sf:SourceFile) ON (sf.painScore)',

@@ -12,7 +12,7 @@ interface ConfigClassRow {
 }
 
 const PROJECT_ID = 'proj_c0d3e9a1f200';
-const ALLOWED_CONFIG_CLASSES = new Set(['NONE', 'GOVERNANCE_CRITICAL_CONFIG', 'EXAMPLE_ASSET']);
+const ALLOWED_CONFIG_CLASSES = new Set(['NONE', 'GOVERNANCE_CRITICAL_CONFIG', 'EXAMPLE_ASSET', 'TEST_FILE']);
 
 function toNum(v: unknown): number {
   if (v == null) return 0;
