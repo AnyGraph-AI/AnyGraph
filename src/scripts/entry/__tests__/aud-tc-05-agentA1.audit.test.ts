@@ -49,7 +49,7 @@ const mockValidateProjectWrite = vi.fn();
 
 // TypeScriptParser mock
 const mockParseChunk = vi.fn();
-const MockTypeScriptParser = vi.fn(function (this: Record<string, unknown>) {
+const MockTypeScriptParser = vi.fn<(...args: unknown[]) => void>(function (this: Record<string, unknown>) {
   this.parseChunk = mockParseChunk;
 });
 
@@ -346,7 +346,7 @@ describe('[L1-03] parse-and-ingest-self.ts — CodeGraph self-parse and ingest',
     await import('../parse-and-ingest-self.js');
     await flushAsync();
     expect(MockTypeScriptParser).toHaveBeenCalledOnce();
-    const ctorArgs = MockTypeScriptParser.mock.calls[0];
+    const ctorArgs = MockTypeScriptParser.mock.calls[0] as unknown[];
     // 4th arg is framework schemas array — must be empty []
     expect(ctorArgs[3]).toEqual([]);
   });
@@ -450,7 +450,7 @@ describe('[L1-04] parse-and-ingest.ts — GodSpeed parse and ingest', () => {
     await import('../parse-and-ingest.js');
     await flushAsync();
     expect(MockTypeScriptParser).toHaveBeenCalledOnce();
-    const ctorArgs = MockTypeScriptParser.mock.calls[0];
+    const ctorArgs = MockTypeScriptParser.mock.calls[0] as unknown[];
     // 4th arg is framework schemas array — must be non-empty for Grammy
     expect(Array.isArray(ctorArgs[3])).toBe(true);
     expect((ctorArgs[3] as unknown[]).length).toBeGreaterThan(0);

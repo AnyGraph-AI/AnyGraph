@@ -897,7 +897,7 @@ describe('[aud-tc-02] Batch 8b — MCP services (watch-manager) + workers', () =
       //   parentPort.on('message', handler)  — registered listener
       //   sendReady()                         — initial 'ready' posted
       await import('../../workers/chunk.worker.js');
-      chunkMessageHandler = ppState.handlers['message']?.[0] ?? null;
+      chunkMessageHandler = (ppState.handlers['message']?.[0] as ((msg: any) => Promise<void>) | undefined) ?? null;
     });
 
     it('sends a ready message immediately on startup (module load)', () => {

@@ -446,7 +446,7 @@ describe('[aud-tc-02] Batch 7 — MCP handlers (graph-generator, incremental-par
       await handler.generateGraph('/tmp/graph.json', 100, false);
 
       const createNodeCall = mockNeo4jRun.mock.calls.find((c: any[]) => c[0] === 'CREATE_NODE');
-      expect(createNodeCall).toBeDefined();
+      if (!createNodeCall) throw new Error('expected CREATE_NODE call in mock');
       const importedNode = createNodeCall[1].nodes[0];
       const nestedValue = importedNode.properties.nested;
       expect(typeof nestedValue).toBe('string');
@@ -468,7 +468,7 @@ describe('[aud-tc-02] Batch 7 — MCP handlers (graph-generator, incremental-par
       await handler.generateGraph('/tmp/graph.json', 100, false);
 
       const createNodeCall = mockNeo4jRun.mock.calls.find((c: any[]) => c[0] === 'CREATE_NODE');
-      expect(createNodeCall).toBeDefined();
+      if (!createNodeCall) throw new Error('expected CREATE_NODE call in mock');
       const arrValue = createNodeCall[1].nodes[0].properties.mixedArr;
       expect(typeof arrValue).toBe('string');
       const parsed = JSON.parse(arrValue);
@@ -492,7 +492,7 @@ describe('[aud-tc-02] Batch 7 — MCP handlers (graph-generator, incremental-par
       await handler.generateGraph('/tmp/graph.json', 100, false);
 
       const createNodeCall = mockNeo4jRun.mock.calls.find((c: any[]) => c[0] === 'CREATE_NODE');
-      expect(createNodeCall).toBeDefined();
+      if (!createNodeCall) throw new Error('expected CREATE_NODE call in mock');
       const props = createNodeCall[1].nodes[0].properties;
       expect(props.lineCount).toBe(42);
       expect(props.isExported).toBe(true);
@@ -507,7 +507,7 @@ describe('[aud-tc-02] Batch 7 — MCP handlers (graph-generator, incremental-par
       await handler.generateGraph('/tmp/graph.json', 100, false);
 
       const createRelCall = mockNeo4jRun.mock.calls.find((c: any[]) => c[0] === 'CREATE_RELATIONSHIP');
-      expect(createRelCall).toBeDefined();
+      if (!createRelCall) throw new Error('expected CREATE_RELATIONSHIP call in mock');
       const importedEdge = createRelCall[1].edges[0];
       expect(importedEdge.properties.sourceKind).toBe('ts-morph');
     });
@@ -519,7 +519,7 @@ describe('[aud-tc-02] Batch 7 — MCP handlers (graph-generator, incremental-par
       await handler.generateGraph('/tmp/graph.json', 100, false);
 
       const createRelCall = mockNeo4jRun.mock.calls.find((c: any[]) => c[0] === 'CREATE_RELATIONSHIP');
-      expect(createRelCall).toBeDefined();
+      if (!createRelCall) throw new Error('expected CREATE_RELATIONSHIP call in mock');
       const importedEdge = createRelCall[1].edges[0];
       expect(importedEdge.properties.sourceKind).toBe('babel');
     });

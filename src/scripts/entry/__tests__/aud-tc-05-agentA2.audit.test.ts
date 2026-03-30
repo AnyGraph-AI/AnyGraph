@@ -223,7 +223,7 @@ describe('L1-10: test-parse-godspeed.ts', () => {
 
     expect(TypeScriptParser).toHaveBeenCalledOnce();
 
-    const args = (TypeScriptParser as ReturnType<typeof vi.fn>).mock.calls[0];
+    const args = vi.mocked(TypeScriptParser).mock.calls[0] as unknown[];
     // arg[0] = GODSPEED_PATH
     expect(typeof args[0]).toBe('string');
     expect(args[0]).toContain('GodSpeed');
@@ -231,9 +231,10 @@ describe('L1-10: test-parse-godspeed.ts', () => {
     expect(args[2]).toBeTruthy();
     expect(typeof args[2]).toBe('object');
     // arg[3] = array containing GRAMMY_FRAMEWORK_SCHEMA
-    expect(Array.isArray(args[3])).toBe(true);
-    expect(args[3].length).toBeGreaterThanOrEqual(1);
-    expect(args[3][0]).toBeTruthy();
+    const frameworkSchemas = args[3] as unknown[];
+    expect(Array.isArray(frameworkSchemas)).toBe(true);
+    expect(frameworkSchemas.length).toBeGreaterThanOrEqual(1);
+    expect(frameworkSchemas[0]).toBeTruthy();
   });
 
   it('B2: calls discoverSourceFiles to locate GodSpeed source tree', async () => {
