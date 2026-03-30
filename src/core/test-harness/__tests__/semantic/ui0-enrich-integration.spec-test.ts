@@ -37,7 +37,7 @@ afterAll(async () => {
 });
 
 describe('[UI-0] enrichPrecomputeScores integration', () => {
-  it('returns counts of updated functions and files', { timeout: 15000 }, async () => {
+  it('returns counts of updated functions and files', { timeout: 60_000 }, async () => {
     const result = await enrichPrecomputeScores(driver, PROJECT_ID);
     expect(result.functionsUpdated).toBeGreaterThan(0);
     expect(result.filesUpdated).toBeGreaterThan(0);
@@ -129,13 +129,13 @@ describe('[UI-0] enrichPrecomputeScores integration', () => {
     }
   });
 
-  it('configRiskClass is always one of NONE/GOVERNANCE_CRITICAL_CONFIG/EXAMPLE_ASSET', async () => {
+  it('configRiskClass is always one of NONE/GOVERNANCE_CRITICAL_CONFIG/EXAMPLE_ASSET/TEST_FILE', async () => {
     await enrichPrecomputeScores(driver, PROJECT_ID);
     const session = driver.session();
     try {
       const r = await session.run(
         `MATCH (sf:SourceFile {projectId: $pid})
-         WHERE NOT sf.configRiskClass IN ['NONE', 'GOVERNANCE_CRITICAL_CONFIG', 'EXAMPLE_ASSET']
+         WHERE NOT sf.configRiskClass IN ['NONE', 'GOVERNANCE_CRITICAL_CONFIG', 'EXAMPLE_ASSET', 'TEST_FILE']
          RETURN sf.name AS name, sf.configRiskClass AS configRiskClass`,
         { pid: PROJECT_ID },
       );

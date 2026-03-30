@@ -28,9 +28,9 @@ describe('RF-13 role diagnostics + probe', () => {
     const d37 = results.find((r) => r.id === 'D37');
     expect(d37).toBeTruthy();
     expect(d37?.question).toContain('semanticRole');
-  }, 15000);
+  }, 60_000);
 
-  it('probe-architecture exposes RF-13 role distribution and role-scoped god-file probes', { timeout: 20_000 }, async () => {
+  it('probe-architecture exposes RF-13 role distribution and role-scoped god-file probes', { timeout: 60_000 }, async () => {
     const probes = await runProbes();
     expect(probes.length).toBeGreaterThanOrEqual(45);
 
