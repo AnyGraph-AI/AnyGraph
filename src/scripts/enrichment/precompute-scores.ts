@@ -1027,6 +1027,31 @@ export async function enrichPrecomputeScores(
       console.log(`[UI-0] Excluded files classified (configRiskClass): ${classifiedCount}`);
     }
 
+    // ── Step 5c: Zero stale scores on excluded files ──────────
+    // Files marked productionRiskExcluded may have stale scores from older
+    // enrichment runs that computed pain/fragility before the exclusion flag
+    // was set. Step 4 skips them (correctly), but never clears old values.
+    // Without this cleanup, excluded files pollute painHeatmap queries and
+    // inflate project-wide maxima.
+    const staleExcludedResult = await session.run(
+      `MATCH (sf:CodeNode:SourceFile {projectId: $projectId})
+       WHERE coalesce(sf.productionRiskExcluded, false) = true
+         AND (sf.adjustedPain IS NOT NULL OR sf.painScore IS NOT NULL)
+       SET sf.adjustedPain = 0,
+           sf.painScore = 0,
+           sf.basePain = 0,
+           sf.fragility = 0,
+           sf.confidenceScore = 0,
+           sf.downstreamImpact = 0,
+           sf.centrality = 0
+       RETURN count(sf) AS zeroed`,
+      { projectId },
+    );
+    const zeroedCount = toNum(staleExcludedResult.records[0]?.get('zeroed'));
+    if (zeroedCount > 0) {
+      console.log(`[UI-0] Zeroed stale scores on ${zeroedCount} excluded files`);
+    }
+
     // ── Step 6: Create indexes ─────────────────────────────────
     const indexes = [
       'CREATE INDEX IF NOT EXISTS FOR (sf:SourceFile) ON (sf.painScore)',
