@@ -65,9 +65,14 @@ export async function GET(
       return NextResponse.json({ error: `Root node not found for seed: ${seed}` }, { status: 404 });
     }
 
+    // Filter to structural relationship types only — traversing all types
+    // (HAS_CODE_EVIDENCE, MODIFIES, ORIGINATES_IN, ANALYZED, etc.) causes
+    // exponential fan-out for high-connectivity files like page.tsx (836 nodes
+    // unfiltered vs 287 filtered at depth 2). Without filtering, the query
+    // times out under concurrent load.
     const nodes = await cachedQuery<GraphNode>(
       `MATCH (root {id: $rootId})
-       MATCH p = (root)-[*0..${depth}]-(n)
+       MATCH p = (root)-[:CONTAINS|CALLS|IMPORTS|CO_CHANGES_WITH|TESTED_BY*0..${depth}]-(n)
        WHERE coalesce(n.projectId, '') = $projectId
        WITH DISTINCT n
        LIMIT $limit

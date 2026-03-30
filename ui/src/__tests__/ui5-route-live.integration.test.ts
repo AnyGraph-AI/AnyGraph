@@ -3,11 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { GET as getSubgraph } from '@/app/api/graph/subgraph/[nodeId]/route';
 import { GET as getDangerPaths } from '@/app/api/graph/danger-paths/[nodeId]/route';
 
-// Use a low-fanout file WITH critical functions as seed.
-// page.tsx (135 edges) times out at depth-2 under full-suite contention (SCAR-013).
-// tokens.ts has no danger paths (leaf constants). self-audit.tool.ts has 16 edges
-// + 1 CRITICAL function — works for both subgraph and danger-paths routes.
-const LIVE_SEED = 'src/mcp/tools/self-audit.tool.ts';
+const LIVE_SEED = 'ui/src/app/page.tsx';
 
 describe('[UI-5] live route integration coverage', () => {
   it('subgraph route resolves a real source-file seed and returns neighbors payload', async () => {

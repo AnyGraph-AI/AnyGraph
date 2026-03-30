@@ -93,7 +93,7 @@ describe('[UI-5] subgraph route GET coverage', () => {
     expect(body.data.edgeCount).toBe(1);
 
     const [, nodeQuery, edgeQuery] = cachedQueryMock.mock.calls;
-    expect(String(nodeQuery[0])).toContain('[*0..3]');
+    expect(String(nodeQuery[0])).toContain('*0..3]');
     expect(nodeQuery[1]).toMatchObject({ projectId: 'proj_c0d3e9a1f200', limit: 200 });
     expect(String(edgeQuery[0])).toContain('MATCH (a {id: id})-[r]-(b)');
     expect(edgeQuery[1]).toMatchObject({ nodeIds: ['root-1'] });
@@ -111,7 +111,7 @@ describe('[UI-5] subgraph route GET coverage', () => {
     expect(res.status).toBe(200);
     expect(body.data.mode).toBe('neighbors');
     const [, nodeQuery] = cachedQueryMock.mock.calls;
-    expect(String(nodeQuery[0])).toContain('[*0..1]');
+    expect(String(nodeQuery[0])).toContain('*0..1]');
     expect(nodeQuery[1]).toMatchObject({ projectId: 'proj_custom' });
   });
 
