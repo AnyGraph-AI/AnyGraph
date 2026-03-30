@@ -15,13 +15,14 @@
 //     validateProjectWrite() throws. The driver is created before the try block,
 //     so a validation failure leaks the connection. Recommendation: wrap from
 //     driver creation in try-finally.
-//   FIND-A1-02 [LOW] — parse-and-ingest-self.ts: Spec §SG-1 says "runs post-ingest
-//     enrichment via execSync". The only execSync call in the file is for file
-//     discovery (finding *.ts files). No enrichment execSync is present.
-//     Recommendation: add post-ingest enrichment step (e.g. npm run done-check).
-//   FIND-A1-03 [LOW] — parse-and-ingest.ts: Same as FIND-A1-02 — no post-ingest
-//     enrichment execSync. The spec says behavior 7 is "runs post-ingest via
-//     execSync" but only file-discovery execSync exists.
+//   FIND-A1-02 [RESOLVED] — parse-and-ingest-self.ts: Spec §SG-1 previously said
+//     "runs post-ingest enrichment via execSync". The only execSync call is for
+//     file-discovery (finding *.ts files). Spec corrected: actual behavior is
+//     "runs file-discovery via execSync". Enrichment is handled by rebuild-derived.ts
+//     and the watcher pipeline — not parse-and-ingest scripts. No code change needed.
+//   FIND-A1-03 [RESOLVED] — parse-and-ingest.ts: Same as FIND-A1-02 — the only
+//     execSync call is for file-discovery via find. Spec corrected: behavior is
+//     "runs file-discovery via execSync", not "runs post-ingest enrichment via execSync".
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 

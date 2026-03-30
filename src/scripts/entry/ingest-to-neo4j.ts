@@ -26,11 +26,13 @@ async function main() {
   console.log(`Loaded: ${data.nodes.length} nodes, ${data.edges.length} edges`);
 
   // 2. Connect to Neo4j
-  const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD));
-  await validateProjectWrite(driver as any, PROJECT_ID);
-  const session = driver.session();
+  let driver: ReturnType<typeof neo4j.driver> | undefined;
+  let session: ReturnType<ReturnType<typeof neo4j.driver>['session']> | undefined;
 
   try {
+    driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD));
+    await validateProjectWrite(driver as any, PROJECT_ID);
+    session = driver.session();
     // 3. Clear existing data for this project
     console.log('Clearing existing graph data...');
     await session.run('MATCH (n {projectId: $projectId}) DETACH DELETE n', { projectId: PROJECT_ID });
@@ -197,8 +199,8 @@ async function main() {
     console.log(`   Project: ${PROJECT_ID}`);
 
   } finally {
-    await session.close();
-    await driver.close();
+    await session?.close();
+    await driver?.close();
   }
 }
 

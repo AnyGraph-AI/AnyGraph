@@ -63,6 +63,7 @@ async function main() {
 
   await client.connect(transport);
 
+  try {
   // List available tools
   const tools = await client.listTools();
   console.log(`   Connected. ${tools.tools.length} tools available.`);
@@ -131,6 +132,9 @@ async function main() {
 
   // Keep alive
   await new Promise(() => {});
+  } finally {
+    await client.close();
+  }
 }
 
 main().catch(err => {

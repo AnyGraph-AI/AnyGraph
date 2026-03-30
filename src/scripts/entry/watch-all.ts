@@ -91,6 +91,7 @@ export async function reEnrichPlanEvidence(
 
   return { skipped: false, evidenceEdges: enrichResult.evidenceEdges };
 }
+
 const RESCAN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface ProjectInfo {
@@ -110,7 +111,48 @@ const KNOWN_PROJECTS: Record<string, { path: string; tsconfig?: string; kind: 'c
   },
 };
 
-function inferProjectKind(
+// ============================================================
+// MODULE-LEVEL CONSTANTS (moved from main() for testability)
+// ============================================================
+
+/** Root directory for plan markdown files */
+export const PLANS_ROOT = '/home/jonathan/.openclaw/workspace/plans';
+
+/** Debounce delay (ms) for plan file watcher */
+export const PLAN_DEBOUNCE_MS = 3000;
+
+/** Enrichment scripts to run after a code parse */
+export const ENRICHMENT_SCRIPTS = [
+  'create-possible-call-edges.ts',
+  'create-state-edges.ts',
+  'create-virtual-dispatch-edges.ts',
+  'create-unresolved-nodes.ts',
+];
+
+/** Directory containing enrichment scripts */
+export const ENRICHMENT_DIR = nodePath.join(process.cwd(), 'src/scripts/enrichment');
+
+// ============================================================
+// MODULE-LEVEL MUTABLE STATE (singleton per process)
+// Exposed as a single object so tests can mutate properties.
+// ============================================================
+
+export const _state = {
+  /** Guard flag: prevents concurrent enrichment runs */
+  enrichmentRunning: false,
+  /** Guard flag: prevents concurrent plan re-parses */
+  planParsing: false,
+  /** Flag: a plan change arrived while a parse was in-flight */
+  planPendingReparse: false,
+  /** Active debounce timer for plan file watcher */
+  planParseTimer: null as NodeJS.Timeout | null,
+};
+
+// ============================================================
+// EXPORTED MODULE-LEVEL FUNCTIONS (previously private)
+// ============================================================
+
+export function inferProjectKind(
   projectType: string | null,
   sourceKind: string | null,
   path: string,
@@ -131,7 +173,7 @@ function inferProjectKind(
   return 'document';
 }
 
-async function discoverProjects(): Promise<ProjectInfo[]> {
+export async function discoverProjects(): Promise<ProjectInfo[]> {
   const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD));
   const session = driver.session();
 
@@ -206,12 +248,17 @@ async function discoverProjects(): Promise<ProjectInfo[]> {
   }
 }
 
-async function waitForNeo4j(): Promise<void> {
+export async function waitForNeo4j(
+  url: string = NEO4J_URI,
+  user: string = NEO4J_USER,
+  password: string = NEO4J_PASSWORD,
+  maxRetries: number = 60,
+  retryDelayMs: number = 5000,
+): Promise<void> {
   console.log('[watch-all] Waiting for Neo4j...');
-  const maxRetries = 60; // 5 minutes
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD));
+      const driver = neo4j.driver(url, neo4j.auth.basic(user, password));
       const session = driver.session();
       await session.run('RETURN 1');
       await session.close();
@@ -220,13 +267,13 @@ async function waitForNeo4j(): Promise<void> {
       return;
     } catch {
       if (i % 10 === 0) console.log(`[watch-all] Neo4j not ready yet... (attempt ${i + 1}/${maxRetries})`);
-      await new Promise((r) => setTimeout(r, 5000));
+      await new Promise((r) => setTimeout(r, retryDelayMs));
     }
   }
   throw new Error('Neo4j did not become available within 5 minutes');
 }
 
-async function ingestDocumentProject(project: ProjectInfo): Promise<void> {
+export async function ingestDocumentProject(project: ProjectInfo): Promise<void> {
   const started = Date.now();
   const schema = await parseDocumentCollection({
     projectId: project.projectId,
@@ -278,6 +325,208 @@ async function ingestDocumentProject(project: ProjectInfo): Promise<void> {
   );
 }
 
+/**
+ * Run post-parse structural enrichment scripts after a code graph update.
+ * Uses module-level `_enrichmentRunning` to prevent concurrent runs.
+ */
+export async function runPostParseEnrichment(projectId: string): Promise<void> {
+  if (_state.enrichmentRunning) return; // skip if already running
+  _state.enrichmentRunning = true;
+  const time = new Date().toLocaleTimeString();
+  try {
+    for (const script of ENRICHMENT_SCRIPTS) {
+      const scriptPath = nodePath.join(ENRICHMENT_DIR, script);
+      try {
+        await execFileAsync('node', ['--loader', 'ts-node/esm', scriptPath], {
+          cwd: process.cwd(),
+          timeout: 60_000, // 60s max per script
+          env: { ...process.env },
+        });
+      } catch (err: any) {
+        // Log but don't fail — enrichment is best-effort
+        console.error(`[${time}] ⚠️  ${projectId}: enrichment ${script} failed: ${err.message?.slice(0, 120)}`);
+      }
+    }
+    console.log(`[${time}] 🔬 ${projectId}: post-parse enrichment complete (${ENRICHMENT_SCRIPTS.length} scripts)`);
+  } finally {
+    _state.enrichmentRunning = false;
+  }
+}
+
+/**
+ * Re-parse all plan markdown files and update the Neo4j plan graph.
+ * Uses module-level `_planParsing` / `_planPendingReparse` to serialize concurrent calls.
+ */
+export async function reParsePlans(): Promise<void> {
+  if (_state.planParsing) {
+    _state.planPendingReparse = true;
+    return;
+  }
+  _state.planParsing = true;
+  _state.planPendingReparse = false;
+  try {
+    const time = new Date().toLocaleTimeString();
+    console.log(`[${time}] 📋 Plan change detected — reparsing...`);
+
+    const results = await parsePlanDirectory(PLANS_ROOT);
+    let totalNodes = 0;
+    let totalStale = 0;
+
+    for (const parsed of results) {
+      const ingestResult = await ingestToNeo4j(parsed);
+      totalNodes += ingestResult.nodesUpserted;
+      totalStale += ingestResult.staleRemoved;
+    }
+
+    const enrichResult = await enrichCrossDomain(results);
+    const contractResult = await emitPlanParserContracts();
+
+    console.log(
+      `[${time}] ✅ Plans updated: ${totalNodes} nodes, ${totalStale} stale removed, ${enrichResult.evidenceEdges} evidence edges, contracts ${contractResult.nodesUpserted} nodes/${contractResult.edgesUpserted} edges`,
+    );
+
+    if (enrichResult.driftDetected.length > 0) {
+      console.log(`[${time}] ⚠️  ${enrichResult.driftDetected.length} drift items detected`);
+    }
+
+    // TC-2: Scoped confidence recompute for affected plan projects
+    try {
+      const planProjectIds = results.map(r => r.projectId).filter(Boolean);
+      for (const pid of planProjectIds) {
+        const svc = new Neo4jService();
+        try {
+          const result = await incrementalRecompute(svc, {
+            projectId: pid,
+            scope: 'full',
+            fullOverride: true,
+            reason: 'plan_change',
+          });
+          if (result.updatedCount > 0) {
+            console.log(`[${time}] 🕐 ${pid}: Temporal recompute: ${result.updatedCount} updated`);
+          }
+        } finally {
+          await svc.close();
+        }
+      }
+    } catch (err) {
+      if (process.env.GTH_DEBUG) console.error(`[plan-watcher] temporal recompute error: ${err}`);
+    }
+  } catch (err) {
+    console.error(`[plan-watcher] ❌ Parse failed: ${err}`);
+  } finally {
+    _state.planParsing = false;
+    if (_state.planPendingReparse) {
+      _state.planPendingReparse = false;
+      setTimeout(reParsePlans, 500);
+    }
+  }
+}
+
+/**
+ * Set up a recursive fs watcher on a plans directory with debounce.
+ * Pushes the created FSWatcher into the provided `planWatchersArr`.
+ */
+export function watchPlansDir(
+  dir: string,
+  planWatchersArr: FSWatcher[],
+  debounceMs: number = PLAN_DEBOUNCE_MS,
+): void {
+  try {
+    const watcher = fsWatch(dir, { recursive: true }, (_eventType, filename) => {
+      if (!filename?.endsWith('.md')) return;
+      if (_state.planParseTimer) clearTimeout(_state.planParseTimer);
+      _state.planParseTimer = setTimeout(reParsePlans, debounceMs);
+    });
+    planWatchersArr.push(watcher);
+    console.log(`   📋 Watching plans: ${dir} (recursive)`);
+  } catch (err) {
+    console.error(`   ❌ Failed to watch plans dir: ${err}`);
+  }
+}
+
+/**
+ * Spawn an MCP client watch for a code project.
+ * Uses the provided `watchedCodeIds` set to prevent duplicate watchers.
+ */
+export async function startWatchingCode(
+  project: ProjectInfo,
+  client: Client,
+  watchedCodeIds: Set<string>,
+): Promise<void> {
+  if (watchedCodeIds.has(project.projectId)) return;
+  if (!project.tsconfigPath || !existsSync(project.tsconfigPath)) {
+    console.error(`   ⚠️  Skipping code watcher for ${project.name}: tsconfig missing (${project.tsconfigPath ?? 'n/a'})`);
+    return;
+  }
+
+  try {
+    console.log(`\n   Starting code watcher: ${project.name} (${project.projectId})`);
+    const result = await client.callTool({
+      name: 'start_watch_project',
+      arguments: {
+        projectPath: project.path,
+        tsconfigPath: project.tsconfigPath,
+        projectId: project.projectId,
+        debounceMs: 1000,
+      },
+    });
+
+    for (const content of result.content as any[]) {
+      if (content.type === 'text') {
+        console.log(`   ${content.text.split('\n').join('\n   ')}`);
+      }
+    }
+
+    watchedCodeIds.add(project.projectId);
+  } catch (err) {
+    console.error(`   ❌ Failed to watch code project ${project.name}: ${err}`);
+  }
+}
+
+/**
+ * Set up an fs watcher for a document project with debounced re-ingest.
+ * Uses the provided `documentWatchers` and `documentTimers` maps to track state.
+ */
+export async function startWatchingDocument(
+  project: ProjectInfo,
+  documentWatchers: Map<string, FSWatcher>,
+  documentTimers: Map<string, NodeJS.Timeout>,
+): Promise<void> {
+  if (documentWatchers.has(project.projectId)) return;
+
+  try {
+    console.log(`\n   Starting document watcher: ${project.name} (${project.projectId})`);
+    // initial ingest
+    await ingestDocumentProject(project);
+
+    const watcher = fsWatch(project.path, { recursive: true }, (_eventType, filename) => {
+      if (!filename) return;
+
+      // ignore transient tmp files
+      if (filename.endsWith('.swp') || filename.endsWith('~')) return;
+
+      const existing = documentTimers.get(project.projectId);
+      if (existing) clearTimeout(existing);
+
+      const timer = setTimeout(async () => {
+        try {
+          const time = new Date().toLocaleTimeString();
+          console.log(`[${time}] 📄 ${project.projectId}: change detected (${filename}) — re-ingesting...`);
+          await ingestDocumentProject(project);
+        } catch (err) {
+          console.error(`[document-watcher] ❌ ${project.projectId}: ingest failed: ${err}`);
+        }
+      }, 3000);
+
+      documentTimers.set(project.projectId, timer);
+    });
+
+    documentWatchers.set(project.projectId, watcher);
+  } catch (err) {
+    console.error(`   ❌ Failed to watch document project ${project.name}: ${err}`);
+  }
+}
+
 async function main() {
   console.log('\n🔍 CodeGraph Universal File Watcher');
   console.log('   Watches code, document, and plan projects automatically.\n');
@@ -309,117 +558,14 @@ async function main() {
   const documentWatchers = new Map<string, FSWatcher>();
   const documentTimers = new Map<string, NodeJS.Timeout>();
 
-  async function startWatchingCode(project: ProjectInfo) {
-    if (watchedCodeIds.has(project.projectId)) return;
-    if (!project.tsconfigPath || !existsSync(project.tsconfigPath)) {
-      console.error(`   ⚠️  Skipping code watcher for ${project.name}: tsconfig missing (${project.tsconfigPath ?? 'n/a'})`);
-      return;
-    }
-
-    try {
-      console.log(`\n   Starting code watcher: ${project.name} (${project.projectId})`);
-      const result = await client.callTool({
-        name: 'start_watch_project',
-        arguments: {
-          projectPath: project.path,
-          tsconfigPath: project.tsconfigPath,
-          projectId: project.projectId,
-          debounceMs: 1000,
-        },
-      });
-
-      for (const content of result.content as any[]) {
-        if (content.type === 'text') {
-          console.log(`   ${content.text.split('\n').join('\n   ')}`);
-        }
-      }
-
-      watchedCodeIds.add(project.projectId);
-    } catch (err) {
-      console.error(`   ❌ Failed to watch code project ${project.name}: ${err}`);
-    }
-  }
-
-  async function startWatchingDocument(project: ProjectInfo) {
-    if (documentWatchers.has(project.projectId)) return;
-
-    try {
-      console.log(`\n   Starting document watcher: ${project.name} (${project.projectId})`);
-      // initial ingest
-      await ingestDocumentProject(project);
-
-      const watcher = fsWatch(project.path, { recursive: true }, (_eventType, filename) => {
-        if (!filename) return;
-
-        // ignore transient tmp files
-        if (filename.endsWith('.swp') || filename.endsWith('~')) return;
-
-        const existing = documentTimers.get(project.projectId);
-        if (existing) clearTimeout(existing);
-
-        const timer = setTimeout(async () => {
-          try {
-            const time = new Date().toLocaleTimeString();
-            console.log(`[${time}] 📄 ${project.projectId}: change detected (${filename}) — re-ingesting...`);
-            await ingestDocumentProject(project);
-          } catch (err) {
-            console.error(`[document-watcher] ❌ ${project.projectId}: ingest failed: ${err}`);
-          }
-        }, 3000);
-
-        documentTimers.set(project.projectId, timer);
-      });
-
-      documentWatchers.set(project.projectId, watcher);
-    } catch (err) {
-      console.error(`   ❌ Failed to watch document project ${project.name}: ${err}`);
-    }
-  }
-
   async function startWatching(project: ProjectInfo) {
-    if (project.kind === 'code') return startWatchingCode(project);
-    return startWatchingDocument(project);
+    if (project.kind === 'code') return startWatchingCode(project, client, watchedCodeIds);
+    return startWatchingDocument(project, documentWatchers, documentTimers);
   }
 
   // start all current projects
   for (const p of projects) {
     await startWatching(p);
-  }
-
-  // ========================================
-  // POST-PARSE STRUCTURAL ENRICHMENT
-  // ========================================
-  const ENRICHMENT_SCRIPTS = [
-    'create-possible-call-edges.ts',
-    'create-state-edges.ts',
-    'create-virtual-dispatch-edges.ts',
-    'create-unresolved-nodes.ts',
-  ];
-  const ENRICHMENT_DIR = nodePath.join(process.cwd(), 'src/scripts/enrichment');
-  let enrichmentRunning = false;
-
-  async function runPostParseEnrichment(projectId: string) {
-    if (enrichmentRunning) return; // skip if already running
-    enrichmentRunning = true;
-    const time = new Date().toLocaleTimeString();
-    try {
-      for (const script of ENRICHMENT_SCRIPTS) {
-        const scriptPath = nodePath.join(ENRICHMENT_DIR, script);
-        try {
-          await execFileAsync('node', ['--loader', 'ts-node/esm', scriptPath], {
-            cwd: process.cwd(),
-            timeout: 60_000, // 60s max per script
-            env: { ...process.env },
-          });
-        } catch (err: any) {
-          // Log but don't fail — enrichment is best-effort
-          console.error(`[${time}] ⚠️  ${projectId}: enrichment ${script} failed: ${err.message?.slice(0, 120)}`);
-        }
-      }
-      console.log(`[${time}] 🔬 ${projectId}: post-parse enrichment complete (${ENRICHMENT_SCRIPTS.length} scripts)`);
-    } finally {
-      enrichmentRunning = false;
-    }
   }
 
   // logging notifications from code watchers
@@ -481,96 +627,10 @@ async function main() {
   // ========================================
   // PLAN GRAPH WATCHER
   // ========================================
-  const PLANS_ROOT = '/home/jonathan/.openclaw/workspace/plans';
-  let planParseTimer: NodeJS.Timeout | null = null;
-  const PLAN_DEBOUNCE_MS = 3000;
-
-  let planParsing = false;
-  let planPendingReparse = false;
-
-  async function reParsePlans() {
-    if (planParsing) {
-      planPendingReparse = true;
-      return;
-    }
-    planParsing = true;
-    planPendingReparse = false;
-    try {
-      const time = new Date().toLocaleTimeString();
-      console.log(`[${time}] 📋 Plan change detected — reparsing...`);
-
-      const results = await parsePlanDirectory(PLANS_ROOT);
-      let totalNodes = 0;
-      let totalStale = 0;
-
-      for (const parsed of results) {
-        const ingestResult = await ingestToNeo4j(parsed);
-        totalNodes += ingestResult.nodesUpserted;
-        totalStale += ingestResult.staleRemoved;
-      }
-
-      const enrichResult = await enrichCrossDomain(results);
-      const contractResult = await emitPlanParserContracts();
-
-      console.log(
-        `[${time}] ✅ Plans updated: ${totalNodes} nodes, ${totalStale} stale removed, ${enrichResult.evidenceEdges} evidence edges, contracts ${contractResult.nodesUpserted} nodes/${contractResult.edgesUpserted} edges`,
-      );
-
-      if (enrichResult.driftDetected.length > 0) {
-        console.log(`[${time}] ⚠️  ${enrichResult.driftDetected.length} drift items detected`);
-      }
-
-      // TC-2: Scoped confidence recompute for affected plan projects
-      try {
-        const planProjectIds = results.map(r => r.projectId).filter(Boolean);
-        for (const pid of planProjectIds) {
-          const svc = new Neo4jService();
-          try {
-            const result = await incrementalRecompute(svc, {
-              projectId: pid,
-              scope: 'full',
-              fullOverride: true,
-              reason: 'plan_change',
-            });
-            if (result.updatedCount > 0) {
-              console.log(`[${time}] 🕐 ${pid}: Temporal recompute: ${result.updatedCount} updated`);
-            }
-          } finally {
-            await svc.close();
-          }
-        }
-      } catch (err) {
-        if (process.env.GTH_DEBUG) console.error(`[plan-watcher] temporal recompute error: ${err}`);
-      }
-    } catch (err) {
-      console.error(`[plan-watcher] ❌ Parse failed: ${err}`);
-    } finally {
-      planParsing = false;
-      if (planPendingReparse) {
-        planPendingReparse = false;
-        setTimeout(reParsePlans, 500);
-      }
-    }
-  }
-
   const planWatchers: FSWatcher[] = [];
 
-  function watchPlansDir(dir: string) {
-    try {
-      const watcher = fsWatch(dir, { recursive: true }, (_eventType, filename) => {
-        if (!filename?.endsWith('.md')) return;
-        if (planParseTimer) clearTimeout(planParseTimer);
-        planParseTimer = setTimeout(reParsePlans, PLAN_DEBOUNCE_MS);
-      });
-      planWatchers.push(watcher);
-      console.log(`   📋 Watching plans: ${dir} (recursive)`);
-    } catch (err) {
-      console.error(`   ❌ Failed to watch plans dir: ${err}`);
-    }
-  }
-
   if (existsSync(PLANS_ROOT)) {
-    watchPlansDir(PLANS_ROOT);
+    watchPlansDir(PLANS_ROOT, planWatchers);
     await reParsePlans();
   } else {
     console.log('   ℹ️  Plans directory not found, skipping plan watcher');
@@ -630,7 +690,7 @@ async function main() {
         // ignore
       }
     }
-    if (planParseTimer) clearTimeout(planParseTimer);
+    if (_state.planParseTimer) clearTimeout(_state.planParseTimer);
 
     await client.close();
     console.log('   Done.');

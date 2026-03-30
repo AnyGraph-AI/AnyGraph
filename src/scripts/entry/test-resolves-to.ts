@@ -1,9 +1,6 @@
 /**
  * Test: RESOLVES_TO — trace import symbols to their canonical declarations
  */
-import { TypeScriptParser } from '../../../src/core/parsers/typescript-parser.js';
-import { CORE_TYPESCRIPT_SCHEMA } from '../../../src/core/config/schema.js';
-import { GRAMMY_FRAMEWORK_SCHEMA } from '../../../src/core/config/grammy-framework-schema.js';
 import { Project, Node } from 'ts-morph';
 
 const GODSPEED_PATH = '/mnt/c/Users/ddfff/Downloads/Bots/GodSpeed/';

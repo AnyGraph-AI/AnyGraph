@@ -52,6 +52,7 @@ function assert(name: string, condition: boolean, detail?: string) {
 
 async function main() {
   console.log('🧪 CodeGraph Integrity Tests\n');
+  try {
 
   // === Test 1: Grammy Schema Detection ===
   console.log('Test 1: Grammy Framework Schema');
@@ -205,16 +206,17 @@ async function main() {
       `${chain[0].callerCount} bot handlers reach executeOrder`);
   }
 
-  // === Summary ===
-  console.log(`\n${'='.repeat(50)}`);
-  console.log(`Results: ${passed} passed, ${failed} failed`);
-  if (failures.length > 0) {
-    console.log(`\nFailures:`);
-    failures.forEach(f => console.log(`  ❌ ${f}`));
+    // === Summary ===
+    console.log(`\n${'='.repeat(50)}`);
+    console.log(`Results: ${passed} passed, ${failed} failed`);
+    if (failures.length > 0) {
+      console.log(`\nFailures:`);
+      failures.forEach(f => console.log(`  ❌ ${f}`));
+    }
+    console.log('');
+  } finally {
+    await driver.close();
   }
-  console.log('');
-
-  await driver.close();
   process.exit(failed > 0 ? 1 : 0);
 }
 
