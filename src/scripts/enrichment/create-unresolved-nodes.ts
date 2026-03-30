@@ -76,16 +76,18 @@ export async function createUnresolvedNodes(driver: Driver): Promise<{
             WHEN imp.name STARTS WITH '.' THEN 'local-module-not-found'
             ELSE 'external-package'
           END,
-          file: sf.filePath,
+          file: COALESCE(sf.filePath, 'unknown'),
           name: imp.name,
           projectId: imp.projectId,
           confidence: 0.0,
           sourceKind: 'unresolved'
         })
-        CREATE (u)-[:ORIGINATES_IN {
-          sourceKind: 'postIngest',
-          confidence: 0.8
-        }]->(sf)
+        FOREACH (_ IN CASE WHEN sf IS NOT NULL THEN [1] ELSE [] END |
+          CREATE (u)-[:ORIGINATES_IN {
+            sourceKind: 'postIngest',
+            confidence: 0.8
+          }]->(sf)
+        )
         RETURN count(u) AS count
       `);
       created = createResult.records[0]?.get('count')?.toNumber?.() ?? 
