@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { KPI, PANEL } from "@/lib/tokens";
 
 export interface KpiCardProps {
   readonly value: string | number;
@@ -54,19 +55,19 @@ export function KpiCard({ value, label, indicator, accentColor = '#7ec8e3' }: Kp
 
   return (
     <div
-      className="
-        group relative flex flex-col gap-1.5 rounded-xl
-        border border-white/10 bg-white/[0.03] p-4
+      className={`
+        group relative flex flex-col gap-1.5 p-4
+        ${PANEL.classes}
         backdrop-blur-sm transition-all duration-200
         hover:-translate-y-px hover:shadow-lg hover:shadow-black/30
-      "
+      `}
     >
       <span
         className="absolute left-0 right-0 top-0 h-[2px] rounded-t-xl"
         style={{ background: `linear-gradient(90deg, ${accentColor}55, ${accentColor}, ${accentColor}55)` }}
       />
       <div className="flex items-center justify-between">
-        <span className="text-3xl font-bold tabular-nums font-mono" style={{ color: accentColor }}>
+        <span className={`${KPI.value} font-mono`} style={{ color: accentColor }}>
           {isNumeric ? (
             <span ref={displayRef}>0</span>
           ) : (
@@ -77,7 +78,7 @@ export function KpiCard({ value, label, indicator, accentColor = '#7ec8e3' }: Kp
           <span className="flex items-center">{indicator}</span>
         )}
       </div>
-      <span className="text-xs uppercase tracking-wide text-zinc-500">
+      <span className={KPI.label}>
         {label}
       </span>
     </div>

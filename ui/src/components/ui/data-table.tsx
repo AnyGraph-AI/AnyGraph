@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PANEL } from "@/lib/tokens";
 
 export interface ColumnDef<T> {
   readonly key: keyof T & string;
@@ -36,6 +38,10 @@ export function DataTable<T extends Record<string, unknown>>({
     }
   };
 
+  if (data.length === 0) {
+    return <EmptyState title="No data" icon="📭" />;
+  }
+
   const sorted = sortKey
     ? [...data].sort((a, b) => {
         const av = a[sortKey];
@@ -47,7 +53,7 @@ export function DataTable<T extends Record<string, unknown>>({
     : data;
 
   return (
-    <div className="overflow-auto max-h-[400px] rounded-xl border border-zinc-800/40 bg-zinc-900">
+    <div className={`overflow-auto max-h-[400px] ${PANEL.classes}`}>
       <table className="w-full text-sm border-collapse">
         <thead className="sticky top-0 z-10 bg-zinc-900">
           <tr className="border-b border-zinc-800/40">

@@ -236,13 +236,11 @@ describe('[L2-13] GodFilesTable — gap fills', () => {
     expect(source).toContain('containerHeight = 400');
   });
 
-  // Note: Source does NOT handle empty data — this is a gap finding
-  it('SPEC-GAP: source does NOT handle empty data array', async () => {
+  // Fixed in AUD-TC-10a R-01: EmptyState added for empty data
+  it('handles empty data with EmptyState', async () => {
     const source = await readFile(path.join(COMPONENTS_DIR, 'GodFilesTable.tsx'), 'utf8');
-    const hasEmptyCheck = source.includes('data.length === 0') || 
-                          source.includes('EmptyState') ||
-                          source.includes('No data');
-    expect(hasEmptyCheck).toBe(false); // Confirms gap exists
+    expect(source).toContain('EmptyState');
+    expect(source).toMatch(/data\.length\s*===\s*0/);
   });
 });
 

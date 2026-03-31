@@ -12,6 +12,7 @@ import {
 } from '@tanstack/react-table';
 import { confidenceColor, confidenceTextClass } from '@/lib/colors';
 import { shortestUniqueSuffix } from '@/lib/filename-disambig';
+import { EmptyState } from '@/components/ui/empty-state';
 
 export interface GodFile {
   name: string;
@@ -31,6 +32,10 @@ export interface GodFilesTableProps {
 }
 
 export function GodFilesTable({ data, onRowClick, containerHeight = 400 }: GodFilesTableProps) {
+  if (data.length === 0) {
+    return <EmptyState title="No files to display" icon="📭" />;
+  }
+
   const [sorting, setSorting] = useState<SortingState>([
     { id: 'adjustedPain', desc: true },
   ]);

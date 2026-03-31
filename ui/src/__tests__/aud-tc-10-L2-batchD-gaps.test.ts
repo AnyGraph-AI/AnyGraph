@@ -244,11 +244,16 @@ describe('[L2-29] DataTable row click handling', () => {
   });
 });
 
-describe('[L2-29] DataTable SPEC MISMATCH: EmptyState not used', () => {
-  it('source does NOT import EmptyState (empty tbody rendered instead)', async () => {
+describe('[L2-29] DataTable — EmptyState + PANEL token (fixed in TC-10a R-02)', () => {
+  it('imports and uses EmptyState for empty data', async () => {
     const source = await readFile(path.join(UI_DIR, 'data-table.tsx'), 'utf8');
-    expect(source).not.toContain('EmptyState');
-    // Renders empty <tbody> for no data - no explicit empty state
+    expect(source).toContain('EmptyState');
+    expect(source).toMatch(/data\.length\s*===\s*0/);
+  });
+  it('imports and uses PANEL token for container', async () => {
+    const source = await readFile(path.join(UI_DIR, 'data-table.tsx'), 'utf8');
+    expect(source).toContain("import { PANEL }");
+    expect(source).toContain('PANEL.classes');
   });
 });
 
@@ -359,14 +364,12 @@ describe('[L2-32] KpiCard value animation', () => {
   });
 });
 
-describe('[L2-32] KpiCard SPEC MISMATCH: No token imports', () => {
-  it('source does NOT import KPI or PANEL tokens (uses inline Tailwind)', async () => {
+describe('[L2-32] KpiCard — KPI/PANEL token adoption (fixed in TC-10a R-03)', () => {
+  it('imports and uses KPI and PANEL tokens', async () => {
     const source = await readFile(path.join(UI_DIR, 'kpi-card.tsx'), 'utf8');
-    // Spec claimed KPI.value, KPI.label, PANEL.classes but they don't exist
-    expect(source).not.toContain("import { KPI");
-    expect(source).not.toContain("import { PANEL");
-    expect(source).not.toContain('KPI.value');
-    expect(source).not.toContain('KPI.label');
-    expect(source).not.toContain('PANEL.classes');
+    expect(source).toContain("import { KPI, PANEL }");
+    expect(source).toContain('KPI.value');
+    expect(source).toContain('KPI.label');
+    expect(source).toContain('PANEL.classes');
   });
 });
